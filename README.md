@@ -13,15 +13,19 @@ First relic done: **Arayashiki**. More are planned.
 
 1. Put `Reliquary-x.x.x.jar` in your server's `plugins/` folder.
 2. Restart the server.
-3. Run `/aya` in-game.
+3. As an operator, run `/reliquary give arayashiki` in-game.
 
 ## Commands
 
+All commands are **operator only** (permission `reliquary.admin`).
+
 | Command | Effect |
 | --- | --- |
-| `/aya` | Give yourself Arayashiki |
-| `/reliquary give <id>` | Give yourself a relic by id |
+| `/reliquary help` | Show command help |
 | `/reliquary list` | List loaded relic ids |
+| `/reliquary give <id> [player]` | Give a relic to yourself or another player |
+| `/reliquary track` | List every relic in play and who's holding it |
+| `/reliquary purge <player>` | Remove all relics from a player |
 
 ---
 
@@ -29,7 +33,7 @@ First relic done: **Arayashiki**. More are planned.
 
 ### Arayashiki
 
-**Status:** Complete · **Command:** `/aya`
+**Status:** Complete · **Give:** `/reliquary give arayashiki [player]`
 
 | Input | Effect |
 | --- | --- |
