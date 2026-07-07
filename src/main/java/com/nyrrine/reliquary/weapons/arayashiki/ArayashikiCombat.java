@@ -149,7 +149,7 @@ public final class ArayashikiCombat {
             if (to.lengthSquared() < 1.0e-6) continue;
             if (to.clone().normalize().dot(dir) < cosLimit) continue;
 
-            weapon.markErased(target);
+            weapon.markErased(target, player);
             target.damage(DAMAGE, player);
             Vector kb = dir.clone().setY(0).normalize().multiply(0.55).setY(0.28);
             target.setVelocity(target.getVelocity().add(kb));

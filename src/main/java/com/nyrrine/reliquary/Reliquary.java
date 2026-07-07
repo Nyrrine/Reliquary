@@ -76,6 +76,7 @@ public final class Reliquary extends JavaPlugin {
             return true;
         }
         player.getInventory().addItem(weapon.createItem());
+        weapons.engage(weapon, player.getUniqueId());
         player.sendMessage(Component.text("The House of Spiders hands you ")
                 .color(NamedTextColor.GRAY)
                 .append(Component.text(ArayashikiWeapon.BLADE_NAME).color(NamedTextColor.WHITE))

@@ -31,9 +31,9 @@ public final class ArayashikiWielder {
     private final Reliquary plugin;
     private final ArayashikiWeapon weapon;
 
-    // Per 2-tick step. Full drain over 3 min of holding; full regen over ~2 min of rest.
+    // Per 2-tick step. Full drain over 3 min of holding; full regen in ~45s of rest.
     private static final int DRAIN_PER_STEP = 2;
-    private static final int REGEN_PER_STEP = 3;
+    private static final int REGEN_PER_STEP = 8;
 
     private final Map<UUID, Integer> lastLevel = new HashMap<>();
     private final Set<UUID> hollowSeen = new HashSet<>();
@@ -47,7 +47,8 @@ public final class ArayashikiWielder {
         this.weapon = weapon;
     }
 
-    public void tick(Player player, long ticks) {
+    /** @return true to keep ticking this player (still holding or regenerating), false to disengage. */
+    public boolean tick(Player player, long ticks) {
         UUID id = player.getUniqueId();
         boolean holding = weapon.matches(player.getInventory().getItemInMainHand());
 
@@ -57,7 +58,12 @@ public final class ArayashikiWielder {
         cur = weapon.useTicksOf(id);
 
         boolean owns = holding || inventoryHasBlade(player);
-        if (!owns) { lastLevel.remove(id); hollowSeen.remove(id); return; }
+        if (!owns) {
+            lastLevel.remove(id);
+            hollowSeen.remove(id);
+            // Keep resting the mind back to full even with the blade away; stop once whole.
+            return cur < ArayashikiWeapon.MAX_USE_TICKS;
+        }
 
         if (cur <= 0) hollowSeen.add(id); // remember the mind bottomed out this cycle
 
@@ -77,6 +83,15 @@ public final class ArayashikiWielder {
             // Only pops when the mind has climbed all the way back from hollow.
             player.sendActionBar(Component.text("Your mind is clear again.", TextColor.color(0x9FD8FF)));
         }
+
+        // Stay engaged while actively holding or still regenerating; idle-at-full disengages.
+        return holding || cur < ArayashikiWeapon.MAX_USE_TICKS;
+    }
+
+    /** Drop this player's wielder state on quit. */
+    public void clear(UUID id) {
+        lastLevel.remove(id);
+        hollowSeen.remove(id);
     }
 
     private boolean inventoryHasBlade(Player player) {

@@ -38,8 +38,9 @@ public final class ArayashikiWeapon implements Weapon {
     /** The blade's canonical name — the thing that gets "erased" as a cooldown later. */
     public static final String BLADE_NAME = "Arayashiki";
 
-    /** Entities recently struck by Arayashiki -> time, so death can be recognised as erasure. */
-    private final Map<UUID, Long> erasedMarks = new HashMap<>();
+    /** Entities recently struck by Arayashiki -> who struck them + when, so a kill can reward its wielder. */
+    private record Mark(UUID killer, long time) {}
+    private final Map<UUID, Mark> erasedMarks = new HashMap<>();
     private static final long ERASE_MARK_MS = 6000L;
 
     /**
@@ -85,8 +86,8 @@ public final class ArayashikiWeapon implements Weapon {
     }
 
     @Override
-    public void onTick(Player player, long tick) {
-        wielder.tick(player, tick);
+    public boolean onTick(Player player, long tick) {
+        return wielder.tick(player, tick);
     }
 
     @Override
@@ -238,20 +239,43 @@ public final class ArayashikiWeapon implements Weapon {
         return out;
     }
 
-    /** Records that this entity was just cut by Arayashiki. */
-    public void markErased(LivingEntity entity) {
-        erasedMarks.put(entity.getUniqueId(), System.currentTimeMillis());
+    /** Records that this entity was just cut by Arayashiki, and by whom. */
+    public void markErased(LivingEntity entity, Player killer) {
+        erasedMarks.put(entity.getUniqueId(), new Mark(killer.getUniqueId(), System.currentTimeMillis()));
         // Cheap housekeeping so the map can't grow without bound.
         if (erasedMarks.size() > 256) {
             long cutoff = System.currentTimeMillis() - ERASE_MARK_MS;
-            erasedMarks.values().removeIf(t -> t < cutoff);
+            erasedMarks.values().removeIf(m -> m.time() < cutoff);
         }
     }
 
-    /** True (once) if the entity died recently enough to a cut from Arayashiki. */
-    public boolean consumeErasedMark(UUID id) {
-        Long t = erasedMarks.remove(id);
-        return t != null && System.currentTimeMillis() - t < ERASE_MARK_MS;
+    /** The killer's id if this entity died recently enough to a cut from Arayashiki, else null. */
+    public UUID consumeErasedMark(UUID id) {
+        Mark m = erasedMarks.remove(id);
+        if (m != null && System.currentTimeMillis() - m.time() < ERASE_MARK_MS) return m.killer();
+        return null;
+    }
+
+    /** An erased kill refreshes the wielder's dashes (with a ding + updated pips). */
+    public void onErasedKill(UUID killerId) {
+        Player killer = plugin.getServer().getPlayer(killerId);
+        if (killer == null) return;
+        skills.onKillRefresh(killer);
+    }
+
+    /** A recent dash breaks the wielder's fall — no fall damage. */
+    @Override
+    public boolean cancelsFallDamage(UUID id) {
+        return skills.dashedRecently(id);
+    }
+
+    /** Drop a player's per-player state when they leave, so the maps don't grow over time. */
+    @Override
+    public void onQuit(UUID id) {
+        useTicks.remove(id);
+        actionBarMuteUntil.remove(id);
+        skills.clear(id);
+        wielder.clear(id);
     }
 
     public NamespacedKey bladeKey() {

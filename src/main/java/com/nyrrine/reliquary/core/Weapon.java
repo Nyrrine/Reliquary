@@ -15,9 +15,16 @@ public interface Weapon {
 
     default void onInteract(org.bukkit.entity.Player player, boolean sneaking) {}
 
-    default void onTick(org.bukkit.entity.Player player, long tick) {}
+    /** Called every 2 ticks while the player is an active wielder. Return false to disengage. */
+    default boolean onTick(org.bukkit.entity.Player player, long tick) { return false; }
 
     default void onEntityDeath(org.bukkit.event.entity.EntityDeathEvent event) {}
 
     default void onPlayerDeath(org.bukkit.event.entity.PlayerDeathEvent event) {}
+
+    /** A player left — drop any per-player state you keep for them. */
+    default void onQuit(java.util.UUID id) {}
+
+    /** True to cancel this player's fall damage right now (e.g. they just dashed). */
+    default boolean cancelsFallDamage(java.util.UUID id) { return false; }
 }

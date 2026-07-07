@@ -13,6 +13,7 @@ import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.scheduler.BukkitRunnable;
 
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -33,21 +34,25 @@ public final class ArayashikiErasure {
 
     public void onEntityDeath(EntityDeathEvent event) {
         LivingEntity victim = event.getEntity();
-        if (!weapon.consumeErasedMark(victim.getUniqueId())) return;
+        UUID killer = weapon.consumeErasedMark(victim.getUniqueId());
+        if (killer == null) return;
 
         // Erased from existence -> leaves nothing behind.
         event.getDrops().clear();
         event.setDroppedExp(0);
         erase(victim);
+        weapon.onErasedKill(killer);
     }
 
     public void onPlayerDeath(PlayerDeathEvent event) {
         LivingEntity victim = event.getEntity();
-        if (!weapon.consumeErasedMark(victim.getUniqueId())) return;
+        UUID killer = weapon.consumeErasedMark(victim.getUniqueId());
+        if (killer == null) return;
 
         event.deathMessage(Component.text(victim.getName() + " was erased from existence.")
                 .color(NamedTextColor.WHITE));
         erase(victim);
+        weapon.onErasedKill(killer);
     }
 
     /** Plays the rising fade-to-white dissolve at the victim's body. */

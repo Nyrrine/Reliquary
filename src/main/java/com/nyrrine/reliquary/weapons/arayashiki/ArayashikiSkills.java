@@ -33,8 +33,9 @@ public final class ArayashikiSkills {
 
     // Dash: Tracer-style charge pool.
     private static final int MAX_DASH = 3;
-    private static final long DASH_RECHARGE_MS = 3000L; // per-charge recharge
-    private static final long DASH_MIN_GAP_MS = 150L;   // tiny gap between consecutive dashes
+    private static final long DASH_RECHARGE_MS = 3000L;   // per-charge recharge
+    private static final long DASH_MIN_GAP_MS = 150L;     // tiny gap between consecutive dashes
+    private static final long DASH_FALL_GRACE_MS = 4000L; // dashing breaks your fall for this long
     private final Map<UUID, Integer> dashCharges = new HashMap<>();
     private final Map<UUID, Long> dashRechargeAt = new HashMap<>();
     private final Map<UUID, Long> lastDash = new HashMap<>();
@@ -50,6 +51,36 @@ public final class ArayashikiSkills {
     public ArayashikiSkills(Reliquary plugin, ArayashikiWeapon weapon) {
         this.plugin = plugin;
         this.weapon = weapon;
+    }
+
+    /** True if the player dashed recently enough for it to still be breaking their fall. */
+    public boolean dashedRecently(UUID id) {
+        Long t = lastDash.get(id);
+        return t != null && System.currentTimeMillis() - t < DASH_FALL_GRACE_MS;
+    }
+
+    /** Refill all dash charges instantly (an erased kill resets the wielder's dashes). */
+    public void resetDashes(UUID id) {
+        dashCharges.put(id, MAX_DASH);
+        dashRechargeAt.remove(id);
+    }
+
+    /** An erased kill: refill dashes, ding, and re-show the pips so the subtitle updates. */
+    public void onKillRefresh(Player killer) {
+        UUID id = killer.getUniqueId();
+        resetDashes(id);
+        killer.playSound(killer.getLocation(), Sound.ENTITY_ARROW_HIT_PLAYER, 1.0f, 1.2f);
+        weapon.muteActionBar(id, 2200);              // let the refreshed pips stay visible
+        killer.sendActionBar(dashPips(MAX_DASH));    // <- the fix: push the updated charges
+    }
+
+    /** Drop this player's skill state on quit. */
+    public void clear(UUID id) {
+        dashCharges.remove(id);
+        dashRechargeAt.remove(id);
+        lastDash.remove(id);
+        lastNova.remove(id);
+        channeling.remove(id);
     }
 
     public void onInteract(Player player, boolean sneaking) {
@@ -117,6 +148,7 @@ public final class ArayashikiSkills {
         Vector v = dir.clone().multiply(1.9);
         v.setY(v.getY() + 0.1); // a touch of lift so a level dash still feels snappy
         player.setVelocity(v);
+        player.setFallDistance(0f); // dashing breaks the fall you were in
 
         world.playSound(player.getLocation(), Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.9f, 1.7f);
         world.playSound(player.getLocation(), Sound.ITEM_TRIDENT_RETURN, 0.7f, 1.9f);
@@ -133,7 +165,7 @@ public final class ArayashikiSkills {
                 for (var e : player.getNearbyEntities(1.9, 1.9, 1.9)) {
                     if (e == player || !(e instanceof LivingEntity target)) continue;
                     if (!hit.add(e.getUniqueId())) continue;
-                    weapon.markErased(target);
+                    weapon.markErased(target, player);
                     target.damage(6.0, player);
                     target.setVelocity(target.getVelocity().add(dir.clone().multiply(0.5).setY(0.2)));
                     // slash effect on the struck entity
@@ -188,7 +220,7 @@ public final class ArayashikiSkills {
 
                 for (var e : player.getNearbyEntities(R, R, R)) {
                     if (e == player || !(e instanceof LivingEntity target)) continue;
-                    weapon.markErased(target);
+                    weapon.markErased(target, player);
                     target.damage(3.0, player);
                     Location tl = target.getLocation().add(0, 1, 0);
                     world.spawnParticle(Particle.SWEEP_ATTACK, tl, 2, 0.3, 0.3, 0.3, 0);
