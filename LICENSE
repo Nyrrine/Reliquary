@@ -1,21 +1,38 @@
-MIT License
+Reliquary License
 
 Copyright (c) 2026 Nyrrine
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated files (the "Software"), to use, copy, modify, and
+distribute the Software for personal, non-commercial purposes, subject to the
+following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. Attribution.
+   The above copyright notice and this license must be included in all copies
+   or substantial portions of the Software.
+
+2. No commercial use or monetization without permission.
+   The Software, in whole or in part, may not be sold, monetized, or used for
+   any commercial purpose without the prior written permission of the copyright
+   holder (Nyrrine). This includes, but is not limited to, paid downloads,
+   paywalls, in-server sales, donations tied to access, and bundling into any
+   paid product or service.
+
+3. No AI or machine-learning training.
+   The Software, including its source code, assets, and any data derived from
+   them, may not be used to train, fine-tune, or otherwise develop machine-
+   learning or artificial-intelligence models or datasets.
+
+4. Derivatives.
+   Modified versions and derivative works remain subject to this license,
+   including all restrictions above.
+
+To request permission for anything not granted here (including commercial use),
+contact the copyright holder.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
