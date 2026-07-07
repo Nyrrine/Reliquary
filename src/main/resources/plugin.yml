@@ -1,0 +1,13 @@
+name: Reliquary
+version: '${version}'
+main: com.nyrrine.reliquary.Reliquary
+api-version: '1.21'
+author: Nyrrine
+description: A vault of unique, lore-driven relic weapons for the House of Spiders.
+commands:
+  reliquary:
+    description: Open the vault — give or list its relic weapons.
+    usage: /reliquary give <id> | /reliquary list
+  aya:
+    description: Receive the Arayashiki relic.
+    usage: /aya
