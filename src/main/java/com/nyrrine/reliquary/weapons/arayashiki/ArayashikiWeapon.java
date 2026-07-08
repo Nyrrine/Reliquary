@@ -34,6 +34,10 @@ public final class ArayashikiWeapon implements Weapon {
 
     /** PDC key that marks an ItemStack as the Arayashiki blade. */
     private final NamespacedKey bladeKey;
+    /** Admin/debug "True" variant: keeps cutting even at 0% memory. */
+    private final NamespacedKey trueKey;
+    /** Wielders currently holding the True variant — their blade never runs out. */
+    private final java.util.Set<UUID> trueWielders = new java.util.HashSet<>();
 
     /** The blade's canonical name — the thing that gets "erased" as a cooldown later. */
     public static final String BLADE_NAME = "Arayashiki";
@@ -62,6 +66,7 @@ public final class ArayashikiWeapon implements Weapon {
     public ArayashikiWeapon(Reliquary plugin) {
         this.plugin = plugin;
         this.bladeKey = new NamespacedKey(plugin, "arayashiki_blade");
+        this.trueKey = new NamespacedKey(plugin, "arayashiki_true");
         this.combat = new ArayashikiCombat(plugin, this);
         this.skills = new ArayashikiSkills(plugin, this);
         this.wielder = new ArayashikiWielder(plugin, this);
@@ -110,10 +115,21 @@ public final class ArayashikiWeapon implements Weapon {
         useTicks.put(id, Math.max(0, Math.min(MAX_USE_TICKS, value)));
     }
 
-    /** True while the blade still has enough of itself left to cut. */
+    /** True while the blade still has enough of itself left to cut (True variant always does). */
     public boolean hasCharge(UUID id) {
-        return useTicksOf(id) > 0;
+        return useTicksOf(id) > 0 || trueWielders.contains(id);
     }
+
+    // ---- admin/debug "True Arayashiki" (never runs out of memory) -------------------
+
+    /** True if this stack is the admin "True" variant. */
+    public boolean isTrue(ItemStack item) {
+        if (!matches(item)) return false;
+        return item.getItemMeta().getPersistentDataContainer().has(trueKey, PersistentDataType.BYTE);
+    }
+
+    public void markTrue(UUID id)   { trueWielders.add(id); }
+    public void unmarkTrue(UUID id) { trueWielders.remove(id); }
 
     /** Temporarily silence the memory bar (e.g. so a dash's charge pips stay visible). */
     private final Map<UUID, Long> actionBarMuteUntil = new HashMap<>();
@@ -274,6 +290,7 @@ public final class ArayashikiWeapon implements Weapon {
     public void onQuit(UUID id) {
         useTicks.remove(id);
         actionBarMuteUntil.remove(id);
+        trueWielders.remove(id);
         skills.clear(id);
         wielder.clear(id);
     }
@@ -301,7 +318,24 @@ public final class ArayashikiWeapon implements Weapon {
         meta.lore(erodedLore(MAX_USE_TICKS));
 
         meta.setUnbreakable(true);
+        // Tag it for the resource pack's custom model. Using custom-model-data (not the item_model
+        // component) means a client WITHOUT the pack just sees a normal iron sword, not a missing model.
+        var cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(java.util.List.of("arayashiki"));
+        meta.setCustomModelDataComponent(cmd);
         meta.getPersistentDataContainer().set(bladeKey, PersistentDataType.BYTE, (byte) 1);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /** The admin/debug "True Arayashiki": it keeps cutting through even at 0% memory. */
+    @Override
+    public ItemStack adminVariant() {
+        ItemStack item = createItem();
+        ItemMeta meta = item.getItemMeta();
+        meta.displayName(Component.text("True Arayashiki").color(TextColor.color(0x9FD8FF))
+                .decoration(TextDecoration.ITALIC, false));
+        meta.getPersistentDataContainer().set(trueKey, PersistentDataType.BYTE, (byte) 1);
         item.setItemMeta(meta);
         return item;
     }

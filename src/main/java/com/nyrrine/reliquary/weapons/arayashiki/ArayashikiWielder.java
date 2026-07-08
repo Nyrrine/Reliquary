@@ -50,7 +50,10 @@ public final class ArayashikiWielder {
     /** @return true to keep ticking this player (still holding or regenerating), false to disengage. */
     public boolean tick(Player player, long ticks) {
         UUID id = player.getUniqueId();
-        boolean holding = weapon.matches(player.getInventory().getItemInMainHand());
+        ItemStack main = player.getInventory().getItemInMainHand();
+        boolean holding = weapon.matches(main);
+        // True Arayashiki (admin) keeps cutting even at 0% memory — flag it so hasCharge stays true.
+        if (holding && weapon.isTrue(main)) weapon.markTrue(id); else weapon.unmarkTrue(id);
 
         int cur = weapon.useTicksOf(id);
         cur += holding ? -DRAIN_PER_STEP : REGEN_PER_STEP;

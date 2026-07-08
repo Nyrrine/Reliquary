@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.core;
 
 import com.nyrrine.reliquary.Reliquary;
+import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -15,6 +16,7 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -116,17 +118,29 @@ public final class WeaponManager implements Listener {
         if (event.getAnimationType() != PlayerAnimationType.ARM_SWING) return;
 
         Player player = event.getPlayer();
-        Weapon weapon = fromItem(player.getInventory().getItemInMainHand());
-        if (weapon == null) return;
-
         UUID id = player.getUniqueId();
         long now = System.currentTimeMillis();
         Long last = lastSwing.get(id);
-        if (last != null && now - last < SLASH_GUARD_MS) return;
-        lastSwing.put(id, now);
+        if (last != null && now - last < SLASH_GUARD_MS) return; // shared swing guard
 
-        engage(weapon, id);
-        weapon.onSwing(player);
+        ItemStack main = player.getInventory().getItemInMainHand();
+        Weapon weapon = fromItem(main);
+        if (weapon != null) {
+            lastSwing.put(id, now);
+            engage(weapon, id);
+            weapon.onSwing(player);
+            return;
+        }
+
+        // Empty main hand: give relics a chance to react to a bare left-click (e.g. Gungnir recall).
+        if (main.getType() == Material.AIR) {
+            for (Weapon w : weapons.values()) {
+                if (w.onBareSwing(player)) {
+                    lastSwing.put(id, now);
+                    return;
+                }
+            }
+        }
     }
 
     @EventHandler
@@ -145,6 +159,14 @@ public final class WeaponManager implements Listener {
     }
 
     @EventHandler
+    public void onSwapHands(PlayerSwapHandItemsEvent event) {
+        // Dispatched to every relic — the presser's hand may be empty (its item is out in the world).
+        for (Weapon w : weapons.values()) {
+            w.onSwapHands(event.getPlayer(), event);
+        }
+    }
+
+    @EventHandler
     public void onItemHeld(PlayerItemHeldEvent event) {
         Player player = event.getPlayer();
         Weapon w = fromItem(player.getInventory().getItem(event.getNewSlot()));
@@ -154,6 +176,16 @@ public final class WeaponManager implements Listener {
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
         engageHeld(event.getPlayer());
+        for (Weapon w : weapons.values()) {
+            w.onJoin(event.getPlayer());
+        }
+    }
+
+    /** Called from the plugin's onDisable so relics can return anything they have out in the world. */
+    public void disable() {
+        for (Weapon w : weapons.values()) {
+            w.onDisable();
+        }
     }
 
     @EventHandler(ignoreCancelled = true)
