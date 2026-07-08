@@ -94,7 +94,7 @@ All commands are **operator only** (permission `reliquary.admin`).
 
 ---
 
-### Special — Project Moon
+### Special: Project Moon
 
 #### An Arbiter's Power
 
