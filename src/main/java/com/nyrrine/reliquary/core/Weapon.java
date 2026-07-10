@@ -25,6 +25,16 @@ public interface Weapon {
     default void onInteract(org.bukkit.entity.Player player, boolean sneaking) {}
 
     /**
+     * The wielder landed a melee hit on a living entity with this relic in the main hand. Fired for
+     * vanilla weapon damage so a relic can add an on-hit gimmick (heal, brand, bleed, bonus damage via
+     * {@code event.setDamage(...)}, particles) without replacing the vanilla swing. Avoid calling
+     * {@code victim.damage()} in here — it re-enters this dispatch. Default: no-op.
+     */
+    default void onHit(org.bukkit.entity.Player attacker,
+                       org.bukkit.entity.LivingEntity victim,
+                       org.bukkit.event.entity.EntityDamageByEntityEvent event) {}
+
+    /**
      * The player pressed the swap-hands key (F). Dispatched to every weapon regardless of what's
      * held, so a relic can react even when its item has left the hand (e.g. Gungnir's recall).
      */

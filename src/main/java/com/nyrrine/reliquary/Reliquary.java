@@ -3,6 +3,30 @@ package com.nyrrine.reliquary;
 import com.nyrrine.reliquary.core.RelicTracker;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.core.WeaponManager;
+import com.nyrrine.reliquary.ego.weapons.BeakWeapon;
+import com.nyrrine.reliquary.ego.weapons.ChristmasWeapon;
+import com.nyrrine.reliquary.ego.weapons.CobaltScarWeapon;
+import com.nyrrine.reliquary.ego.weapons.CrimsonScarWeapon;
+import com.nyrrine.reliquary.ego.weapons.GreenStemWeapon;
+import com.nyrrine.reliquary.ego.weapons.GrinderMk4Weapon;
+import com.nyrrine.reliquary.ego.weapons.HarvestWeapon;
+import com.nyrrine.reliquary.ego.weapons.HeavenWeapon;
+import com.nyrrine.reliquary.ego.weapons.LaetitiaWeapon;
+import com.nyrrine.reliquary.ego.weapons.LampWeapon;
+import com.nyrrine.reliquary.ego.weapons.LifeForADaredevilWeapon;
+import com.nyrrine.reliquary.ego.weapons.FourthMatchFlameWeapon;
+import com.nyrrine.reliquary.ego.weapons.LoggingWeapon;
+import com.nyrrine.reliquary.ego.weapons.LoveAndHateWeapon;
+import com.nyrrine.reliquary.ego.weapons.MagicBulletWeapon;
+import com.nyrrine.reliquary.ego.weapons.OurGalaxyWeapon;
+import com.nyrrine.reliquary.ego.weapons.PenitenceWeapon;
+import com.nyrrine.reliquary.ego.weapons.RedEyesWeapon;
+import com.nyrrine.reliquary.ego.weapons.RegretWeapon;
+import com.nyrrine.reliquary.ego.weapons.ScreamingWedgeWeapon;
+import com.nyrrine.reliquary.ego.weapons.SodaWeapon;
+import com.nyrrine.reliquary.ego.weapons.SolemnLamentWeapon;
+import com.nyrrine.reliquary.ego.weapons.SwordOfTearsWeapon;
+import com.nyrrine.reliquary.ego.weapons.WristCutterWeapon;
 import com.nyrrine.reliquary.weapons.arayashiki.ArayashikiWeapon;
 import com.nyrrine.reliquary.weapons.gungnir.GungnirOffhandGuard;
 import com.nyrrine.reliquary.weapons.gungnir.GungnirVibration;
@@ -45,6 +69,37 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         weapons.register(gungnir);
         LaevateinnWeapon laevateinn = new LaevateinnWeapon(this);
         weapons.register(laevateinn);
+
+        // ---- E.G.O weapons (Lobotomy Corp roster, ZAYIN..WAW) ----
+        // ZAYIN
+        weapons.register(new PenitenceWeapon(this));
+        weapons.register(new SodaWeapon(this));
+        // TETH
+        weapons.register(new FourthMatchFlameWeapon(this));
+        weapons.register(new RedEyesWeapon(this));
+        weapons.register(new RegretWeapon(this));
+        weapons.register(new BeakWeapon(this));
+        weapons.register(new LoggingWeapon(this));
+        weapons.register(new WristCutterWeapon(this));
+        weapons.register(new ChristmasWeapon(this));
+        // HE
+        weapons.register(new GrinderMk4Weapon(this));
+        weapons.register(new CrimsonScarWeapon(this));
+        weapons.register(new CobaltScarWeapon(this));
+        weapons.register(new OurGalaxyWeapon(this));
+        weapons.register(new HarvestWeapon(this));
+        weapons.register(new LifeForADaredevilWeapon(this));
+        weapons.register(new LaetitiaWeapon(this));
+        // WAW
+        weapons.register(new LampWeapon(this));
+        weapons.register(new SolemnLamentWeapon(this));
+        weapons.register(new SwordOfTearsWeapon(this));
+        weapons.register(new GreenStemWeapon(this));
+        weapons.register(new ScreamingWedgeWeapon(this));
+        weapons.register(new MagicBulletWeapon(this));
+        weapons.register(new HeavenWeapon(this));
+        weapons.register(new LoveAndHateWeapon(this));
+
         weapons.start();
         getServer().getPluginManager().registerEvents(new GungnirOffhandGuard(gungnir), this);
         getServer().getPluginManager().registerEvents(new GungnirVibration(gungnir), this);
@@ -73,6 +128,11 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         return tracker;
     }
 
+    /** True if this player's client has the server resource pack loaded (cosmetic pack models render). */
+    public boolean hasPack(org.bukkit.entity.Player player) {
+        return weapons != null && weapons.hasPack(player.getUniqueId());
+    }
+
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
                              @NotNull String label, @NotNull String[] args) {
@@ -95,6 +155,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
                 sender.sendMessage(Component.text(sb.toString()).color(NamedTextColor.GRAY));
             }
             case "give" -> giveWeapon(sender, args);
+            case "giveall" -> giveAll(sender, args);
             case "admin" -> adminGive(sender, args);
             case "track" -> trackCmd(sender);
             case "purge" -> purgeCmd(sender, args);
@@ -147,6 +208,54 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
                     .append(Component.text(id).color(NamedTextColor.WHITE))
                     .append(Component.text(".").color(NamedTextColor.GRAY)));
         }
+    }
+
+    /**
+     * /reliquary giveall &lt;relics|egoequipment&gt; [player] — hand over every weapon of a category.
+     * Relics are the bespoke weapons (Arayashiki/Gungnir/Lævateinn); E.G.O equipment is the Lobotomy
+     * Corp roster (package {@code ego.weapons}). Each item is tracked + engaged like a normal give.
+     */
+    private void giveAll(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage(Component.text("Usage: /reliquary giveall <relics|egoequipment> [player]")
+                    .color(NamedTextColor.GRAY));
+            return;
+        }
+        String cat = args[1].toLowerCase();
+        boolean wantEgo;
+        if (cat.equals("egoequipment") || cat.equals("ego")) wantEgo = true;
+        else if (cat.equals("relics") || cat.equals("relic")) wantEgo = false;
+        else {
+            sender.sendMessage(Component.text("Category must be 'relics' or 'egoequipment'.").color(NamedTextColor.RED));
+            return;
+        }
+
+        Player target;
+        if (args.length >= 3) {
+            target = getServer().getPlayerExact(args[2]);
+            if (target == null) {
+                sender.sendMessage(Component.text("Player not found: " + args[2]).color(NamedTextColor.RED));
+                return;
+            }
+        } else if (sender instanceof Player player) {
+            target = player;
+        } else {
+            sender.sendMessage(Component.text("Specify a player: /reliquary giveall " + cat + " <player>")
+                    .color(NamedTextColor.RED));
+            return;
+        }
+
+        int given = 0;
+        for (Weapon w : weapons.all()) {
+            boolean isEgo = w.getClass().getName().contains(".ego.weapons.");
+            if (isEgo != wantEgo) continue;
+            ItemStack item = tracker.register(w.createItem(), w.id(), target.getName());
+            target.getInventory().addItem(item);
+            weapons.engage(w, target.getUniqueId());
+            given++;
+        }
+        sender.sendMessage(Component.text("Gave " + given + " " + (wantEgo ? "E.G.O equipment" : "relic(s)")
+                + " to " + target.getName() + ".").color(NamedTextColor.GRAY));
     }
 
     /** /reliquary admin <id> [player] — give an admin/debug variant of a relic (if it has one). */
@@ -236,6 +345,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         help(sender, "/reliquary help", "this help");
         help(sender, "/reliquary list", "list relic ids");
         help(sender, "/reliquary give <id> [player]", "give a relic to yourself or a player");
+        help(sender, "/reliquary giveall <relics|egoequipment> [player]", "give every weapon of a category");
         help(sender, "/reliquary admin <id> [player]", "give an admin/debug variant (e.g. Worthy Lævateinn)");
         help(sender, "/reliquary track", "list every relic and who holds it");
         help(sender, "/reliquary purge <player>", "remove all relics from a player");
@@ -252,7 +362,13 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         if (!sender.hasPermission(PERMISSION)) return Collections.emptyList();
 
         if (args.length == 1) {
-            return filter(List.of("give", "admin", "list", "track", "purge", "help"), args[0]);
+            return filter(List.of("give", "giveall", "admin", "list", "track", "purge", "help"), args[0]);
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("giveall")) {
+            return filter(List.of("relics", "egoequipment"), args[1]);
+        }
+        if (args.length == 3 && args[0].equalsIgnoreCase("giveall")) {
+            return filter(onlinePlayerNames(), args[2]);
         }
         if (args.length == 2 && (args[0].equalsIgnoreCase("give") || args[0].equalsIgnoreCase("admin"))) {
             List<String> ids = new ArrayList<>();

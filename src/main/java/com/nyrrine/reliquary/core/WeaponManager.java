@@ -6,7 +6,9 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -16,12 +18,15 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerResourcePackStatusEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -48,11 +53,30 @@ public final class WeaponManager implements Listener {
      */
     private final Map<Weapon, Set<UUID>> active = new HashMap<>();
 
+    /**
+     * Players confirmed to have the server resource pack loaded. Used so purely-cosmetic display entities
+     * (e.g. Solemn Lament's flying image "particles") can be hidden from clients without the pack — they'd
+     * otherwise see the plain fallback item. A player counts as having the pack only once their client
+     * reports SUCCESSFULLY_LOADED, so this assumes the pack is server-sent (server.properties resource-pack).
+     */
+    private final Set<UUID> packLoaded = new HashSet<>();
+
     // Shared swing guard: ignore duplicate swing events from a single click.
     private final Map<UUID, Long> lastSwing = new HashMap<>();
     private static final long SLASH_GUARD_MS = 120L;
 
     private long tick = 0;
+
+    /**
+     * Every item Material any registered weapon can wear, collected once at register time. {@link #fromItem}
+     * uses it as an O(1) gate: on a busy server the vast majority of held items (blocks, food, ordinary
+     * tools) share no material with any weapon, so we skip the full per-weapon matches() scan for them —
+     * important because ARM_SWING fires continuously while a player mines or attacks.
+     */
+    private final Set<Material> weaponMaterials = EnumSet.noneOf(Material.class);
+
+    /** Handle to the central 2-tick task so {@link #disable()} can cancel it explicitly. */
+    private BukkitTask tickTask;
 
     public WeaponManager(Reliquary plugin) {
         this.plugin = plugin;
@@ -61,6 +85,17 @@ public final class WeaponManager implements Listener {
     public void register(Weapon weapon) {
         weapons.put(weapon.id(), weapon);
         active.put(weapon, new HashSet<>());
+        // Record every material this weapon's item(s) can be, for the fromItem fast path. Alternate forms
+        // (e.g. a pistol form) reuse a material already covered by another weapon, so createItem() +
+        // adminVariant() cover the roster in practice.
+        try {
+            ItemStack sample = weapon.createItem();
+            if (sample != null) weaponMaterials.add(sample.getType());
+            ItemStack admin = weapon.adminVariant();
+            if (admin != null) weaponMaterials.add(admin.getType());
+        } catch (Throwable ignored) {
+            // A weapon that can't build a sample item at register simply skips the fast-path hint.
+        }
     }
 
     /** Mark a player as an active wielder of this weapon (starts ticking them). */
@@ -85,6 +120,10 @@ public final class WeaponManager implements Listener {
 
     /** The first registered weapon whose matches() accepts this stack, else null. */
     public Weapon fromItem(ItemStack item) {
+        // Fast path: if no registered weapon even uses this material, it can't be one of ours. Skips the
+        // full per-weapon matches() scan for the common case (empty hand, blocks, food, ordinary tools) —
+        // this runs on every arm-swing, which fires continuously while a player mines or attacks.
+        if (item == null || !weaponMaterials.contains(item.getType())) return null;
         for (Weapon w : weapons.values()) {
             if (w.matches(item)) return w;
         }
@@ -93,7 +132,7 @@ public final class WeaponManager implements Listener {
 
     public void start() {
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
-        new BukkitRunnable() {
+        this.tickTask = new BukkitRunnable() {
             @Override
             public void run() {
                 tick++;
@@ -183,9 +222,27 @@ public final class WeaponManager implements Listener {
 
     /** Called from the plugin's onDisable so relics can return anything they have out in the world. */
     public void disable() {
+        if (tickTask != null) {
+            tickTask.cancel();
+            tickTask = null;
+        }
         for (Weapon w : weapons.values()) {
             w.onDisable();
         }
+    }
+
+    /**
+     * A wielder's melee hit lands: dispatch an on-hit hook to whatever relic is in their main hand so it
+     * can add a gimmick on top of the vanilla swing. Cheap: one instanceof + a map lookup per melee hit.
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onEntityDamageByEntity(EntityDamageByEntityEvent event) {
+        if (!(event.getDamager() instanceof Player player)) return;
+        if (!(event.getEntity() instanceof LivingEntity victim)) return;
+        Weapon weapon = fromItem(player.getInventory().getItemInMainHand());
+        if (weapon == null) return;
+        engage(weapon, player.getUniqueId());
+        weapon.onHit(player, victim, event);
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -215,9 +272,26 @@ public final class WeaponManager implements Listener {
         }
     }
 
+    /** Track resource-pack load status so cosmetic displays can be hidden from clients without the pack. */
+    @EventHandler
+    public void onPackStatus(PlayerResourcePackStatusEvent event) {
+        UUID id = event.getPlayer().getUniqueId();
+        switch (event.getStatus()) {
+            case SUCCESSFULLY_LOADED -> packLoaded.add(id);
+            case DECLINED, FAILED_DOWNLOAD, FAILED_RELOAD, DISCARDED, INVALID_URL -> packLoaded.remove(id);
+            default -> { /* ACCEPTED / DOWNLOADED — wait for the terminal status */ }
+        }
+    }
+
+    /** True if this player's client has the server resource pack loaded (so cosmetic pack models render). */
+    public boolean hasPack(UUID id) {
+        return packLoaded.contains(id);
+    }
+
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         UUID id = event.getPlayer().getUniqueId();
+        packLoaded.remove(id);
         lastSwing.remove(id);
         for (Set<UUID> set : active.values()) set.remove(id);
         for (Weapon w : weapons.values()) {
