@@ -1,0 +1,402 @@
+package com.nyrrine.reliquary.ego.weapons;
+
+import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.Weapon;
+import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoModels;
+import com.nyrrine.reliquary.ego.EgoHud;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.TextColor;
+import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Color;
+import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
+import org.bukkit.World;
+import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.BoundingBox;
+import org.bukkit.util.Vector;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
+
+/**
+ * Cobalt Scar — the claws of a vicious wolf. A close-range flurry E.G.O Equipment built for 1.8-style
+ * combat: no attack-cooldown, fast full-damage swings, but a modest per-hit bite and a hitbox-tight
+ * reach that keeps the flurry honest.
+ *
+ * <p>The bargain is speed for range. Its melee damage and (very high) attack speed are stamped by
+ * {@link EgoModels#stampWeapon} so a wielder can rattle off full-power blows with no swing-timer — but
+ * in {@link #onHit} a blow only lands when the target sits inside a short {@link #REACH} of the
+ * attacker's eye; a swing that reaches past that is nullified ({@code event.setCancelled(true)}), so
+ * this cannot poke from sword range. Get in close or land nothing.
+ *
+ * <p>Every cut that lands opens (or refreshes) a short <b>bleed</b> — the flaying wound of a wolf's
+ * claws — that keeps costing the victim blood for a couple of seconds, so a sustained flurry keeps the
+ * quarry bleeding nonstop. The bleed's own tick calls {@code victim.damage(..., attacker)} and so
+ * re-enters {@link #onHit}; a re-entrancy fence ({@link #ticking}) makes onHit refuse to re-seed (or
+ * range-cancel) from inside its own tick. Each victim carries at most one bleed — a fresh cut refreshes
+ * rather than stacks.
+ *
+ * <p>Right-click is a short <b>dash</b> on a {@value #DASH_COOLDOWN_MS}ms cooldown (shown in whole
+ * seconds via {@link EgoHud#cooldown}). The dash is non-vanilla motion, so it wears the main-hand item
+ * through {@link EgoDurability#wearMainHand(Player)}; ordinary swings wear through the vanilla swing.
+ */
+public final class CobaltScarWeapon implements Weapon {
+
+    private final Reliquary plugin;
+
+    /** PDC key marking an ItemStack as Cobalt Scar. */
+    private final NamespacedKey key;
+
+    // ---- bleed model --------------------------------------------------------------
+    /** Victim UUID -> their live bleed task. At most one per victim; refreshed (cancel + replace) per cut. */
+    private final Map<UUID, BukkitTask> bleeds = new HashMap<>();
+    /** Victims currently taking a bleed tick — guards {@link #onHit} against re-seeding from its own tick. */
+    private final Set<UUID> ticking = new HashSet<>();
+
+    // Bleed tuning — small per tick so the fast flurry + bleed stays fair for 1.8-style PvP.
+    private static final double BLEED_DAMAGE = 1.0;      // half a heart per tick
+    private static final long   BLEED_PERIOD_TICKS = 10; // every ~0.5s
+    private static final int    BLEED_TICKS = 4;         // four ticks -> ~4.0 total over ~2s, refreshed while pressing
+
+    // ---- reach --------------------------------------------------------------------
+    /** Effective melee reach (blocks, eye to victim hitbox). Shorter than a sword — the price of 1.8 speed. */
+    private static final double REACH = 2.2;
+
+    // ---- dash ---------------------------------------------------------------------
+    /** Wielder UUID -> epoch-millis when their next dash is allowed. */
+    private final Map<UUID, Long> dashReadyAt = new HashMap<>();
+
+    // ---- off-hand seal ------------------------------------------------------------
+    /** Wielders we've already told (once) that the off hand is sealed. Cleared on unequip/quit. */
+    private final Set<UUID> offhandNotified = new HashSet<>();
+    /** Dash cooldown — seven seconds. */
+    private static final long DASH_COOLDOWN_MS = 7_000L;
+    /** Dash impulse — a short lunge, not a leap. */
+    private static final double DASH_POWER = 0.9;
+
+    public CobaltScarWeapon(Reliquary plugin) {
+        this.plugin = plugin;
+        this.key = new NamespacedKey(plugin, "cobalt_scar");
+    }
+
+    @Override
+    public String id() {
+        return "cobalt_scar";
+    }
+
+    @Override
+    public boolean matches(ItemStack item) {
+        if (item == null || item.getType() != EgoModels.COBALT_SCAR.material()) return false;
+        ItemMeta m = item.getItemMeta();
+        return m != null && m.getPersistentDataContainer().has(key, PersistentDataType.BYTE);
+    }
+
+    @Override
+    public ItemStack createItem() {
+        ItemStack item = new ItemStack(EgoModels.COBALT_SCAR.material());
+        ItemMeta meta = item.getItemMeta();
+
+        meta.displayName(Component.text("Cobalt Scar").color(COBALT).decoration(TextDecoration.ITALIC, false));
+        meta.lore(LORE);
+        meta.setEnchantmentGlintOverride(false);
+        meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
+        EgoModels.stampWeapon(meta, EgoModels.COBALT_SCAR);
+
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    // ---- gimmick: a short-reach flurry that flays -----------------------------------
+
+    /**
+     * Melee hit landed. If this is our own bleed tick re-entering (flagged in {@link #ticking}) we do
+     * nothing — the bleed must neither re-seed nor be range-cancelled from inside its own tick. Otherwise
+     * we enforce the short reach (nullifying a swing that reaches past {@link #REACH}) and, on a clean
+     * close hit, open or refresh the flaying bleed. The vanilla swing damage is left intact underneath.
+     */
+    @Override
+    public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        UUID vid = victim.getUniqueId();
+        if (ticking.contains(vid)) return; // our own bleed tick — don't refresh or cancel from within
+
+        if (eyeReach(attacker, victim) > REACH) {
+            event.setCancelled(true); // too far — a close-range weapon can't poke from sword range
+            whiff(attacker);
+            return;
+        }
+
+        // TRUE 1.8-combo multi-hit: vanilla just stamped the victim with hurt-immunity (i-frames),
+        // which would swallow the next fast swing. Cobalt Scar's whole point is the flurry, so we
+        // strip those i-frames right here — the event fires AFTER noDamageTicks was set, so zeroing
+        // it now sticks and the very next swing lands full damage. Fairness stays in the small
+        // per-hit bite (stamped by EgoModels) and the short REACH gate above, not in a swing-timer.
+        victim.setNoDamageTicks(0);
+
+        clawFx(attacker, victim);
+        startBleed(attacker, victim);
+    }
+
+    /** Distance from the attacker's eye to the nearest point of the victim's hitbox, in blocks. */
+    private double eyeReach(Player attacker, LivingEntity victim) {
+        Location eye = attacker.getEyeLocation();
+        BoundingBox box = victim.getBoundingBox();
+        double cx = clamp(eye.getX(), box.getMinX(), box.getMaxX());
+        double cy = clamp(eye.getY(), box.getMinY(), box.getMaxY());
+        double cz = clamp(eye.getZ(), box.getMinZ(), box.getMaxZ());
+        double dx = eye.getX() - cx, dy = eye.getY() - cy, dz = eye.getZ() - cz;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    private static double clamp(double v, double lo, double hi) {
+        return v < lo ? lo : (v > hi ? hi : v);
+    }
+
+    /** Cancel any existing bleed on the victim and seed a fresh one — refresh, not stack. */
+    private void startBleed(Player attacker, LivingEntity victim) {
+        UUID vid = victim.getUniqueId();
+        BukkitTask old = bleeds.remove(vid);
+        if (old != null) old.cancel();
+
+        BukkitTask task = new BleedTask(attacker.getUniqueId(), victim)
+                .runTaskTimer(plugin, BLEED_PERIOD_TICKS, BLEED_PERIOD_TICKS);
+        bleeds.put(vid, task);
+    }
+
+    /**
+     * The flaying wound. Deals a small damage tick (attributed to the wielder while they remain online)
+     * a fixed number of times, weeping blood off the body each tick, then ends. Re-entrancy into
+     * {@link #onHit} is fenced by the {@link #ticking} flag around the damage call.
+     */
+    private final class BleedTask extends BukkitRunnable {
+        private final UUID attackerId;
+        private final LivingEntity victim;
+        private int ticksLeft = BLEED_TICKS;
+
+        private BleedTask(UUID attackerId, LivingEntity victim) {
+            this.attackerId = attackerId;
+            this.victim = victim;
+        }
+
+        @Override
+        public void run() {
+            if (ticksLeft <= 0 || victim.isDead() || !victim.isValid()) {
+                finish();
+                return;
+            }
+            ticksLeft--;
+
+            UUID vid = victim.getUniqueId();
+            Player attacker = plugin.getServer().getPlayer(attackerId);
+
+            // Pure damage-over-time, not a shove: capture the victim's velocity before the tick and
+            // restore it after, so the damage event's knockback impulse is undone.
+            Vector preVel = victim.getVelocity();
+
+            ticking.add(vid); // fence: victim.damage below re-enters onHit; don't let it re-seed the bleed
+            try {
+                if (attacker != null && !attacker.equals(victim)) {
+                    victim.damage(BLEED_DAMAGE, attacker);
+                } else {
+                    victim.damage(BLEED_DAMAGE);
+                }
+            } finally {
+                ticking.remove(vid);
+                victim.setVelocity(preVel); // undo the bleed tick's knockback
+            }
+
+            bloodTrail(victim);
+
+            if (ticksLeft <= 0) finish();
+        }
+
+        private void finish() {
+            cancel();
+            bleeds.remove(victim.getUniqueId());
+        }
+    }
+
+    // ---- ability: a short lunge -----------------------------------------------------
+
+    /**
+     * Right-click: a short forward dash on a {@value #DASH_COOLDOWN_MS}ms cooldown. While cooling, the
+     * remaining wait is shown in whole seconds on the action bar (never raw milliseconds). The dash is
+     * non-vanilla motion, so it wears the main-hand item.
+     */
+    @Override
+    public void onInteract(Player player, boolean sneaking) {
+        UUID id = player.getUniqueId();
+        long now = System.currentTimeMillis();
+        long ready = dashReadyAt.getOrDefault(id, 0L);
+        if (now < ready) {
+            player.sendActionBar(EgoHud.cooldown("Dash", ready - now, FAINT));
+            player.playSound(player.getLocation(), Sound.ITEM_AXE_SCRAPE, 0.3f, 1.6f + jitter());
+            return;
+        }
+        dashReadyAt.put(id, now + DASH_COOLDOWN_MS);
+
+        Vector dir = player.getEyeLocation().getDirection();
+        Vector vel = dir.multiply(DASH_POWER);
+        if (vel.getY() < 0.2) vel.setY(0.2); // a slight hop so the lunge skims rather than digs in
+        player.setVelocity(vel);
+
+        EgoDurability.wearMainHand(player); // non-vanilla motion wears the claws
+
+        World world = player.getWorld();
+        // A lunging claw-rake: a ravager's tearing snap layered under an iron scrape.
+        world.playSound(player.getLocation(), Sound.ENTITY_RAVAGER_ATTACK, 0.7f, 1.3f + jitter());
+        world.playSound(player.getLocation(), Sound.ITEM_AXE_SCRAPE, 0.6f, 1.5f + jitter());
+        world.spawnParticle(Particle.DUST, player.getLocation().add(0, 1.0, 0), 12, 0.3, 0.4, 0.3, 0.0,
+                new Particle.DustOptions(COBALT_ICE, 1.0f));
+    }
+
+    // ---- SFX / VFX ----------------------------------------------------------------
+
+    /** Claws scratching and mauling flesh, and a cobalt rake spraying red where the skin opens. */
+    private void clawFx(Player attacker, LivingEntity victim) {
+        World world = victim.getWorld();
+        Location wound = victim.getLocation().add(0, 1.0, 0);
+        // Tearing, not a bark: a raking scrape + a heavy maul, pitch-jittered so each cut differs.
+        world.playSound(wound, Sound.ITEM_AXE_SCRAPE, 0.7f, 1.5f + jitter());
+        world.playSound(wound, Sound.ENTITY_PLAYER_ATTACK_STRONG, 0.6f, 0.9f + jitter());
+        if (ThreadLocalRandom.current().nextInt(3) == 0) {
+            world.playSound(wound, Sound.ENTITY_RAVAGER_ATTACK, 0.5f, 1.4f + jitter());
+        }
+        world.spawnParticle(Particle.DUST, wound, 8, 0.25, 0.3, 0.25, 0.0,
+                new Particle.DustOptions(COBALT_DEEP, 1.0f));
+        world.spawnParticle(Particle.DUST, wound, 6, 0.2, 0.22, 0.2, 0.0,
+                new Particle.DustOptions(BLOOD, 0.9f));
+    }
+
+    /** A thin trail of red mist weeping off the flayed body — low count, short-lived. */
+    private void bloodTrail(LivingEntity victim) {
+        Location body = victim.getLocation().add(0, 1.0, 0);
+        victim.getWorld().spawnParticle(Particle.DUST, body, 3, 0.18, 0.30, 0.18, 0.0,
+                new Particle.DustOptions(BLOOD, 0.8f));
+    }
+
+    /** A soft whiff when a swing falls short of the close reach. */
+    private void whiff(Player attacker) {
+        attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_WEAK, 0.5f, 1.4f);
+        attacker.sendActionBar(EgoHud.status("Too far", FAINT));
+    }
+
+    private static float jitter() {
+        return (ThreadLocalRandom.current().nextFloat() - 0.5f) * 0.12f;
+    }
+
+    // ---- passive: seal the off hand -------------------------------------------------
+
+    /**
+     * While Cobalt Scar is in the main hand the off hand is kept empty — no shield, no totem, no
+     * attribute-item swapping mid-flurry. Any off-hand item is pushed into the main inventory (or
+     * dropped at the wielder's feet if the pack is full), and we flash a one-off note the first time.
+     * When the weapon is sheathed we disengage and forget the note so re-equipping can re-announce.
+     */
+    @Override
+    public boolean onTick(Player player, long tick) {
+        UUID id = player.getUniqueId();
+        if (!matches(player.getInventory().getItemInMainHand())) {
+            offhandNotified.remove(id); // sheathed -> go idle, reset the one-off note
+            return false;
+        }
+
+        ItemStack off = player.getInventory().getItemInOffHand();
+        if (off != null && !off.getType().isAir()) {
+            player.getInventory().setItemInOffHand(null);
+            var overflow = player.getInventory().addItem(off);
+            for (ItemStack left : overflow.values()) {
+                if (left != null && !left.getType().isAir()) {
+                    player.getWorld().dropItemNaturally(player.getLocation(), left);
+                }
+            }
+            if (offhandNotified.add(id)) {
+                player.sendActionBar(EgoHud.status("Off hand sealed", FAINT));
+            }
+        }
+        return true;
+    }
+
+    // ---- lifecycle ----------------------------------------------------------------
+
+    @Override
+    public void onQuit(UUID id) {
+        // The quitter may have been a bleeding victim and/or a wielder with a dash on cooldown.
+        BukkitTask task = bleeds.remove(id);
+        if (task != null) task.cancel();
+        ticking.remove(id);
+        dashReadyAt.remove(id);
+        offhandNotified.remove(id);
+    }
+
+    @Override
+    public void onDisable() {
+        for (BukkitTask task : bleeds.values()) task.cancel();
+        bleeds.clear();
+        ticking.clear();
+        offhandNotified.clear();
+    }
+
+    // ---- lore ---------------------------------------------------------------------
+
+    private static final TextColor COBALT = TextColor.color(0x2E6BE6); // name / cobalt blue
+    private static final TextColor PALE   = TextColor.color(0xB9CBE8); // base description
+    private static final TextColor FAINT  = TextColor.color(0x6C7C97); // conditions / faint line
+
+    // Particle colors (kept apart from the lore palette so tuning one never disturbs the other).
+    private static final Color COBALT_DEEP = Color.fromRGB(40, 96, 230);   // deep cobalt claw-spark
+    private static final Color COBALT_ICE  = Color.fromRGB(140, 190, 255); // bright ice-blue flare (dash)
+    private static final Color BLOOD       = Color.fromRGB(0x8A, 0x0B, 0x0B); // flayed-flesh red
+
+    private record Seg(String text, TextColor color, boolean italic) {
+        Seg(String text, TextColor color) { this(text, color, false); }
+    }
+
+    private static final List<List<Seg>> LORE_SRC = List.of(
+        List.of(new Seg("Big and Will be Bad Wolf", COBALT)),
+        List.of(),
+        List.of(new Seg("Claws of a vicious wolf. Once, they", PALE)),
+        List.of(new Seg("cut open bellies and tore out guts.", PALE)),
+        List.of(),
+        List.of(new Seg("It flays the flesh and makes the", FAINT, true)),
+        List.of(new Seg("target bleed without end.", FAINT, true)),
+        List.of(),
+        List.of(new Seg("How to use:", FAINT)),
+        List.of(new Seg("Attack — fast flurry, no cooldown", FAINT)),
+        List.of(new Seg("Close only — each cut draws blood", FAINT)),
+        List.of(new Seg("Right-click — short dash (7s)", FAINT)),
+        List.of(new Seg("Off hand kept empty while held", FAINT))
+    );
+
+    private static final List<Component> LORE = buildLore();
+
+    private static List<Component> buildLore() {
+        List<Component> out = new ArrayList<>(LORE_SRC.size());
+        for (List<Seg> line : LORE_SRC) {
+            if (line.isEmpty()) { out.add(Component.empty()); continue; }
+            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
+            for (Seg seg : line) {
+                c = c.append(Component.text(seg.text())
+                        .color(seg.color())
+                        .decoration(TextDecoration.ITALIC, seg.italic()));
+            }
+            out.add(c);
+        }
+        return out;
+    }
+}
