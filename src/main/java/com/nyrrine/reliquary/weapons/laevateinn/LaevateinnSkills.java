@@ -22,7 +22,10 @@ import org.bukkit.util.Vector;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -41,10 +44,26 @@ public final class LaevateinnSkills {
     private final Reliquary plugin;
     private final LaevateinnWeapon weapon;
 
+    // ---- shutdown-safety registries (only ever touched on the main thread) ----------
+    /**
+     * Every live thrown molten-sword {@link ItemDisplay}. Its flight runnable removes it
+     * on the normal paths, but a plugin disable / {@code /reload} / crash cancels that
+     * runnable first, so {@link #flushThrownSwords()} clears any that were still in flight.
+     */
+    private final Set<ItemDisplay> thrownSwords = new HashSet<>();
+    /** The flight tasks driving those displays, so a disable can stop them. */
+    private final Set<BukkitRunnable> flightTasks = new HashSet<>();
+    /**
+     * Outstanding temp-carved blocks awaiting their ~7s timed restore, keyed by block
+     * location so a timed restore and a disable flush can never double-restore the same
+     * block. {@link #flushCarves()} restores them all immediately on shutdown.
+     */
+    private final Map<Location, BlockState> pendingCarves = new LinkedHashMap<>();
+
     // ---- Gut Stab (dash → impale → flurry) -----------------------------------------
-    /** Gut Stab cooldown per form — longer sealed, shorter unsealed. */
+    /** Gut Stab cooldown — a flat 7.5s dash across every form; it's a commitment, not a mobility spam. */
     private static long gutstabCd(int form) {
-        return switch (form) { case 1 -> 7500L; case 2 -> 6000L; case 3 -> 2000L; default -> 9000L; };
+        return 7500L;
     }
     private static final double DASH_SPEED = 1.3;          // a snappy dash, a bit longer now
     private static final int DASH_TICKS = 8;
@@ -54,11 +73,13 @@ public final class LaevateinnSkills {
     private static final double[] IMPALE_DAMAGE = {2.0, 3.0, 4.0, 6.0};
     private static final double[] FLURRY_TOTAL = {3.0, 4.0, 5.0, 7.0};
     private static final int FLURRY_TICKS = 16;            // the stunned-flurry window
-    private static final int FLURRY_DMG_EVERY = 2;         // a slash+hit every other tick (8 hits)
+    private static final int FLURRY_DMG_EVERY = 4;         // a slash+hit every 4th tick (4 hits — easy on armor)
 
     // ---- Bullseye (True Form shift-right-click) ------------------------------------
     private static final long BULLSEYE_CD_MS = 90000L;    // 1:30
     private static final double BULLSEYE_RANGE = 22.0;    // how far it can lock a target
+    /** Tight lock cone — you have to actually aim at them; only a little assist for laggy-server aim. */
+    private static final double BULLSEYE_LOCK_DOT = 0.97; // ~14° half-angle (was 0.08 ≈ auto-snap)
     private static final double THROW_SPEED = 1.3;        // the flaming sword's flight
     private static final int THROW_MAX_TICKS = 40;
     private static final int BULLSEYE_CHARGE_TICKS = 12;  // wind-up before the kick-off
@@ -97,7 +118,9 @@ public final class LaevateinnSkills {
         UUID id = player.getUniqueId();
         long now = System.currentTimeMillis();
         if (now < weapon.gutstabReadyAt(id)) { onCooldown(player, weapon.gutstabReadyAt(id) - now, "Gut Stab"); return; }
-        weapon.setGutstabReadyAt(id, now + gutstabCd(form));
+        // Admin (Worthy) mode gets a 2s cooldown for testing; otherwise the full dash cooldown.
+        long cd = weapon.isWorthy(player.getInventory().getItemInMainHand()) ? 2000L : gutstabCd(form);
+        weapon.setGutstabReadyAt(id, now + cd);
         weapon.grantFallGrace(id, 3000L);
 
         final int f = clampForm(form);
@@ -225,8 +248,12 @@ public final class LaevateinnSkills {
 
     /** Slowly restore a temp-broken block after ~7s (jittered), with a soft purple return cue. */
     private void scheduleRestore(Block b, BlockState st) {
+        Location key = b.getLocation();
+        pendingCarves.put(key, st);                           // track it so a disable can flush it
         long delay = RESTORE_DELAY_TICKS + ThreadLocalRandom.current().nextInt(30);
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+            // If a shutdown flush already restored this block, don't double-restore it.
+            if (pendingCarves.remove(key) == null) return;
             if (b.getType() == Material.AIR) {
                 st.update(true, false);                           // pop it back, contents intact
                 Location ctr = b.getLocation().add(0.5, 0.5, 0.5);
@@ -313,14 +340,16 @@ public final class LaevateinnSkills {
             return;
         }
 
-        LivingEntity locked = frontTarget(player, BULLSEYE_RANGE, 0.08); // forgiving auto-aim, akin to Gungnir
+        // Admin (Worthy) mode gets a 2s cooldown for debugging; otherwise the full 1:30.
+        final long cd = weapon.isWorthy(player.getInventory().getItemInMainHand()) ? 2000L : BULLSEYE_CD_MS;
+
+        // You have to aim it at someone now — only a little auto-aim. Whiff and the blade just comes
+        // home and refunds half the cooldown, so a missed throw isn't a full commitment.
+        LivingEntity locked = frontTarget(player, BULLSEYE_RANGE, BULLSEYE_LOCK_DOT);
         if (locked == null) {
-            sealedCue(player);
-            player.sendActionBar(Component.text("No target to lock.", TextColor.color(0x8C8A93)));
+            missThrow(player, id, cd);
             return;
         }
-        // Admin (Worthy) mode gets a 2s cooldown for debugging; otherwise the full 1:30.
-        long cd = weapon.isWorthy(player.getInventory().getItemInMainHand()) ? 2000L : BULLSEYE_CD_MS;
         weapon.setUltReadyAt(id, now + cd);
         weapon.setComboBusy(id, (long) (THROW_MAX_TICKS + BULLSEYE_CHARGE_TICKS + LEAP_MAX_TICKS + 10) * 50L);
         weapon.grantFallGrace(id, 9000L);
@@ -328,28 +357,21 @@ public final class LaevateinnSkills {
         final World world = player.getWorld();
         final UUID tid = locked.getUniqueId();
         // A real 3D netherite sword, spinning end-over-end and wrapped in flame (Murder-Mystery style).
-        final ItemDisplay sword = world.spawn(
-                player.getEyeLocation().add(player.getEyeLocation().getDirection().multiply(0.6)),
-                ItemDisplay.class, d -> {
-                    d.setItemStack(new ItemStack(Material.NETHERITE_SWORD));
-                    d.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.GROUND);
-                    d.setPersistent(false);
-                    d.setBrightness(new Display.Brightness(15, 15)); // glow like it's molten
-                    d.setInterpolationDuration(3);                    // smooth the spin
-                    d.setTransformation(new Transformation(new Vector3f(), new Quaternionf(),
-                            new Vector3f(1.5f, 1.5f, 1.5f), new Quaternionf()));
-                });
+        final ItemDisplay sword = spawnThrownSword(world,
+                player.getEyeLocation().add(player.getEyeLocation().getDirection().multiply(0.6)));
         player.playSound(player.getLocation(), Sound.ITEM_TRIDENT_THROW, 1.0f, 0.8f);
         player.playSound(player.getLocation(), Sound.ENTITY_BLAZE_SHOOT, 1.0f, 0.7f);
 
-        new BukkitRunnable() {
+        BukkitRunnable throwTask = new BukkitRunnable() {
             int phase = 0; // 0 throw, 1 charge, 2 leap
             int t = 0;
             @Override
             public void run() {
                 var e = plugin.getServer().getEntity(tid);
                 if (!player.isOnline() || !(e instanceof LivingEntity tgt) || tgt.isDead()) {
-                    sword.remove(); weapon.setComboBusy(id, 0L); cancel(); return;
+                    // The mark escaped (or died) before the combo landed — treat it as a miss: half refund.
+                    if (player.isOnline()) weapon.setUltReadyAt(id, System.currentTimeMillis() + cd / 2);
+                    despawnSword(sword); weapon.setComboBusy(id, 0L); flightTasks.remove(this); cancel(); return;
                 }
                 Location tl = tgt.getLocation().add(0, 1.0, 0);
 
@@ -406,8 +428,9 @@ public final class LaevateinnSkills {
                 world.spawnParticle(Particle.DUST, loc, 1, 0.1, 0.1, 0.1, 0, LaevateinnVfx.PURPLE_FLAKE);
                 if (d <= 2.5 || t >= LEAP_MAX_TICKS) {
                     pullout(player, tgt);
-                    sword.remove();
+                    despawnSword(sword);
                     weapon.setComboBusy(id, 0L);
+                    flightTasks.remove(this);
                     cancel();
                     return;
                 }
@@ -415,7 +438,9 @@ public final class LaevateinnSkills {
                 player.setFallDistance(0f);
                 t++;
             }
-        }.runTaskTimer(plugin, 0L, 1L);
+        };
+        flightTasks.add(throwTask);
+        throwTask.runTaskTimer(plugin, 0L, 1L);
     }
 
     /** Arrival: rip the blade out of the target — a big true-form slash + heavy pull-out damage. */
@@ -434,6 +459,73 @@ public final class LaevateinnSkills {
         world.playSound(tl, Sound.ENTITY_GENERIC_EXPLODE, 1.0f, 0.6f);
         Vector kb = target.getLocation().toVector().subtract(player.getLocation().toVector()).setY(0);
         if (kb.lengthSquared() > 1.0e-6) target.setVelocity(kb.normalize().multiply(0.6).setY(0.4));
+    }
+
+    /** Spawn the molten 3D netherite sword (spinning, flame-wrapped) at a point, tracked for shutdown. */
+    private ItemDisplay spawnThrownSword(World world, Location at) {
+        ItemDisplay sword = world.spawn(at, ItemDisplay.class, d -> {
+            d.setItemStack(new ItemStack(Material.NETHERITE_SWORD));
+            d.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.GROUND);
+            d.setPersistent(false);                           // never saved to the world
+            d.setBrightness(new Display.Brightness(15, 15)); // glow like it's molten
+            d.setInterpolationDuration(3);                    // smooth the spin
+            d.setTransformation(new Transformation(new Vector3f(), new Quaternionf(),
+                    new Vector3f(1.5f, 1.5f, 1.5f), new Quaternionf()));
+        });
+        thrownSwords.add(sword);
+        return sword;
+    }
+
+    /** Remove a thrown sword on a normal flight path and deregister it from shutdown tracking. */
+    private void despawnSword(ItemDisplay sword) {
+        thrownSwords.remove(sword);
+        sword.remove();
+    }
+
+    /** A whiffed throw: the blade sails out where you aimed, finds nothing, and returns — half cooldown. */
+    private void missThrow(Player player, UUID id, long cd) {
+        weapon.setUltReadyAt(id, System.currentTimeMillis() + cd / 2); // you kept the blade — only half the cost
+        final World world = player.getWorld();
+        final Vector dir = player.getEyeLocation().getDirection().normalize();
+        final ItemDisplay sword = spawnThrownSword(world,
+                player.getEyeLocation().add(dir.clone().multiply(0.6)));
+        player.playSound(player.getLocation(), Sound.ITEM_TRIDENT_THROW, 1.0f, 0.8f);
+        player.sendActionBar(Component.text("Threw wide — the blade returns.", TextColor.color(0x8C8A93)));
+
+        BukkitRunnable returnTask = new BukkitRunnable() {
+            int t = 0;
+            boolean returning = false;
+            @Override
+            public void run() {
+                if (!player.isOnline()) { despawnSword(sword); flightTasks.remove(this); cancel(); return; }
+                Location sl = sword.getLocation();
+                sword.setInterpolationDelay(0);
+                sword.setTransformation(new Transformation(new Vector3f(),
+                        new Quaternionf().rotateX(t * 0.7f), new Vector3f(1.5f, 1.5f, 1.5f), new Quaternionf()));
+                world.spawnParticle(Particle.FLAME, sl.clone().add(0, 0.3, 0), 5, 0.15, 0.15, 0.15, 0.02);
+                world.spawnParticle(Particle.SMALL_FLAME, sl.clone().add(0, 0.3, 0), 2, 0.12, 0.12, 0.12, 0.01);
+                if (!returning) {
+                    // Fly out until it has run half its reach or clips a wall, then turn back.
+                    if (t >= THROW_MAX_TICKS / 2 || !sl.getBlock().isPassable()) returning = true;
+                    else sword.teleport(sl.add(dir.clone().multiply(THROW_SPEED)));
+                } else {
+                    Location eye = player.getEyeLocation();
+                    Vector back = eye.toVector().subtract(sl.toVector());
+                    double d = back.length();
+                    if (d <= 1.4) {
+                        despawnSword(sword);
+                        player.playSound(player.getLocation(), Sound.ITEM_TRIDENT_RETURN, 0.8f, 1.1f);
+                        flightTasks.remove(this);
+                        cancel();
+                        return;
+                    }
+                    sword.teleport(sl.add(back.multiply(Math.min(THROW_SPEED * 1.4, d) / d)));
+                }
+                t++;
+            }
+        };
+        flightTasks.add(returnTask);
+        returnTask.runTaskTimer(plugin, 0L, 1L);
     }
 
     // ---- shared --------------------------------------------------------------------
@@ -462,6 +554,39 @@ public final class LaevateinnSkills {
 
     /** No per-player skill state kept here now; nothing to drop. */
     public void clear(UUID id) {
+    }
+
+    // ---- shutdown cleanup (plugin disable / reload / crash) -------------------------
+
+    /**
+     * Called from {@link LaevateinnWeapon#onDisable()} on plugin disable / {@code /reload}.
+     * Restores any temp-carved blocks still awaiting their timed pop-back and removes any
+     * thrown swords still in flight — the scheduler cancels those tasks first, so without
+     * this the holes would stick and the displays would strand until a full restart.
+     */
+    void onDisable() {
+        flushCarves();
+        flushThrownSwords();
+    }
+
+    /** Restore every outstanding temp-carved block immediately, then clear the registry. */
+    private void flushCarves() {
+        for (BlockState st : pendingCarves.values()) {
+            st.update(true, false); // pop it back, contents intact — no VFX during shutdown
+        }
+        pendingCarves.clear();
+    }
+
+    /** Stop every in-flight sword task and remove any thrown displays still in the world. */
+    private void flushThrownSwords() {
+        for (BukkitRunnable task : new ArrayList<>(flightTasks)) {
+            try { task.cancel(); } catch (IllegalStateException ignored) { /* already stopped */ }
+        }
+        flightTasks.clear();
+        for (ItemDisplay sword : new ArrayList<>(thrownSwords)) {
+            if (sword != null && sword.isValid()) sword.remove();
+        }
+        thrownSwords.clear();
     }
 
     private static int clampForm(int form) {

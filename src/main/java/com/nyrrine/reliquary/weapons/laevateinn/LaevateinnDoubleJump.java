@@ -52,7 +52,10 @@ public final class LaevateinnDoubleJump implements Listener {
 
         var id = player.getUniqueId();
         weapon.armAirSlam(id, AIR_SLAM_ARM_MS);
-        weapon.setSlamReadyAt(id, System.currentTimeMillis() + weapon.slamCdMs(weapon.formOf(id))); // gates the next leap
+        // Admin (Worthy) mode gets a 2s slam cooldown for testing; otherwise the full 45s leash.
+        long slamCd = weapon.isWorthy(player.getInventory().getItemInMainHand())
+                ? 2000L : weapon.slamCdMs(weapon.formOf(id));
+        weapon.setSlamReadyAt(id, System.currentTimeMillis() + slamCd); // gates the next leap
         weapon.grantFallGrace(id, 6000L); // no fall damage for the leap + any dive
 
         Location o = player.getLocation().add(0, 0.2, 0);

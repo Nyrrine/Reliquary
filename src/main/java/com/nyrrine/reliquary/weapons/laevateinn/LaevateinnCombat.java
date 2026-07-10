@@ -40,8 +40,12 @@ public final class LaevateinnCombat {
     private final LaevateinnWeapon weapon;
 
     // ---- tuning --------------------------------------------------------------------
-    /** Flat strike damage per form (0..3): weak while sealed, full only at True Form. */
-    private static final double[] STRIKE_DAMAGE = {5.0, 7.0, 10.0, 16.0};
+    /**
+     * Flat strike damage per form (0..3). Kept in the netherite-sword band: sealed feels like a
+     * plain netherite sword (~8), and True Form tops out around a Sharpness-V netherite sword (~11) —
+     * never busted. Balanced 2026-07-09.
+     */
+    private static final double[] STRIKE_DAMAGE = {6.0, 7.0, 8.0, 9.0};
 
     // Sealed M1 combo pacing — really slow at form 0, faster as the seals break (per form 0..2).
     private static final long[] M1_STEP_CD_MS   = {1050L, 750L, 480L}; // between steps 1 and 2
@@ -56,14 +60,15 @@ public final class LaevateinnCombat {
     private static final int BEYBLADE_DASH_TICKS = 9;  // how long the dash thrust sustains
 
     // Ground slam (air left-click after a double-jump; the leap already started the slam cooldown).
-    private static final double[] SLAM_DAMAGE = {8.0, 11.0, 14.0, 22.0};
+    // A big AoE on a very long (45s) cooldown, so its numbers stay in the netherite band too.
+    private static final double[] SLAM_DAMAGE = {7.0, 8.0, 9.0, 11.0};
     private static final double[] SLAM_RADIUS = {6.8, 7.4, 8.0, 9.2};   // 2× — a big, heavy crater
     private static final int SLAM_MAX_TARGETS = 20;
     private static final int SLAM_WATCH_TICKS = 45;
     private static final double SLAM_RANGE = 12.0;          // how far the aim can reach
     private static final double DIVE_SPEED = 1.9;           // fast, lethal dive toward the aim
-    private static final double FALL_BONUS_PER_BLOCK = 1.2; // mace-like: a farther fall hits harder
-    private static final double FALL_BONUS_CAP = 14.0;
+    private static final double FALL_BONUS_PER_BLOCK = 0.4; // mace-like: a farther fall hits a little harder
+    private static final double FALL_BONUS_CAP = 5.0;       // modest — the slam isn't a one-shot
 
     public LaevateinnCombat(Reliquary plugin, LaevateinnWeapon weapon) {
         this.plugin = plugin;
@@ -87,11 +92,13 @@ public final class LaevateinnCombat {
 
     // ---- True Form left-click: one big flashy slash with a lingering burn -----------
 
-    private static final long TRUEFORM_M1_CD = 380L;          // fast, but not spammable
+    private static final long TRUEFORM_M1_CD = 550L;          // fast, but can't be abused into a blender
     private static final double TRUEFORM_SLASH_RANGE = 4.0;
     private static final double TRUEFORM_SLASH_CONE = 130.0;
-    private static final double TRUEFORM_LINGER_TOTAL = 7.0; // spread over ~1s per hit — fair vs netherite
-    private static final int TRUEFORM_LINGER_TICKS = 20;
+    private static final double TRUEFORM_DIRECT = 7.0;        // the swing itself — a clean netherite-band hit
+    private static final double TRUEFORM_LINGER_TOTAL = 3.0;  // a light after-burn on top (~10 total ≈ max netherite)
+    private static final int TRUEFORM_LINGER_HITS = 4;        // only a few burn ticks (was 20) — easy on armor
+    private static final int TRUEFORM_LINGER_STEP = 5;        // one burn tick every 5 game ticks
     private final Map<UUID, BukkitTask> lingering = new HashMap<>();
 
     private void trueFormM1(Player player, UUID id) {
@@ -117,24 +124,25 @@ public final class LaevateinnCombat {
             Vector kb = dir.clone().setY(0);
             if (kb.lengthSquared() < 1.0e-6) kb = dir.clone();
             target.setVelocity(target.getVelocity().add(kb.normalize().multiply(0.3).setY(0.1)));
-            applyLingering(player, target); // the slash keeps burning for ~1s
+            weapon.dealDamage(target, TRUEFORM_DIRECT, player); // the swing lands as one clean hit
+            applyLingering(player, target);                     // then a light burn keeps ticking
             hits++;
         }
         weapon.addHeatForHits(id, hits);
     }
 
-    /** Start/refresh a ~1s lingering burn on a target (11 spread across the ticks — no stacking). */
+    /** Start/refresh a ~1s light after-burn on a target — only a few ticks, so it barely touches armor. */
     private void applyLingering(Player src, LivingEntity target) {
         UUID tid = target.getUniqueId();
         BukkitTask old = lingering.remove(tid);
         if (old != null) old.cancel();
-        final double per = TRUEFORM_LINGER_TOTAL / TRUEFORM_LINGER_TICKS;
+        final double per = TRUEFORM_LINGER_TOTAL / TRUEFORM_LINGER_HITS;
         BukkitTask task = new BukkitRunnable() {
-            int t = 0;
+            int fired = 0;
             @Override
             public void run() {
                 var e = plugin.getServer().getEntity(tid);
-                if (t++ >= TRUEFORM_LINGER_TICKS || !(e instanceof LivingEntity le) || le.isDead() || !src.isOnline()) {
+                if (fired++ >= TRUEFORM_LINGER_HITS || !(e instanceof LivingEntity le) || le.isDead() || !src.isOnline()) {
                     lingering.remove(tid);
                     cancel();
                     return;
@@ -144,7 +152,7 @@ public final class LaevateinnCombat {
                 le.getWorld().spawnParticle(Particle.SMALL_FLAME, tl, 3, 0.3, 0.4, 0.3, 0.01);
                 le.getWorld().spawnParticle(Particle.DUST, tl, 1, 0.2, 0.3, 0.2, 0, LaevateinnVfx.PURPLE_FLAKE);
             }
-        }.runTaskTimer(plugin, 1L, 1L);
+        }.runTaskTimer(plugin, TRUEFORM_LINGER_STEP, TRUEFORM_LINGER_STEP);
         lingering.put(tid, task);
     }
 

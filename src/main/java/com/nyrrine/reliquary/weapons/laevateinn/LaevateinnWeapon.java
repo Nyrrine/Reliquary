@@ -8,12 +8,15 @@ import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.Sound;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Tameable;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.util.Vector;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -52,9 +55,12 @@ public final class LaevateinnWeapon implements Weapon {
     public static final int HEAT_MAX = 320;
     /** Re-seal only once heat drops this far below a break, so it can't flicker on the line. */
     private static final int HYSTERESIS = 15;
-    /** Ground Slam cooldown per form — also gates the double-jump. Longer sealed, shorter unsealed. */
+    /**
+     * Ground Slam cooldown — also gates the double-jump (a leap starts it), so the whole leap→dive
+     * package is on a long leash. A slow, heavy signature move, not a mobility toy. 45s across forms.
+     */
     public long slamCdMs(int form) {
-        return switch (form) { case 1 -> 4500L; case 2 -> 3500L; case 3 -> 2500L; default -> 5500L; };
+        return 45000L;
     }
     /** You count as "in combat" for this long after landing a hit; heat holds, then cools. */
     public static final long COMBAT_WINDOW_MS = 15000L;
@@ -154,7 +160,13 @@ public final class LaevateinnWeapon implements Weapon {
     public boolean isDealing() { return dealing; }
 
     /** Apply a plugin-sourced hit (clears i-frames, flags it as ours so the vanilla-melee guard lets it through). */
-    public void dealDamage(org.bukkit.entity.LivingEntity target, double amount, Player source) {
+    public void dealDamage(LivingEntity target, double amount, Player source) {
+        // Counterplay: a raised shield facing the wielder eats the hit outright — Lævateinn never
+        // forces damage through a guard. Works for every one of the blade's moves (they all route here).
+        if (shieldBlocks(target, source)) {
+            target.getWorld().playSound(target.getLocation(), Sound.ITEM_SHIELD_BLOCK, 1.0f, 0.85f);
+            return;
+        }
         dealing = true;
         try {
             target.setNoDamageTicks(0);
@@ -162,6 +174,16 @@ public final class LaevateinnWeapon implements Weapon {
         } finally {
             dealing = false;
         }
+    }
+
+    /** True if {@code target} is a player actively raising a shield toward the source's side (front arc). */
+    private boolean shieldBlocks(LivingEntity target, Player source) {
+        if (!(target instanceof Player p) || !p.isBlocking()) return false;
+        Vector toSource = source.getLocation().toVector().subtract(p.getLocation().toVector()).setY(0);
+        if (toSource.lengthSquared() < 1.0e-6) return true;   // right on top of them — count as guarded
+        Vector look = p.getEyeLocation().getDirection().setY(0);
+        if (look.lengthSquared() < 1.0e-6) return false;
+        return toSource.normalize().dot(look.normalize()) > 0.0; // source is in front of the shield
     }
 
     public int formOf(UUID id) { return form.getOrDefault(id, 0); }
@@ -488,6 +510,17 @@ public final class LaevateinnWeapon implements Weapon {
             out.add(c);
         }
         return out;
+    }
+
+    /**
+     * Plugin shutdown / {@code /reload} / crash: return anything the blade has out in the world.
+     * The flight runnables and timed block-restores are cancelled by the scheduler before they can
+     * clean up after themselves, so we flush both here — restore outstanding temp-carved blocks and
+     * remove any thrown molten swords still in flight. Purely cleanup; no combat state is touched.
+     */
+    @Override
+    public void onDisable() {
+        skills.onDisable();
     }
 
     /** Drop a player's per-player state when they leave, so the maps don't grow over time. */

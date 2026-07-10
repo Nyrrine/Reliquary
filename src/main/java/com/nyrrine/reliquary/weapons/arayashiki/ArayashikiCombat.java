@@ -31,7 +31,7 @@ public final class ArayashikiCombat {
     private static final double BASE_RADIUS = 3.0;   // how far the swoop reaches out
     private static final double HIT_RANGE = 3.4;     // damage radius
     private static final double HIT_CONE_DEG = 120.0;// generous, since the arc wraps around
-    private static final double DAMAGE = 7.0;
+    private static final double DAMAGE = 9.0;        // netherite band — lands for real vs prot IV (balanced 2026-07-09)
 
     // Swoop animation timing.
     private static final int REVEAL_TICKS = 5;       // ticks for the blade to travel the arc

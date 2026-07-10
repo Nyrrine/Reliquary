@@ -11,6 +11,7 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.util.BoundingBox;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
@@ -56,7 +57,7 @@ final class GungnirSpear extends BukkitRunnable {
 
     // Ricochet mode (right-click): homes onto mobs and bounces off the world until recalled.
     private static final double BOUNCE_SPEED     = 2.8;  // a touch slower so the bounces read
-    private static final double BOUNCE_SEEK      = 12.0; // radius it looks for a mob to home onto
+    private static final double BOUNCE_SEEK      = 8.0;  // radius it looks for a mob to home onto (cheaper AABB; still ample reach)
     private static final double BOUNCE_HOMING     = 0.22; // steering strength toward the current target
     private static final double BOUNCE_DAMAGE     = 2.0;  // 1 heart — it can stay out a long time
     private static final long   BOUNCE_HIT_COOLDOWN_MS = 600L; // per-target damage throttle
@@ -127,7 +128,10 @@ final class GungnirSpear extends BukkitRunnable {
     // ---- OUT: the launch ----------------------------------------------------------
 
     private void flyOut(Player owner) {
-        steerTowardMark();
+        // ONE world scan for the whole tick: a box big enough to hold this tick's swept segment
+        // (+ the hit radius) and the aim-assist radius. Everything below tests THIS list in memory.
+        List<LivingEntity> candidates = nearbyLiving(Math.max(AIM_RADIUS, SPEED_OUT + HIT_RADIUS));
+        steerTowardMark(candidates);
 
         double moved = 0.0;
         while (moved < SPEED_OUT) {
@@ -144,7 +148,7 @@ final class GungnirSpear extends BukkitRunnable {
             drawBeam();
 
             // First body in reach? Bury into it and stop — no pass-through.
-            LivingEntity hit = firstHit();
+            LivingEntity hit = firstHit(candidates);
             if (hit != null) {
                 impale(owner, hit);
                 return;
@@ -164,11 +168,15 @@ final class GungnirSpear extends BukkitRunnable {
     private void flyBounce(Player owner) {
         if (++flightTicks >= BOUNCE_MAX_TICKS) { beginRecall(); return; } // safety so it can't be lost
 
+        // ONE world scan for the whole tick: a box big enough to hold both the homing seek radius and
+        // this tick's swept segment (+ hit radius). Homing AND every sub-step hit-test reuse THIS list.
+        List<LivingEntity> candidates = nearbyLiving(BOUNCE_SPEED + BOUNCE_SEEK);
+
         // Home toward a mob — unless we're briefly wandering after caroming off a lone target.
         if (System.currentTimeMillis() >= wanderUntil) {
             if (bounceTarget == null || bounceTarget.isDead() || !bounceTarget.isValid()
                     || center(bounceTarget).distance(pos.toVector()) > BOUNCE_SEEK) {
-                bounceTarget = randomNearbyMob(null);
+                bounceTarget = randomNearbyMob(candidates, pos, null);
             }
             if (bounceTarget != null) {
                 Vector to = center(bounceTarget).subtract(pos.toVector());
@@ -189,7 +197,7 @@ final class GungnirSpear extends BukkitRunnable {
             pos.add(dir.clone().multiply(step));
             drawBeam();
 
-            LivingEntity hit = firstHit();
+            LivingEntity hit = firstHit(candidates);
             if (hit != null) {
                 long now = System.currentTimeMillis();
                 Long last = hitCooldown.get(hit.getUniqueId());
@@ -201,7 +209,7 @@ final class GungnirSpear extends BukkitRunnable {
                 }
                 // Bounce to a DIFFERENT mob if one's around (ping-pong the room); if this is the only
                 // one, wander off for a beat instead of fixating on it.
-                LivingEntity other = randomNearbyMob(hit);
+                LivingEntity other = randomNearbyMob(candidates, pos, hit);
                 if (other != null) {
                     bounceTarget = other;
                     dir = center(other).subtract(pos.toVector()).normalize();
@@ -246,15 +254,31 @@ final class GungnirSpear extends BukkitRunnable {
      * Cooldown mobs are still eligible so the bolt keeps ping-ponging between a pair; damage itself is
      * throttled separately.
      */
-    private LivingEntity randomNearbyMob(LivingEntity avoid) {
+    private LivingEntity randomNearbyMob(List<LivingEntity> candidates, Location around, LivingEntity avoid) {
+        BoundingBox seek = BoundingBox.of(around.toVector(), BOUNCE_SEEK, BOUNCE_SEEK, BOUNCE_SEEK);
         List<LivingEntity> mobs = new ArrayList<>();
-        for (Entity e : world.getNearbyEntities(pos, BOUNCE_SEEK, BOUNCE_SEEK, BOUNCE_SEEK)) {
-            if (e.getUniqueId().equals(ownerId) || e == avoid) continue;
-            if (!(e instanceof LivingEntity le) || le.isDead()) continue;
+        for (LivingEntity le : candidates) {
+            if (le == avoid || le.isDead()) continue;
+            if (!le.getBoundingBox().overlaps(seek)) continue; // same box test getNearbyEntities did
             mobs.add(le);
         }
         if (mobs.isEmpty()) return null;
         return mobs.get(ThreadLocalRandom.current().nextInt(mobs.size()));
+    }
+
+    /**
+     * One world entity scan for the whole tick. Gathers living, non-owner bodies whose hitboxes fall
+     * within a box of {@code halfExtent} around the tip — sized so it holds every per-sub-step and
+     * homing query this tick makes, so those can be answered in memory instead of re-scanning.
+     */
+    private List<LivingEntity> nearbyLiving(double halfExtent) {
+        List<LivingEntity> out = new ArrayList<>();
+        for (Entity e : world.getNearbyEntities(pos, halfExtent, halfExtent, halfExtent)) {
+            if (e.getUniqueId().equals(ownerId)) continue;
+            if (!(e instanceof LivingEntity le) || le.isDead()) continue;
+            out.add(le);
+        }
+        return out;
     }
 
     /** Bounce off in a semi-random backward direction so the bolt wanders instead of oscillating on one spot. */
@@ -266,11 +290,12 @@ final class GungnirSpear extends BukkitRunnable {
     }
 
     /** If a living target sits roughly ahead within reach, curve the heading gently onto it. */
-    private void steerTowardMark() {
+    private void steerTowardMark(List<LivingEntity> candidates) {
+        BoundingBox aim = BoundingBox.of(pos.toVector(), AIM_RADIUS, AIM_RADIUS, AIM_RADIUS);
         LivingEntity best = null;
         double bestDist = Double.MAX_VALUE;
-        for (Entity e : world.getNearbyEntities(pos, AIM_RADIUS, AIM_RADIUS, AIM_RADIUS)) {
-            if (e.getUniqueId().equals(ownerId) || !(e instanceof LivingEntity le) || le.isDead()) continue;
+        for (LivingEntity le : candidates) {
+            if (le.isDead() || !le.getBoundingBox().overlaps(aim)) continue; // same box test getNearbyEntities did
             Vector to = center(le).subtract(pos.toVector());
             double dist = to.length();
             if (dist < 0.01) continue;
@@ -282,12 +307,17 @@ final class GungnirSpear extends BukkitRunnable {
         dir = dir.clone().multiply(1.0 - AIM_STRENGTH).add(to.multiply(AIM_STRENGTH)).normalize();
     }
 
-    /** The nearest living body (not the owner) within the tip's kill radius, else null. */
-    private LivingEntity firstHit() {
+    /**
+     * The nearest living body (not the owner) within the tip's kill radius at the current sub-step,
+     * else null. Tests the per-tick candidate list in memory — no world scan — preserving the original
+     * "first body along the swept path this tick" behaviour (this is called at each sub-step tip).
+     */
+    private LivingEntity firstHit(List<LivingEntity> candidates) {
+        BoundingBox reach = BoundingBox.of(pos.toVector(), HIT_RADIUS, HIT_RADIUS, HIT_RADIUS);
         LivingEntity best = null;
         double bestDist = Double.MAX_VALUE;
-        for (Entity e : world.getNearbyEntities(pos, HIT_RADIUS, HIT_RADIUS, HIT_RADIUS)) {
-            if (e.getUniqueId().equals(ownerId) || !(e instanceof LivingEntity le) || le.isDead()) continue;
+        for (LivingEntity le : candidates) {
+            if (le.isDead() || !le.getBoundingBox().overlaps(reach)) continue; // same box test getNearbyEntities did
             double d = center(le).subtract(pos.toVector()).lengthSquared();
             if (d < bestDist) { bestDist = d; best = le; }
         }

@@ -33,7 +33,7 @@ public final class ArayashikiSkills {
 
     // Dash: Tracer-style charge pool.
     private static final int MAX_DASH = 3;
-    private static final long DASH_RECHARGE_MS = 3000L;   // per-charge recharge
+    private static final long DASH_RECHARGE_MS = 7500L;   // per-charge recharge (7.5s — a real cost, not spam)
     private static final long DASH_MIN_GAP_MS = 150L;     // tiny gap between consecutive dashes
     private static final long DASH_FALL_GRACE_MS = 4000L; // dashing breaks your fall for this long
     private final Map<UUID, Integer> dashCharges = new HashMap<>();
@@ -166,7 +166,7 @@ public final class ArayashikiSkills {
                     if (e == player || !(e instanceof LivingEntity target)) continue;
                     if (!hit.add(e.getUniqueId())) continue;
                     weapon.markErased(target, player);
-                    target.damage(6.0, player);
+                    target.damage(8.0, player);
                     target.setVelocity(target.getVelocity().add(dir.clone().multiply(0.5).setY(0.2)));
                     // slash effect on the struck entity
                     Location tl = target.getLocation().add(0, 1, 0);
@@ -221,7 +221,7 @@ public final class ArayashikiSkills {
                 for (var e : player.getNearbyEntities(R, R, R)) {
                     if (e == player || !(e instanceof LivingEntity target)) continue;
                     weapon.markErased(target, player);
-                    target.damage(3.0, player);
+                    target.damage(4.0, player);
                     Location tl = target.getLocation().add(0, 1, 0);
                     world.spawnParticle(Particle.SWEEP_ATTACK, tl, 2, 0.3, 0.3, 0.3, 0);
                     target.setVelocity(target.getVelocity().multiply(0.55).setY(0.1));
