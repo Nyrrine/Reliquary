@@ -32,3 +32,5 @@ bin/
 /commands.yml
 /paper*.yml
 /version_history.json
+javac.*.args
+**/javac.*.args
