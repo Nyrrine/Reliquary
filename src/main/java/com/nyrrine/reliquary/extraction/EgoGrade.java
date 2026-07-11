@@ -8,10 +8,10 @@ package com.nyrrine.reliquary.extraction;
  */
 public enum EgoGrade {
 
-    ZAYIN("ZAYIN", Grade.TECHNICAL,   60.0),   // trivial — half a vial of technical stock
-    TETH ("TETH",  Grade.REAGENT,    120.0),   // ~1 vial of reliable working stock
-    HE   ("HE",    Grade.REAGENT,    360.0),   // ~3 vials — reagent-grade but a real stockpile
-    WAW  ("WAW",   Grade.ANALYTICAL, 720.0);   // ~6 vials of tight, analytical-grade cogito
+    ZAYIN("ZAYIN", Grade.TECHNICAL,   30.0),   // a quarter-vial of technical stock
+    TETH ("TETH",  Grade.REAGENT,     60.0),   // ~half a vial of reliable working stock
+    HE   ("HE",    Grade.REAGENT,    150.0),   // ~1.3 vials — reagent-grade, a small stockpile
+    WAW  ("WAW",   Grade.ANALYTICAL, 300.0);   // ~2.5 vials of tight, analytical-grade cogito
 
     private final String display;
     private final Grade minCogito;

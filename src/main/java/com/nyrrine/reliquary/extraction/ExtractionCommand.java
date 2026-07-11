@@ -155,7 +155,36 @@ public final class ExtractionCommand {
         player.sendMessage(msg("Assay:", NamedTextColor.WHITE));
         player.sendMessage(assayLine(st.profile()));
         showGauges(player, st);
-        showNearest(player, st);
+        showPool(player, st);
+    }
+
+    /** The weapons this mix is leaning toward, ranked by match: READY ones in green, the rest with the
+     *  grade/volume they still need. The legible heart of the testbed. */
+    private void showPool(Player player, PotState st) {
+        if (st.isBlank()) return;
+        SinProfile prof = st.profile();
+        List<WeaponSpec> ranked = new ArrayList<>();
+        for (WeaponSpec w : WeaponSignatures.all()) ranked.add(w);
+        ranked.sort((x, y) -> Double.compare(y.matchOf(prof), x.matchOf(prof)));
+
+        player.sendMessage(msg("Leaning toward:", NamedTextColor.WHITE));
+        int shown = 0;
+        for (WeaponSpec w : ranked) {
+            double m = w.matchOf(prof);
+            if (shown >= 4 || m < 0.40) break;
+            String head = String.format("  %s (%s)  %s", w.display(), w.grade().display(), pct(m));
+            if (w.reachableBy(st.grade(), st.titer())) {
+                player.sendMessage(Component.text(head + "  READY", GREEN)
+                        .append(Component.text("  -> /cogito pour " + w.id(), FAINT)));
+            } else {
+                List<String> need = new ArrayList<>();
+                if (!w.grade().minCogito().atMost(st.grade())) need.add("grade >=" + w.grade().minCogito().display());
+                if (st.titer() < w.grade().minVolume()) need.add(String.format("vol >=%.0f", w.grade().minVolume()));
+                player.sendMessage(Component.text(head, NamedTextColor.GRAY)
+                        .append(Component.text("  needs " + String.join(", ", need), FAINT)));
+            }
+            shown++;
+        }
     }
 
     /**

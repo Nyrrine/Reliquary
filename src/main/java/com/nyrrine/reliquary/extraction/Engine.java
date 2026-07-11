@@ -34,14 +34,17 @@ public final class Engine {
     public static final double FAIL_NOISE = 2.0;
     /** Extra stability a failed step costs. */
     public static final double FAIL_STAB = 6.0;
-    /** Fraction of current noise a distillation pass removes (before decay). */
-    public static final double DISTILL_FRACTION = 0.30;
+    /** Fraction of current noise a distillation pass removes (before decay). High enough that a meticulous
+     *  nerd can scrub a clean pot to the Primary Standard cap (~99%) — but it never lifts the ceiling, so it
+     *  can't rescue a spammed/dirty batch. */
+    public static final double DISTILL_FRACTION = 0.45;
     /** Per-pass efficiency decay — diminishing returns (~4 useful passes). */
     public static final double DISTILL_DECAY = 0.6;
     /** Stability a distillation pass restores (locking the batch). */
     public static final double DISTILL_STAB = 4.0;
-    /** Extra contamination a blend introduces. Kept small so clean stocks blend clean (§11). */
-    public static final double BLEND_PENALTY = 0.5;
+    /** Extra contamination a blend introduces. Kept small so clean stocks blend clean (§11) — a blend of
+     *  Primary-Standard stocks must stay Primary Standard, or the catalyst path is dead. */
+    public static final double BLEND_PENALTY = 0.25;
     /** Below this stability, an unstable pot drifts toward noise between touches. */
     public static final double DRIFT_FLOOR = 40.0;
     /** A single vial's volume ceiling — you run out of flask (anti-spam guard #4). Bigger = blend vials. */
