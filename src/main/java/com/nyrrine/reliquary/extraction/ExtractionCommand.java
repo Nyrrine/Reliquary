@@ -144,6 +144,7 @@ public final class ExtractionCommand {
             player.sendMessage(msg("Added " + r.display() + ".", GREEN));
         }
         showGauges(player, st);
+        showNearest(player, st);
     }
 
     // ---- assay + lectern -----------------------------------------------------------
@@ -157,25 +158,37 @@ public final class ExtractionCommand {
         showNearest(player, st);
     }
 
-    /** Show the closest weapon by shape and, if it isn't reachable yet, what grade/volume it still needs. */
+    /**
+     * The status line under the gauges: a green "manifestable now" cue for anything already reachable (so you
+     * know when to stop and pour), plus the closest weapon by shape and what it still needs.
+     */
     private void showNearest(Player player, PotState st) {
         if (st.isBlank()) return;
-        WeaponSpec near = nearestAny(st);
-        if (near == null) return;
-        double m = near.matchOf(st.profile());
-        player.sendMessage(Component.text("  Closest shape: ", FAINT)
-                .append(Component.text(near.display(), NamedTextColor.WHITE))
-                .append(Component.text(" (" + near.grade().display() + ")  " + pct(m) + " match", FAINT)));
 
-        List<String> lacking = new ArrayList<>();
-        if (!near.grade().minCogito().atMost(st.grade())) {
-            lacking.add("grade >=" + near.grade().minCogito().display() + " (have " + st.grade().display() + ")");
+        WeaponSpec reach = nearest(st); // best weapon that already clears the grade floor + volume gate
+        if (reach != null) {
+            double m = reach.matchOf(st.profile());
+            player.sendMessage(Component.text("  READY: ", GREEN)
+                    .append(Component.text(reach.display() + " (" + reach.grade().display() + ")  "
+                            + pct(m) + " match", GREEN))
+                    .append(Component.text("  -> /cogito pour " + reach.id(), FAINT)));
         }
-        if (st.titer() < near.grade().minVolume()) {
-            lacking.add(String.format("volume >=%.0f (have %.0f)", near.grade().minVolume(), st.titer()));
-        }
-        if (!lacking.isEmpty()) {
-            player.sendMessage(Component.text("    to reach it: " + String.join(", ", lacking), FAINT));
+
+        WeaponSpec near = nearestAny(st); // closest by shape, gates ignored — the aspiration
+        if (near != null && near != reach) {
+            double m = near.matchOf(st.profile());
+            List<String> lacking = new ArrayList<>();
+            if (!near.grade().minCogito().atMost(st.grade())) {
+                lacking.add("grade >=" + near.grade().minCogito().display());
+            }
+            if (st.titer() < near.grade().minVolume()) {
+                lacking.add(String.format("volume >=%.0f", near.grade().minVolume()));
+            }
+            Component line = Component.text("  Closest shape: ", FAINT)
+                    .append(Component.text(near.display() + " (" + near.grade().display() + ")  "
+                            + pct(m) + " match", FAINT));
+            if (!lacking.isEmpty()) line = line.append(Component.text("  needs " + String.join(", ", lacking), FAINT));
+            player.sendMessage(line);
         }
     }
 
