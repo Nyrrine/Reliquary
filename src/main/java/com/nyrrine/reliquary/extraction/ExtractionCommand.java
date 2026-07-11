@@ -172,33 +172,55 @@ public final class ExtractionCommand {
         showPool(player, st);
     }
 
-    /** The weapons this mix is leaning toward, ranked by match: READY ones in green, the rest with the
-     *  grade/volume they still need. The legible heart of the testbed. */
+    /**
+     * The Well's live gacha odds for the current mix — each reachable weapon's pull chance (your cogito tilts
+     * these), the overall success chance, and the closest weapon you're still approaching but can't yet pull.
+     * The legible heart of the testbed.
+     */
     private void showPool(Player player, PotState st) {
         if (st.isBlank()) return;
-        SinProfile prof = st.profile();
-        List<WeaponSpec> ranked = new ArrayList<>();
-        for (WeaponSpec w : WeaponSignatures.all()) ranked.add(w);
-        ranked.sort((x, y) -> Double.compare(y.matchOf(prof), x.matchOf(prof)));
+        List<WellRoll.Chance> pool = WellRoll.pool(st);
 
-        player.sendMessage(msg("Leaning toward:", NamedTextColor.WHITE));
-        int shown = 0;
-        for (WeaponSpec w : ranked) {
-            double m = w.matchOf(prof);
-            if (shown >= 4 || m < 0.40) break;
-            String head = String.format("  %s (%s)  %s", w.display(), w.grade().display(), pct(m));
-            if (w.reachableBy(st.grade(), st.titer())) {
-                player.sendMessage(Component.text(head + "  READY", GREEN)
-                        .append(Component.text("  -> /cogito pour " + w.id(), FAINT)));
-            } else {
-                List<String> need = new ArrayList<>();
-                if (!w.grade().minCogito().atMost(st.grade())) need.add("grade >=" + w.grade().minCogito().display());
-                if (st.titer() < w.grade().minVolume()) need.add(String.format("vol >=%.0f", w.grade().minVolume()));
-                player.sendMessage(Component.text(head, NamedTextColor.GRAY)
-                        .append(Component.text("  needs " + String.join(", ", need), FAINT)));
+        if (!pool.isEmpty()) {
+            player.sendMessage(msg("Well odds if you pour now:", NamedTextColor.WHITE));
+            int shown = 0;
+            for (WellRoll.Chance c : pool) {
+                if (shown >= 4) break;
+                player.sendMessage(Component.text(String.format("  %d%%  ", Math.round(c.odds() * 100)),
+                        shown == 0 ? GREEN : NamedTextColor.GRAY)
+                        .append(Component.text(c.weapon().display() + " (" + c.weapon().grade().display() + ")",
+                                shown == 0 ? GREEN : NamedTextColor.GRAY))
+                        .append(Component.text("   " + pct(c.match()) + " match", FAINT)));
+                shown++;
             }
-            shown++;
+            double success = Math.min(1.0, pool.get(0).match() * st.purity() / 100.0);
+            player.sendMessage(Component.text(
+                    String.format("  Overall: ~%d%% you pull one, else near-miss / breach. "
+                            + "Load a catalyst (pour <id>) to guarantee it.", Math.round(success * 100)), FAINT));
         }
+
+        // What you're closest to but can't yet reach — the thing to keep brewing toward.
+        WeaponSpec locked = nearestLocked(st);
+        if (locked != null) {
+            List<String> need = new ArrayList<>();
+            if (!locked.grade().minCogito().atMost(st.grade())) need.add("grade >=" + locked.grade().minCogito().display());
+            if (st.titer() < locked.grade().minVolume()) need.add(String.format("vol >=%.0f", locked.grade().minVolume()));
+            player.sendMessage(Component.text(String.format("  Approaching: %s (%s)  %s match  needs %s",
+                    locked.display(), locked.grade().display(), pct(locked.matchOf(st.profile())),
+                    String.join(", ", need)), FAINT));
+        }
+    }
+
+    /** The closest weapon by shape that ISN'T yet reachable (grade/volume gated) — the aspirational target. */
+    private WeaponSpec nearestLocked(PotState st) {
+        WeaponSpec best = null;
+        double bestMatch = -1;
+        for (WeaponSpec w : WeaponSignatures.all()) {
+            if (w.reachableBy(st.grade(), st.titer())) continue;
+            double m = w.matchOf(st.profile());
+            if (m > bestMatch) { bestMatch = m; best = w; }
+        }
+        return best;
     }
 
     /**

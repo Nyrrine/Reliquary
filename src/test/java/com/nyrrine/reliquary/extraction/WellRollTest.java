@@ -2,6 +2,9 @@ package com.nyrrine.reliquary.extraction;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.random.RandomGenerator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -91,5 +94,37 @@ class WellRollTest {
         assertNotNull(r.weapon());
         assertTrue(r.weapon().grade().minCogito().atMost(Grade.of(92.0)));
         assertTrue(r.match() > 0.9, "a clean on-target pour should match tightly, was " + r.match());
+    }
+
+    @Test
+    void wellIsAWeightedGachaNotDeterministic() {
+        // A mix sitting between reachable weapons should, over many pours, yield MORE THAN ONE — weighted
+        // toward the closer. The odds must be a real distribution (sum to 1).
+        SinProfile mid = SinProfile.builder().add(Sin.GLOOM, 62).add(Sin.SLOTH, 38).build();
+        PotState p = pour(mid, 200, 90.0, 95);
+
+        List<WellRoll.Chance> pool = WellRoll.pool(p);
+        assertTrue(pool.size() >= 2, "the mix should sit near several reachable weapons");
+        assertEquals(1.0, pool.stream().mapToDouble(WellRoll.Chance::odds).sum(), 1.0e-6, "odds are a distribution");
+
+        RandomGenerator rng = new java.util.Random(1L);
+        Set<String> manifested = new HashSet<>();
+        for (int i = 0; i < 300; i++) {
+            WellRoll.Result r = WellRoll.resolve(p, null, 0.0, rng);
+            if (r.outcome() == WellRoll.Outcome.MANIFEST) manifested.add(r.weapon().id());
+        }
+        assertTrue(manifested.size() >= 2, "the gacha should produce variety, got " + manifested);
+    }
+
+    @Test
+    void aCatalystGuaranteesTheTargetOutOfThePool() {
+        // Same neighbourhood, but load Penitence's catalyst on an on-target pour → Penitence every time.
+        PotState p = pour(WeaponSignatures.PENITENCE.signature(), 200, 90.0, 95);
+        RandomGenerator rng = new java.util.Random(2L);
+        for (int i = 0; i < 50; i++) {
+            WellRoll.Result r = WellRoll.resolve(p, "penitence", 0.0, rng);
+            assertSame(WellRoll.Outcome.MANIFEST, r.outcome());
+            assertEquals("penitence", r.weapon().id(), "the catalyst must cut the RNG to a guaranteed pull");
+        }
     }
 }

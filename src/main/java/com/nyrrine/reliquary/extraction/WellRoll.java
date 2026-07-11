@@ -1,5 +1,7 @@
 package com.nyrrine.reliquary.extraction;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.random.RandomGenerator;
 
 /**
@@ -28,6 +30,9 @@ public final class WellRoll {
     public static final double NEARMISS_MIN = 0.5;
     /** A catalyst only locks onto its target if the pour is at least this close to it. */
     public static final double SNAP_MIN = 0.85;
+    /** How sharply the gacha favours your best-matched weapon (weight = match^this). Higher = more targeted,
+     *  lower = more of a lottery across the whole reachable pool. */
+    public static final double GACHA_SHARPNESS = 8.0;
     /** Purity at/above which a locked catalyst certifies the pour to a guaranteed manifest. */
     public static final double CERTIFIED_PURITY = Grade.PRIMARY_STANDARD.minPurity();
 
@@ -66,51 +71,93 @@ public final class WellRoll {
         double titer = pour.titer();
         SinProfile profile = pour.profile();
 
-        // Best reachable weapon by match (grade floor + volume gate applied).
-        WeaponSpec best = null;
-        double bestMatch = -1.0;
-        for (WeaponSpec w : WeaponSignatures.all()) {
-            if (!w.reachableBy(cogitoGrade, titer)) continue;
-            double m = w.matchOf(profile);
-            if (m > bestMatch) { bestMatch = m; best = w; }
-        }
+        List<Chance> pool = pool(pour); // reachable weapons + their pull odds, best first
 
-        // Catalyst: if its target is reachable and the pour is close enough, it locks onto that target.
+        // Catalyst: a reachable target you're already close to is LOCKED — a guaranteed pull (the RNG-cut).
         WeaponSpec target = catalystTargetId == null ? null : WeaponSignatures.byId(catalystTargetId);
-        boolean locked = false;
-        if (target != null && target.reachableBy(cogitoGrade, titer)) {
-            double tm = target.matchOf(profile);
-            if (tm >= SNAP_MIN) { best = target; bestMatch = tm; locked = true; }
-        }
+        boolean locked = target != null && target.reachableBy(cogitoGrade, titer)
+                && target.matchOf(profile) >= SNAP_MIN;
 
         // The grade you reached for — a catalyst declares intent even if unreachable (over-reach → breach).
         EgoGrade aimed = target != null ? target.grade()
-                : (best != null ? best.grade() : EgoGrade.ZAYIN);
+                : (pool.isEmpty() ? EgoGrade.ZAYIN : pool.get(0).weapon().grade());
 
-        if (best == null) {
-            // Nothing in the bucket — a hollow pour just ruptures at the aimed tier.
+        if (locked) {
+            // Guaranteed manifest of the target; Primary Standard purity also stamps it Certified (100%).
+            boolean certified = purity >= CERTIFIED_PURITY - 1.0e-9;
+            return new Result(Outcome.MANIFEST, target, target.matchOf(profile), certified,
+                    cogitoGrade, purity, target.grade());
+        }
+
+        if (pool.isEmpty()) {
+            // Nothing cleared the gates — a hollow pour just ruptures at the aimed tier.
             return new Result(Outcome.BREACH, null, 0.0, false, cogitoGrade, purity, aimed);
         }
 
-        // Success = match × grade; a locked catalyst at Primary Standard certifies to a guaranteed manifest.
-        boolean certified = locked && purity >= CERTIFIED_PURITY - 1.0e-9;
-        double pSuccess = certified ? 1.0 : clamp01(bestMatch * (purity / 100.0));
+        double bestMatch = pool.get(0).match();
 
+        // Does the pour manifest anything at all? Quality (best match × purity) decides success vs failure.
+        double pSuccess = clamp01(bestMatch * (purity / 100.0));
         if (rng.nextDouble() < pSuccess) {
-            return new Result(Outcome.MANIFEST, best, bestMatch, certified, cogitoGrade, purity, best.grade());
+            // The gacha: pull a weapon from the pool weighted by how well the mix matches each. Your cogito
+            // tilts the odds toward what you shaped it for; the roll still decides which one you actually get.
+            WeaponSpec pulled = weightedPick(pool, rng);
+            return new Result(Outcome.MANIFEST, pulled, bestMatch, false, cogitoGrade, purity, pulled.grade());
         }
 
-        // Failed the manifest — decide near-miss vs breach.
+        // Failed the pull — near-miss (nearest neighbour) or breach.
         double breachChance = clamp01(BREACH_BASE
                 + BREACH_W_MATCH * (1.0 - bestMatch)
                 + BREACH_W_PURITY * (1.0 - purity / 100.0)
                 + BREACH_W_STAB * (1.0 - pour.stability() / 100.0)
                 + BREACH_W_RESIDUE * clamp01(wellResidue));
 
+        WeaponSpec nearest = pool.get(0).weapon();
         if (bestMatch < NEARMISS_MIN || rng.nextDouble() < breachChance) {
-            return new Result(Outcome.BREACH, best, bestMatch, false, cogitoGrade, purity, aimed);
+            return new Result(Outcome.BREACH, nearest, bestMatch, false, cogitoGrade, purity, aimed);
         }
-        return new Result(Outcome.NEAR_MISS, best, bestMatch, false, cogitoGrade, purity, best.grade());
+        return new Result(Outcome.NEAR_MISS, nearest, bestMatch, false, cogitoGrade, purity, nearest.grade());
+    }
+
+    /** A weapon's odds of being pulled from the Well right now: its composition match and normalized pull %. */
+    public record Chance(WeaponSpec weapon, double match, double odds) {}
+
+    /**
+     * The reachable loot pool with each weapon's normalized pull odds, best first. A weapon's weight is its
+     * match raised to {@link #GACHA_SHARPNESS} — so shaping your cogito toward a target sharply tilts the
+     * gacha in its favour, while the rest of the pool keeps a real (smaller) chance. Only weapons that clear
+     * the grade floor + volume gate are in the pool.
+     */
+    public static List<Chance> pool(PotState pour) {
+        Grade g = Grade.of(pour.purity());
+        double titer = pour.titer();
+        SinProfile prof = pour.profile();
+
+        List<Chance> weighted = new ArrayList<>();
+        double total = 0.0;
+        for (WeaponSpec w : WeaponSignatures.all()) {
+            if (!w.reachableBy(g, titer)) continue;
+            double m = w.matchOf(prof);
+            double wt = Math.pow(Math.max(0.0, m), GACHA_SHARPNESS);
+            weighted.add(new Chance(w, m, wt)); // stash the raw weight in odds for now
+            total += wt;
+        }
+        List<Chance> out = new ArrayList<>();
+        for (Chance c : weighted) {
+            out.add(new Chance(c.weapon(), c.match(), total > 0.0 ? c.odds() / total : 0.0));
+        }
+        out.sort((a, b) -> Double.compare(b.odds(), a.odds()));
+        return out;
+    }
+
+    private static WeaponSpec weightedPick(List<Chance> pool, RandomGenerator rng) {
+        double r = rng.nextDouble();
+        double cum = 0.0;
+        for (Chance c : pool) {
+            cum += c.odds();
+            if (r < cum) return c.weapon();
+        }
+        return pool.get(pool.size() - 1).weapon();
     }
 
     private static double clamp01(double v) { return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v); }
