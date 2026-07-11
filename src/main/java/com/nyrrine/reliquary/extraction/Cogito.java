@@ -117,24 +117,34 @@ public final class Cogito {
 
     /** Apply the green-by-purity tint, the grade-shaded name, and the quality-only lore. */
     private static void style(PotionMeta meta, PotState state) {
+        boolean blank = state.isBlank();
         double purity = state.purity();
         Grade grade = state.grade();
-        Color tint = greenFor(purity);
+        // A blank vial has no material, so its "purity" is meaningless — render it dim and empty.
+        Color tint = blank ? greenFor(0.0) : greenFor(purity);
 
         meta.setColor(tint);
         meta.addItemFlags(ItemFlag.HIDE_ADDITIONAL_TOOLTIP); // suppress the vanilla "no effects" line
-        meta.setEnchantmentGlintOverride(grade == Grade.CERTIFIED); // certified vials catch the light
+        meta.setEnchantmentGlintOverride(!blank && grade == Grade.CERTIFIED); // certified vials catch the light
 
         var cmd = meta.getCustomModelDataComponent();
         cmd.setStrings(List.of(CMD));
         meta.setCustomModelDataComponent(cmd);
 
         TextColor nameColor = TextColor.color(tint.getRed(), tint.getGreen(), tint.getBlue());
-        meta.displayName(Component.text("Cogito")
-                .color(nameColor)
+        meta.displayName(Component.text(blank ? "Empty Cogito Vial" : "Cogito")
+                .color(blank ? FAINT : nameColor)
                 .decoration(TextDecoration.ITALIC, false));
 
-        meta.lore(lore(state, grade, purity));
+        meta.lore(blank ? blankLore() : lore(state, grade, purity));
+    }
+
+    private static List<Component> blankLore() {
+        List<Component> out = new ArrayList<>();
+        out.add(line("Empty.", FAINT));
+        out.add(Component.empty());
+        out.add(line("Charge it with reagents at the Censer.", FAINT, true));
+        return out;
     }
 
     private static List<Component> lore(PotState state, Grade grade, double purity) {
