@@ -49,10 +49,11 @@ public final class WellRoll {
      * @param match       best match achieved, {@code [0,1]}
      * @param certified   whether a catalyst guaranteed the manifest
      * @param cogitoGrade the analytical grade of the pour
+     * @param purity      the pour's purity (0–100) — for the attribution stamp
      * @param aimedGrade  the E.G.O grade reached for — sets breach severity
      */
     public record Result(Outcome outcome, WeaponSpec weapon, double match, boolean certified,
-                         Grade cogitoGrade, EgoGrade aimedGrade) {}
+                         Grade cogitoGrade, double purity, EgoGrade aimedGrade) {}
 
     /**
      * Resolve a pour. {@code catalystTargetId} may be null (no catalyst); {@code wellResidue} in {@code [0,1]}
@@ -88,7 +89,7 @@ public final class WellRoll {
 
         if (best == null) {
             // Nothing in the bucket — a hollow pour just ruptures at the aimed tier.
-            return new Result(Outcome.BREACH, null, 0.0, false, cogitoGrade, aimed);
+            return new Result(Outcome.BREACH, null, 0.0, false, cogitoGrade, purity, aimed);
         }
 
         // Success = match × grade; a locked catalyst at Primary Standard certifies to a guaranteed manifest.
@@ -96,7 +97,7 @@ public final class WellRoll {
         double pSuccess = certified ? 1.0 : clamp01(bestMatch * (purity / 100.0));
 
         if (rng.nextDouble() < pSuccess) {
-            return new Result(Outcome.MANIFEST, best, bestMatch, certified, cogitoGrade, best.grade());
+            return new Result(Outcome.MANIFEST, best, bestMatch, certified, cogitoGrade, purity, best.grade());
         }
 
         // Failed the manifest — decide near-miss vs breach.
@@ -107,9 +108,9 @@ public final class WellRoll {
                 + BREACH_W_RESIDUE * clamp01(wellResidue));
 
         if (bestMatch < NEARMISS_MIN || rng.nextDouble() < breachChance) {
-            return new Result(Outcome.BREACH, best, bestMatch, false, cogitoGrade, aimed);
+            return new Result(Outcome.BREACH, best, bestMatch, false, cogitoGrade, purity, aimed);
         }
-        return new Result(Outcome.NEAR_MISS, best, bestMatch, false, cogitoGrade, best.grade());
+        return new Result(Outcome.NEAR_MISS, best, bestMatch, false, cogitoGrade, purity, best.grade());
     }
 
     private static double clamp01(double v) { return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v); }

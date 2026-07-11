@@ -3,6 +3,7 @@ package com.nyrrine.reliquary;
 import com.nyrrine.reliquary.core.RelicTracker;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.core.WeaponManager;
+import com.nyrrine.reliquary.extraction.ExtractionCommand;
 import com.nyrrine.reliquary.busego.weapons.FlowerBuryingWedgeReckoning;
 import com.nyrrine.reliquary.busego.weapons.FlowerBuryingWedgeWeapon;
 import com.nyrrine.reliquary.ego.weapons.BeakWeapon;
@@ -62,6 +63,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
 
     private WeaponManager weapons;
     private RelicTracker tracker;
+    private ExtractionCommand extraction;
 
     @Override
     public void onEnable() {
@@ -116,6 +118,8 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         this.tracker = new RelicTracker(this);
         tracker.start();
 
+        this.extraction = new ExtractionCommand(this);
+
         PluginCommand cmd = getCommand("reliquary");
         if (cmd != null) cmd.setTabCompleter(this);
 
@@ -166,6 +170,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
             case "admin" -> adminGive(sender, args);
             case "track" -> trackCmd(sender);
             case "purge" -> purgeCmd(sender, args);
+            case "ext", "extraction", "cogito" -> extraction.handle(sender, args);
             default -> sendHelp(sender);
         }
         return true;
@@ -371,6 +376,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         help(sender, "/reliquary admin <id> [player]", "give an admin/debug variant (e.g. Worthy Lævateinn)");
         help(sender, "/reliquary track", "list every relic and who holds it");
         help(sender, "/reliquary purge <player>", "remove all relics from a player");
+        help(sender, "/reliquary ext ...", "the Cogito extraction testbed (brew, add, distill, pour)");
     }
 
     private void help(CommandSender sender, String cmd, String desc) {
@@ -384,7 +390,21 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         if (!sender.hasPermission(PERMISSION)) return Collections.emptyList();
 
         if (args.length == 1) {
-            return filter(List.of("give", "giveall", "admin", "list", "track", "purge", "help"), args[0]);
+            return filter(List.of("give", "giveall", "admin", "list", "track", "purge", "ext", "help"), args[0]);
+        }
+        if (args[0].equalsIgnoreCase("ext") || args[0].equalsIgnoreCase("extraction")
+                || args[0].equalsIgnoreCase("cogito")) {
+            if (args.length == 2) {
+                return filter(List.of("vial", "fuel", "reagents", "add", "assay", "lectern", "distill", "pour"),
+                        args[1]);
+            }
+            if (args.length == 3 && (args[1].equalsIgnoreCase("add") || args[1].equalsIgnoreCase("lectern"))) {
+                return filter(ExtractionCommand.reagentIds(), args[2]);
+            }
+            if (args.length == 3 && args[1].equalsIgnoreCase("pour")) {
+                return filter(ExtractionCommand.weaponIds(), args[2]);
+            }
+            return Collections.emptyList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("giveall")) {
             return filter(List.of("relics", "egoequipment", "busego"), args[1]);
