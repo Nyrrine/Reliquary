@@ -43,9 +43,12 @@ import java.util.concurrent.ThreadLocalRandom;
  * gimmick in {@link #onHit}: a <b>decapitation execute</b>. When a landed blow finds a foe already at the
  * end of its rope (a normal mob under 25% HP, a player under 10%, a boss under 5%) and that foe is within
  * {@link #EXECUTE_RANGE} blocks, the wielder blinks to <em>directly behind</em> the target and takes the
- * head: a huge raw finishing blow ({@link #EXECUTE_DAMAGE}) that overkills through any armor, wrapped in a
- * clean slice, a burst of blood, and a wet crunch. True armor-bypass ({@code DamageType}) is not on this
- * compile classpath, so the kill is bought with overkill rather than a bypassing damage type.
+ * head: a modest, kill-credited finishing blow ({@link #EXECUTE_DAMAGE}) that {@code setHealth(0)} then
+ * guarantees, wrapped in a clean slice, a burst of blood, and a wet crunch. True armor-bypass
+ * ({@code DamageType}) is not on this compile classpath; earlier builds bought the kill with a
+ * 10,000-point overkill, but that made the victim's armor lose ~2,500 durability per piece in a single hit
+ * (durability toll scales with damage dealt), destroying armored gear instantly. The blow is now normal-
+ * sized and the guaranteed kill comes from {@code setHealth(0)}, which takes no toll on armor at all.
  *
  * <p>That finishing blow is dealt with {@link LivingEntity#damage(double, org.bukkit.entity.Entity)},
  * which fires its own {@code EntityDamageByEntityEvent} and re-enters {@link #onHit}. A per-attacker
@@ -77,8 +80,14 @@ public final class LifeForADaredevilWeapon implements Weapon {
     private static final double THRESH_PLAYER = 0.10; // a player under a tenth
     private static final double THRESH_BOSS   = 0.05; // a boss under a twentieth
 
-    /** A raw finishing blow large enough to overkill any armored target (no true-bypass API here). */
-    private static final double EXECUTE_DAMAGE = 10_000.0;
+    /**
+     * The credited finishing blow. Kept modest on purpose: a landed {@code damage()} makes armour lose
+     * durability proportional to the hit (~damage/4 per piece), so the old 10,000-point overkill shredded
+     * a victim's whole armour set in a single execute. This lands a normal-sized, kill-credited blow; if a
+     * heavily-armoured or Resistance-shielded target soaks it, {@link #decapitate} finishes the kill with
+     * {@code setHealth(0)} — no overkill number, no armour-destroying durability blast.
+     */
+    private static final double EXECUTE_DAMAGE = 20.0;
 
     /** The two-heart burden borne while the blade is held. */
     private static final double HEALTH_PENALTY = -4.0;
@@ -186,11 +195,18 @@ public final class LifeForADaredevilWeapon implements Weapon {
         decapFx(attacker, victim);
 
         // The finishing blow. Guard re-entrancy: this damage() re-fires onHit for the same attacker.
+        // A modest, credited hit (not a thousand-point overkill) keeps armour durability loss vanilla-sized.
         executing.add(aid);
         try {
             victim.damage(EXECUTE_DAMAGE, attacker);
         } finally {
             executing.remove(aid);
+        }
+        // Guarantee the execute even through heavy armour or Resistance, which could soak the modest blow.
+        // setHealth(0) doesn't run the damage pipeline, so it takes no further toll on the victim's armour;
+        // the recent damage() above still credits the kill to the wielder.
+        if (!victim.isDead() && victim.isValid() && victim.getHealth() > 0.0) {
+            victim.setHealth(0.0);
         }
 
         // Teleport + kill is a non-vanilla action, so wear the blade a point beyond the vanilla swing.

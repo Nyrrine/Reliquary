@@ -88,7 +88,7 @@ public final class MagicBulletWeapon implements Weapon {
 
     // ---- tuning --------------------------------------------------------------------
     private static final int    CHARGE_STEPS   = 24;    // onTick steps to full charge → ~2.4s (weighty, dramatic)
-    private static final long   SHOT_COOLDOWN_MS = 7000L; // real post-shot reload before the next charge (~7s, musket-slow)
+    private static final long   SHOT_COOLDOWN_MS = 13000L; // real post-shot reload before the next charge (~13s, musket-slow)
     private static final double RANGE          = 48.0;  // hitscan reach
     private static final double RAY_SIZE       = 0.6;   // entity ray fatness (forgiving aim) when unmarked
     private static final double SHOT_DAMAGE    = 16.0;  // per shot — slow, charged, never-miss, self-costing
@@ -132,15 +132,28 @@ public final class MagicBulletWeapon implements Weapon {
     private static final double RECOIL_HIT     = 1.1;   // within this of the head = strike
 
     // ---- ultimate: "The Seventh Bullet" --------------------------------------------
-    private static final int    ULT_WINDUP_TICKS = 44;  // ~2.2s dramatic wind-up
+    private static final int    ULT_WINDUP_TICKS = 300; // 15s — a dramatic cast; the sigils summon one by one
     private static final double ULT_DAMAGE     = 35.0;  // devastating AoE on contact
-    private static final int    BALL_LIFE      = 90;    // ~4.5s lifetime cap
+    private static final int    BALL_LIFE      = 225;   // ~11.25s lifetime cap (2.5x the old 90t, to match the long cast)
+
+    /**
+     * The four wind-up sigils summon ONE BY ONE across the 15s cast: each {@code {startFrac, endFrac}} is the
+     * slice of the global wind-up during which that circle inscribes itself (via {@link #drawMagicCircle}'s
+     * written-formation animation). Once inscribed a circle stays — fully drawn and spinning — to the end, so
+     * by the launch all four hang together in the air.
+     */
+    private static final double[][] ULT_CIRCLE_SCHEDULE = {
+            {0.00, 0.22}, // 1 — the great sigil summoned at the wielder's back
+            {0.24, 0.46}, // 2 — the first circle at the muzzle
+            {0.48, 0.70}, // 3 — the second, larger, marching down the aim
+            {0.72, 0.94}, // 4 — the third, largest, farthest down the aim
+    };
     private static final double BALL_SPEED     = 0.45;  // blocks/tick — moderate, watchable
     private static final double BALL_VIS_R     = 3.4;   // visual radius → ~7-block diameter (really big)
     private static final double BALL_CARVE_R   = 3.4;   // temp-destroy radius — gouges a wide trench in its path
     private static final double BALL_HIT_R     = 3.6;   // damage radius
     private static final double BALL_HOMING    = 0.12;  // per-tick curve toward a marked target
-    private static final int    ULT_RESTORE_TICKS = 100; // temp-broken blocks pop back after ~5s
+    private static final int    ULT_RESTORE_TICKS = 250; // temp-broken blocks pop back after ~12.5s — in step with the longer orb
     private static final int    MAX_ULT_CARVE  = 1400;  // hard cap on temp-broken blocks per orb (a big trench)
     private static final double FOOTING_R      = 2.6;   // never carve within this of the wielder's feet — don't drop them
 
@@ -462,9 +475,11 @@ public final class MagicBulletWeapon implements Weapon {
     // ---- "The Seventh Bullet" ultimate ---------------------------------------------
 
     /**
-     * The showpiece. A dramatic wind-up inscribes a large circle BEHIND the wielder and a triple-large
-     * circle in front of the gun (the written-formation animation, driven by the wind-up fraction), over
-     * ~{@value #ULT_WINDUP_TICKS} ticks with a rising roar; then a massive black-and-blue orb is launched.
+     * The showpiece. A dramatic {@value #ULT_WINDUP_TICKS}-tick (15s) cast: the four sigils — a great
+     * circle BEHIND the wielder and a triple-large formation marching down the aim — are summoned ONE BY ONE
+     * (see {@link #ULT_CIRCLE_SCHEDULE}), each inscribing itself and then hanging, spinning, as the next is
+     * drawn. A rising roar and a resonant toll on every new circle build to the launch of a massive
+     * black-and-blue orb, which then lives {@value #BALL_LIFE} ticks on the field.
      */
     private void seventhBullet(Player player, State st) {
         st.casting = true;
@@ -477,6 +492,7 @@ public final class MagicBulletWeapon implements Weapon {
         BukkitRunnable windup = new BukkitRunnable() {
             int t = 0;
             double spin = 0.0;
+            int summoned = 0; // how many circles have been announced with a toll so far
 
             @Override
             public void run() {
@@ -491,15 +507,28 @@ public final class MagicBulletWeapon implements Weapon {
                 spin += 0.40;
                 double frac = Math.min(1.0, (double) t / ULT_WINDUP_TICKS);
                 renderUltCharge(player, spin, frac);
-                if (t % 3 == 0) {
-                    float pitch = 0.5f + (float) (frac * 0.9);
-                    player.getWorld().playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS,
-                            0.6f, Math.min(1.6f, pitch));                          // building demonic menace
-                    player.getWorld().playSound(player.getLocation(), Sound.BLOCK_BLASTFURNACE_FIRE_CRACKLE,
-                            0.6f, 0.6f);                                            // the growing hellfire
+
+                // A resonant toll each time a new sigil begins to summon — the drama of the one-by-one build.
+                int nowSummoned = circlesSummoned(frac);
+                if (nowSummoned > summoned) {
+                    summoned = nowSummoned;
+                    float pitch = 0.5f + 0.16f * summoned;
+                    world.playSound(player.getLocation(), Sound.BLOCK_BELL_RESONATE, 1.0f, pitch);
+                    world.playSound(player.getLocation(), Sound.BLOCK_CONDUIT_ACTIVATE, 0.8f, 0.7f);
+                    world.playSound(player.getLocation(), Sound.ENTITY_ILLUSIONER_PREPARE_MIRROR, 0.7f, 0.6f);
+                }
+
+                // A low, terrible demonic growl building under the cast — the weapon's black-flame nature.
+                if (t % 34 == 0) {
+                    float pitch = 0.35f + (float) (frac * 0.15);                   // stays deep, barely rising
+                    world.playSound(player.getLocation(), Sound.ENTITY_ENDER_DRAGON_GROWL, 0.8f, pitch);
+                }
+                if (t % 6 == 0) {
+                    world.playSound(player.getLocation(), Sound.BLOCK_BLASTFURNACE_FIRE_CRACKLE,
+                            0.6f, 0.6f);                                            // the growing hellfire — black flame
                 }
                 player.sendActionBar(EgoHud.gauge(NAME, frac,
-                        plain("THE SEVENTH BULLET — inscribing", NAME)));
+                        plain("THE SEVENTH BULLET — inscribing " + summoned + "/4", NAME)));
                 if (t >= ULT_WINDUP_TICKS) {
                     st.ultWindup = null;
                     cancel();
@@ -511,21 +540,45 @@ public final class MagicBulletWeapon implements Weapon {
         windup.runTaskTimer(plugin, 0L, 1L);
     }
 
-    /** The wind-up sigils: a large circle behind the wielder + a triple-large nested circle at the muzzle. */
+    /**
+     * The wind-up sigils, summoned one by one: a large circle behind the wielder, then a triple-large nested
+     * formation down the aim. Each circle is drawn only once its {@link #ULT_CIRCLE_SCHEDULE} window opens,
+     * inscribing on its own local fraction and staying complete thereafter.
+     */
     private void renderUltCharge(Player player, double spin, double frac) {
         World world = player.getWorld();
         Location eye = player.getEyeLocation();
         Vector dir = eye.getDirection().normalize();
 
-        // BEHIND — a large sigil summoned at the wielder's back, facing forward down the aim.
         Location behind = eye.clone().add(dir.clone().multiply(-2.4));
-        drawMagicCircle(world, behind, dir, R_LARGE, spin, frac);
+        Location front  = eye.clone().add(dir.clone().multiply(GUN_TIP + 1.0));
 
-        // IN FRONT — three nested large circles marching down the aim (the "triple-large" cast).
-        Location front = eye.clone().add(dir.clone().multiply(GUN_TIP + 1.0));
-        drawMagicCircle(world, front, dir, R_LARGE, spin, frac);
-        drawMagicCircle(world, front.clone().add(dir.clone().multiply(1.6)), dir, R_LARGE * 1.25, -spin, frac);
-        drawMagicCircle(world, front.clone().add(dir.clone().multiply(3.2)), dir, R_LARGE * 1.55, spin, frac);
+        // BEHIND — a large sigil at the wielder's back (summons first).
+        double f0 = circleFrac(frac, 0);
+        if (f0 >= 0.0) drawMagicCircle(world, behind, dir, R_LARGE, spin, f0);
+
+        // IN FRONT — three nested large circles marching down the aim, each summoning after the last.
+        double f1 = circleFrac(frac, 1);
+        if (f1 >= 0.0) drawMagicCircle(world, front, dir, R_LARGE, spin, f1);
+        double f2 = circleFrac(frac, 2);
+        if (f2 >= 0.0) drawMagicCircle(world, front.clone().add(dir.clone().multiply(1.6)), dir, R_LARGE * 1.25, -spin, f2);
+        double f3 = circleFrac(frac, 3);
+        if (f3 >= 0.0) drawMagicCircle(world, front.clone().add(dir.clone().multiply(3.2)), dir, R_LARGE * 1.55, spin, f3);
+    }
+
+    /** Local 0..1 inscription fraction for wind-up circle {@code i}, or -1 if its summon window hasn't opened. */
+    private double circleFrac(double globalFrac, int i) {
+        double start = ULT_CIRCLE_SCHEDULE[i][0], end = ULT_CIRCLE_SCHEDULE[i][1];
+        if (globalFrac < start) return -1.0;
+        if (globalFrac >= end) return 1.0;
+        return (globalFrac - start) / (end - start);
+    }
+
+    /** How many wind-up circles have begun summoning at this global fraction (drives the one-by-one toll). */
+    private int circlesSummoned(double globalFrac) {
+        int n = 0;
+        for (double[] window : ULT_CIRCLE_SCHEDULE) if (globalFrac >= window[0]) n++;
+        return n;
     }
 
     /** Launch the massive homing orb down the aim; it self-cancels at its lifetime cap or on wielder loss. */
@@ -666,7 +719,8 @@ public final class MagicBulletWeapon implements Weapon {
             myCarves.add(keyLoc);
             // Explosive break VFX — a cheap dust puff of the broken block…
             Location ctr = keyLoc.clone().add(0.5, 0.5, 0.5);
-            world.spawnParticle(Particle.BLOCK, ctr, 10, 0.3, 0.3, 0.3, 0.12, saved.getBlockData());
+            // force=true: the orb carves far from the wielder — see dustF's note on the 32-block cull.
+            world.spawnParticle(Particle.BLOCK, ctr, 10, 0.3, 0.3, 0.3, 0.12, saved.getBlockData(), true);
             // …plus real PHYSICS DEBRIS: a fraction of carved chunks are flung outward as FallingBlocks that
             // tumble with gravity then vanish (never drop, never place, never settle).
             spawnDebris(saved, ctr, rng);
@@ -731,6 +785,21 @@ public final class MagicBulletWeapon implements Weapon {
             }
         }
 
+        /**
+         * FORCE-send a dust particle (long-distance). The orb flies far from the wielder, and this Paper
+         * build's no-force {@code spawnParticle} default is {@code force=false} — the server then transmits
+         * particles only to players within 32 blocks and the client culls them past 32, so the ball would
+         * vanish the moment the viewer is more than ~32 blocks from it. Forcing sends/renders it out to 512.
+         */
+        private void dustF(Location p, int n, double s, Particle.DustOptions o) {
+            world.spawnParticle(Particle.DUST, p, n, s, s, s, 0.0, o, true);
+        }
+
+        /** FORCE-send a data-less particle (SMOKE / LARGE_SMOKE) long-distance — same reason as {@link #dustF}. */
+        private void smokeF(Particle particle, Location p, int n, double s, double extra) {
+            world.spawnParticle(particle, p, n, s, s, s, extra, null, true);
+        }
+
         /** A dense BLUE core wrapped in a churning BLACK-FLAME shell (smoke + near-black dust), plus a trail. */
         private void drawBall(Location loc) {
             double swirl = age * 0.5;
@@ -742,22 +811,18 @@ public final class MagicBulletWeapon implements Weapon {
                 double ang = i * 2.399963229728653 + swirl;          // golden angle + rotation = churn
                 double x = Math.cos(ang) * rr, z = Math.sin(ang) * rr;
                 Location p = loc.clone().add(x * BALL_VIS_R, y * BALL_VIS_R, z * BALL_VIS_R);
-                world.spawnParticle(Particle.DUST, p, 1, 0, 0, 0, 0, BALL_FLAME);
-                if (i % 3 == 0) world.spawnParticle(Particle.SMOKE, p, 1, 0.06, 0.06, 0.06, 0.01);
-                if (i % 5 == 0) world.spawnParticle(Particle.LARGE_SMOKE, p, 1, 0.05, 0.05, 0.05, 0.0);
+                dustF(p, 1, 0, BALL_FLAME);
+                if (i % 3 == 0) smokeF(Particle.SMOKE, p, 1, 0.06, 0.01);
+                if (i % 5 == 0) smokeF(Particle.LARGE_SMOKE, p, 1, 0.05, 0.0);
             }
             // Blue churning core.
-            world.spawnParticle(Particle.DUST, loc, 26, BALL_VIS_R * 0.45, BALL_VIS_R * 0.45, BALL_VIS_R * 0.45,
-                    0, BALL_DEEP);
-            world.spawnParticle(Particle.DUST, loc, 14, BALL_VIS_R * 0.25, BALL_VIS_R * 0.25, BALL_VIS_R * 0.25,
-                    0, BALL_LIGHT);
+            dustF(loc, 26, BALL_VIS_R * 0.45, BALL_DEEP);
+            dustF(loc, 14, BALL_VIS_R * 0.25, BALL_LIGHT);
             // A thick black-flame trail dropped behind the orb, laced with blue.
             Location tail = loc.clone().subtract(dir.clone().multiply(BALL_VIS_R * 0.9));
-            world.spawnParticle(Particle.SMOKE, tail, 14, BALL_VIS_R * 0.5, BALL_VIS_R * 0.5, BALL_VIS_R * 0.5, 0.01);
-            world.spawnParticle(Particle.DUST, tail, 14, BALL_VIS_R * 0.5, BALL_VIS_R * 0.5, BALL_VIS_R * 0.5,
-                    0, BALL_FLAME);
-            world.spawnParticle(Particle.DUST, tail, 8, BALL_VIS_R * 0.4, BALL_VIS_R * 0.4, BALL_VIS_R * 0.4,
-                    0, BALL_DEEP);
+            smokeF(Particle.SMOKE, tail, 14, BALL_VIS_R * 0.5, 0.01);
+            dustF(tail, 14, BALL_VIS_R * 0.5, BALL_FLAME);
+            dustF(tail, 8, BALL_VIS_R * 0.4, BALL_DEEP);
         }
 
         /** Normal end-of-life: a dissipation burst, then the downtime begins. */
@@ -765,9 +830,9 @@ public final class MagicBulletWeapon implements Weapon {
             if (finished) return;
             finished = true;
             Location loc = pos.toLocation(world);
-            world.spawnParticle(Particle.DUST, loc, 50, BALL_VIS_R, BALL_VIS_R, BALL_VIS_R, 0, BALL_DEEP);
-            world.spawnParticle(Particle.DUST, loc, 30, BALL_VIS_R, BALL_VIS_R, BALL_VIS_R, 0, BALL_FLAME);
-            world.spawnParticle(Particle.SMOKE, loc, 40, BALL_VIS_R, BALL_VIS_R, BALL_VIS_R, 0.02);
+            dustF(loc, 50, BALL_VIS_R, BALL_DEEP);
+            dustF(loc, 30, BALL_VIS_R, BALL_FLAME);
+            smokeF(Particle.SMOKE, loc, 40, BALL_VIS_R, 0.02);
             world.playSound(loc, Sound.ENTITY_GENERIC_EXPLODE, 1.4f, 0.5f);
             world.playSound(loc, Sound.ENTITY_GENERIC_EXPLODE, 1.2f, 0.4f);
             activeBalls.remove(this);

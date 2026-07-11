@@ -100,8 +100,14 @@ public final class GreenStemWeapon implements Weapon {
     /** How near the wielder a low body must be for the thorn to reach it. */
     private static final double EXECUTE_RADIUS = 5.0;
 
-    /** A guaranteed finisher for sub-threshold targets — large enough to pierce armour and resistance. */
-    private static final double EXECUTE_DAMAGE = 1000.0;
+    /**
+     * The credited finishing blow. Kept modest on purpose: a landed {@code damage()} makes armour lose
+     * durability proportional to the hit (~damage/4 per piece), so the old 1,000-point overkill stripped a
+     * victim's whole armour set in a hit or two. This lands a normal-sized, kill-credited blow; if a
+     * heavily-armoured or Resistance-shielded body soaks it, {@link #fireThorn} finishes with
+     * {@code setHealth(0)} — no overkill number, no armour-destroying durability blast.
+     */
+    private static final double EXECUTE_DAMAGE = 20.0;
 
     /** A speared body can't be re-speared for this long (mostly matters if a hit somehow fails to kill). */
     private static final long THORN_COOLDOWN_MS = 3_000L;
@@ -221,10 +227,17 @@ public final class GreenStemWeapon implements Weapon {
 
         UUID vid = target.getUniqueId();
         ticking.add(vid); // fence: the damage below re-enters onHit — don't let it loop
+        // A modest, credited hit (not a thousand-point overkill) keeps armour durability loss vanilla-sized.
         try {
             target.damage(EXECUTE_DAMAGE, wielder);
         } finally {
             ticking.remove(vid);
+        }
+        // Guarantee the finisher even through heavy armour or Resistance, which could soak the modest blow.
+        // setHealth(0) doesn't run the damage pipeline, so it takes no further toll on the victim's armour;
+        // the recent damage() above still credits the kill to the wielder.
+        if (!target.isDead() && target.isValid() && target.getHealth() > 0.0) {
+            target.setHealth(0.0);
         }
 
         thornCd.put(vid, now + THORN_COOLDOWN_MS);

@@ -18,6 +18,7 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Tameable;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -192,7 +193,10 @@ public final class LampWeapon implements Weapon {
 
     /**
      * Called every 2 server ticks while the player is an active wielder. Returns {@code true} while the
-     * lantern is held (keep glowing), {@code false} the moment it leaves the main hand (go dark).
+     * lantern is held in <em>either</em> hand (keep glowing), {@code false} the moment it leaves both (go
+     * dark). The protective glow is a passive of simply carrying the lantern, so it burns just the same in
+     * the off-hand — only the active abilities (Gaze / Slam, routed through the main-hand right-click in
+     * {@link #onInteract}) go dark there, since the main hand then holds something else.
      *
      * <p>Once every {@link #AURA_INTERVAL} pulses it refreshes the Resistance aura and its warm light on
      * every nearby ally; every pulse it advances any Gaze this wielder holds (copying debuffs during the
@@ -200,11 +204,17 @@ public final class LampWeapon implements Weapon {
      */
     @Override
     public boolean onTick(Player player, long tick) {
-        if (!matches(player.getInventory().getItemInMainHand())) return false; // sheathed -> dark
+        if (!isHeld(player)) return false; // sheathed in neither hand -> dark
 
         if (tick % AURA_INTERVAL == 0) applyAura(player);
         advanceGaze(player, tick);
         return true;
+    }
+
+    /** The lantern is being carried if it sits in either the main hand or the off-hand. */
+    private boolean isHeld(Player player) {
+        return matches(player.getInventory().getItemInMainHand())
+                || matches(player.getInventory().getItemInOffHand());
     }
 
     /** Bathe the wielder and every nearby ally (players + tamed pets) in Resistance and warm light. */
@@ -418,6 +428,26 @@ public final class LampWeapon implements Weapon {
             Location p = feet.clone().add(Math.cos(a) * AURA_RADIUS, 0.0, Math.sin(a) * AURA_RADIUS);
             world.spawnParticle(Particle.DUST, p, 1, 0.04, 0.02, 0.04, 0.0, RING);
         }
+    }
+
+    // ---- engagement: keep the glow alive when the lantern rides in the off-hand ----
+
+    /**
+     * Engagement is otherwise main-hand-driven, so a lantern carried only in the off-hand would never be
+     * ticked and its passive glow would stay dark. Re-engage whenever the lantern is swapped into a hand so
+     * the tick loop keeps calling {@link #onTick}; onTick itself drops the player once it leaves both hands.
+     */
+    @Override
+    public void onSwapHands(Player player, PlayerSwapHandItemsEvent event) {
+        if (matches(event.getMainHandItem()) || matches(event.getOffHandItem())) {
+            plugin.weapons().engage(this, player.getUniqueId());
+        }
+    }
+
+    /** Logging in with the lantern already in the off-hand also needs an engage — the main-hand join hook misses it. */
+    @Override
+    public void onJoin(Player player) {
+        if (isHeld(player)) plugin.weapons().engage(this, player.getUniqueId());
     }
 
     // ---- state cleanup -------------------------------------------------------------

@@ -8,6 +8,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
@@ -195,6 +196,18 @@ public final class WeaponManager implements Listener {
         event.setCancelled(true); // the relic doesn't interact with the world
         engage(weapon, player.getUniqueId());
         weapon.onInteract(player, player.isSneaking());
+    }
+
+    /**
+     * A weapon is never a placeable block, in either hand. Most weapons wear non-block materials so this
+     * never fires for them; the fast-path {@link #fromItem} makes those a cheap material check. It matters
+     * for a weapon whose fallback material IS a block (e.g. Lamp, a LANTERN): the main-hand interact guard
+     * cancels placement from the main hand, but an offhand placement fires with hand == OFF_HAND and slips
+     * past it — {@code getItemInHand()} here reports whichever hand placed, so this closes both.
+     */
+    @EventHandler(ignoreCancelled = true)
+    public void onBlockPlace(BlockPlaceEvent event) {
+        if (fromItem(event.getItemInHand()) != null) event.setCancelled(true);
     }
 
     @EventHandler

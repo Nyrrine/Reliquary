@@ -191,6 +191,12 @@ public final class LaevateinnWielder {
         if (meta == null) return;
         meta.displayName(weapon.formName(form));
         meta.lore(weapon.formLore(form));
+        // Fresh slate: the old True-Form Blockbench model was removed, so wear no custom model data. This
+        // also scrubs any residual "laev_true" tag off items forged before the model was pulled. Re-add a
+        // case here once a new texture is embedded.
+        var cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(java.util.List.of());
+        meta.setCustomModelDataComponent(cmd);
         held.setItemMeta(meta);
         player.getInventory().setItemInMainHand(held);
     }
