@@ -69,28 +69,27 @@ public final class Engine {
         double stabilityGoingIn = pot.stability();
         pot.incrementAdds();
 
-        // Handling: escalating with add count, plus the reagent's own drip. Milk washes existing noise first.
-        if (r.noiseScale() != 1.0) pot.setNoise(pot.noise() * r.noiseScale());
+        // Handling: every touch of the volatile pot dirties it a little (escalating). This lands whether or
+        // not the reagent enters cleanly — you disturbed the batch either way.
         double handling = HANDLING_BASE * (1.0 + HANDLING_ESCALATION * (pot.adds() - 1));
-        pot.addNoise(handling + r.contam());
-
-        // Ceiling: your worst reagent caps the batch.
-        pot.capCeiling(r.tierCeiling());
-
-        // Stability move (signed) then the reagent's own cost is already in stab.
-        pot.addStability(r.stab());
+        pot.addNoise(handling);
 
         // Step-failure roll — worse when you were already shaky and the reagent runs hot.
         double pFail = STEP_BASE * (1.0 - stabilityGoingIn / 100.0) * r.failFactor();
         boolean failed = rng.nextDouble() < pFail;
 
         if (failed) {
-            // The reagent slips — wasted. It never entered the pot; you eat noise + a stability hit.
+            // Slipped — the reagent never entered the pot. None of its own effects apply (no composition,
+            // no contamination, no ceiling cap, no stability cost); you eat only the fumble's toll.
             pot.addNoise(FAIL_NOISE);
             pot.addStability(-FAIL_STAB);
         } else {
-            // Solvents scale first (dilution), then the additive shift lands.
-            if (r.chargeScale() != 1.0) pot.scaleCharge(r.chargeScale());
+            // It went in cleanly: its contamination, ceiling cap, stability cost, dilution and shift all land.
+            if (r.noiseScale() != 1.0) pot.setNoise(pot.noise() * r.noiseScale()); // milk washes noise
+            pot.addNoise(r.contam());
+            pot.capCeiling(r.tierCeiling());
+            pot.addStability(r.stab());
+            if (r.chargeScale() != 1.0) pot.scaleCharge(r.chargeScale()); // solvent dilution
             applyDelta(pot, r, rng);
         }
 

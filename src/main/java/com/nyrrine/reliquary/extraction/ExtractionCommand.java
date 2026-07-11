@@ -6,6 +6,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Sound;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
@@ -132,19 +133,32 @@ public final class ExtractionCommand {
         }
 
         Engine.AddResult result = Engine.addReagent(st, r, ThreadLocalRandom.current());
-        writeVial(player, v);
 
         if (result.breached()) {
-            player.sendMessage(msg("The pot RUPTURES — stability hit zero. Pour now and it breaches.",
-                    NamedTextColor.RED));
-        } else if (result.stepFailed()) {
-            player.sendMessage(msg("Your hand slips — the " + r.display() + " is wasted. Steady, and retry.",
+            // Stability bottomed out — the pot ruptures and the whole batch is lost.
+            destroyVial(player, v);
+            player.playSound(player.getLocation(), Sound.BLOCK_GLASS_BREAK, 1.0f, 0.7f);
+            player.playSound(player.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 0.4f, 1.5f);
+            player.sendMessage(msg("The pot RUPTURES — stability hit zero and the batch is LOST. "
+                    + "Buffer with amethyst_shard before it bottoms out.", NamedTextColor.RED));
+            return;
+        }
+
+        writeVial(player, v);
+        if (result.stepFailed()) {
+            player.sendMessage(msg("Your hand slips — the " + r.display() + " never enters the pot (wasted). "
+                    + "The batch survives, but the fumble cost a little purity + stability. Retry.",
                     NamedTextColor.GOLD));
         } else {
             player.sendMessage(msg("Added " + r.display() + ".", GREEN));
         }
         showGauges(player, st);
         showNearest(player, st);
+    }
+
+    private void destroyVial(Player player, Vial v) {
+        if (v.slot() < 0) player.getInventory().setItemInMainHand(null);
+        else player.getInventory().setItem(v.slot(), null);
     }
 
     // ---- assay + lectern -----------------------------------------------------------
