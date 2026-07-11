@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.random.RandomGenerator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -198,8 +199,26 @@ class EngineTest {
     }
 
     @Test
+    void vialCapRefusesFurtherVolumeButAllowsUtilities() {
+        // The finite-vessel guard: a single vial fills up, forcing distill/blend for more volume (WAW).
+        PotState pot = new PotState();
+        RandomGenerator rng = seeded();
+        boolean hitFull = false;
+        for (int i = 0; i < 300; i++) {
+            if (Engine.addReagent(pot, Reagents.LAPIS_LAZULI, rng).full()) { hitFull = true; break; }
+        }
+        assertTrue(hitFull, "repeated volume adds should hit the vial cap");
+        assertTrue(pot.titer() >= Engine.VIAL_CAP, "cap reached, titer=" + pot.titer());
+
+        double titerAtCap = pot.titer();
+        Engine.AddResult buffered = Engine.addReagent(pot, Reagents.AMETHYST_SHARD, rng); // a utility
+        assertFalse(buffered.full(), "buffers/solvents are allowed even at the cap");
+        assertEquals(titerAtCap, pot.titer(), 1.0e-9, "a buffer adds no volume");
+    }
+
+    @Test
     void reagentTableIsFullyRegistered() {
-        assertEquals(29, Reagents.count(), "the full starter fingerprint table should be present");
+        assertEquals(30, Reagents.count(), "the full starter fingerprint table should be present");
         assertNotNull(Reagents.byId("knell_extract"));
         assertSame(Reagent.Tier.STANDARD, Reagents.KNELL_EXTRACT.tier());
         assertTrue(Reagents.BLAZE_ROD.isVolatile());

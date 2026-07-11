@@ -395,8 +395,8 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         if (args[0].equalsIgnoreCase("ext") || args[0].equalsIgnoreCase("extraction")
                 || args[0].equalsIgnoreCase("cogito")) {
             if (args.length == 2) {
-                return filter(List.of("vial", "fuel", "reagents", "add", "assay", "lectern", "distill", "pour"),
-                        args[1]);
+                return filter(List.of("vial", "fuel", "reagents", "add", "assay", "lectern", "distill",
+                        "blend", "pour"), args[1]);
             }
             if (args.length == 3 && (args[1].equalsIgnoreCase("add") || args[1].equalsIgnoreCase("lectern"))) {
                 return filter(ExtractionCommand.reagentIds(), args[2]);

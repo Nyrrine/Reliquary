@@ -52,6 +52,7 @@ public final class ExtractionCommand {
             case "assay"    -> assay(player);
             case "lectern"  -> lectern(player, args);
             case "distill"  -> distill(player);
+            case "blend"    -> blend(player);
             case "pour"     -> pour(player, args);
             default          -> help(player);
         }
@@ -89,6 +90,16 @@ public final class ExtractionCommand {
         ItemStack held = player.getInventory().getItemInMainHand();
         PotState st = Cogito.read(held);
         if (st == null) { player.sendMessage(msg("Hold a Cogito vial to work it.", NamedTextColor.RED)); return; }
+
+        if (st.titer() >= Engine.VIAL_CAP) {
+            Engine.AddResult probe = Engine.addReagent(st.copy(), r, new java.util.Random(0L));
+            if (probe.full()) {
+                player.sendMessage(msg(String.format(
+                        "The vial is full (%.0f titer cap). Distill it, or blend several vials for more volume.",
+                        Engine.VIAL_CAP), NamedTextColor.RED));
+                return;
+            }
+        }
 
         Engine.AddResult result = Engine.addReagent(st, r, ThreadLocalRandom.current());
         Cogito.write(held, st);
@@ -151,6 +162,31 @@ public final class ExtractionCommand {
         player.sendMessage(msg(String.format("Distilled — noise %.1f -> %.1f (pass %d).",
                 before, st.noise(), st.distillPasses()), GREEN));
         showGauges(player, st);
+    }
+
+    // ---- the Manifold: blend -------------------------------------------------------
+
+    private void blend(Player player) {
+        ItemStack[] contents = player.getInventory().getContents();
+        List<PotState> pots = new ArrayList<>();
+        List<Integer> slots = new ArrayList<>();
+        for (int i = 0; i < contents.length; i++) {
+            PotState st = Cogito.read(contents[i]);
+            if (st == null || st.isBlank()) continue;
+            for (int c = 0; c < contents[i].getAmount(); c++) pots.add(st.copy());
+            slots.add(i);
+        }
+        if (pots.size() < 2) {
+            player.sendMessage(msg("Carry at least two charged vials to blend (the stock-solution route).",
+                    NamedTextColor.RED));
+            return;
+        }
+        PotState blended = Engine.blend(pots);
+        for (int s : slots) player.getInventory().setItem(s, null);
+        player.getInventory().addItem(Cogito.create(blended));
+        player.sendMessage(msg("Blended " + pots.size() + " vials at the Manifold.", GREEN));
+        player.sendMessage(assayLine(blended.profile()));
+        showGauges(player, blended);
     }
 
     // ---- the Well: pour ------------------------------------------------------------
@@ -271,6 +307,7 @@ public final class ExtractionCommand {
         line(player, "assay", "reveal the held vial's composition");
         line(player, "lectern <id>", "what-if: project a reagent without committing");
         line(player, "distill", "run the held vial through the Centrifuge");
+        line(player, "blend", "blend all charged vials you carry (the Manifold)");
         line(player, "pour [catalystId]", "pour into the Well — manifest / near-miss / breach");
     }
 

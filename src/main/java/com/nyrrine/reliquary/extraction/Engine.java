@@ -21,7 +21,7 @@ public final class Engine {
     // ---- tuning constants (§25 — starter, tune in playtest) ------------------------
 
     /** Base handling contamination per add. */
-    public static final double HANDLING_BASE = 0.4;
+    public static final double HANDLING_BASE = 0.30;
     /** Each add's handling grows by this fraction over the previous (escalating — the anti-spam core). */
     public static final double HANDLING_ESCALATION = 0.15;
     /** Opposition drain per point of the smaller share of an opposed pair, per add. */
@@ -40,20 +40,29 @@ public final class Engine {
     public static final double DISTILL_DECAY = 0.6;
     /** Stability a distillation pass restores (locking the batch). */
     public static final double DISTILL_STAB = 4.0;
-    /** Extra contamination a blend introduces. */
-    public static final double BLEND_PENALTY = 2.0;
+    /** Extra contamination a blend introduces. Kept small so clean stocks blend clean (§11). */
+    public static final double BLEND_PENALTY = 0.5;
     /** Below this stability, an unstable pot drifts toward noise between touches. */
     public static final double DRIFT_FLOOR = 40.0;
+    /** A single vial's volume ceiling — you run out of flask (anti-spam guard #4). Bigger = blend vials. */
+    public static final double VIAL_CAP = 120.0;
 
     /** Outcome of a single reagent addition, for the station to narrate. */
-    public record AddResult(boolean stepFailed, boolean breached, double stabilityAfter) {}
+    public record AddResult(boolean full, boolean stepFailed, boolean breached, double stabilityAfter) {}
 
     /**
      * Add a reagent to a pot (the Censer operation). Mutates {@code pot}. Handling contamination and the
      * ceiling cap always apply (you touched it); on a step failure the composition change is wasted and
      * the slip spikes noise + stability instead. {@code rng} drives the volatile roll and the failure roll.
+     *
+     * <p>A vial that has hit {@link #VIAL_CAP} refuses further reagent — you've run out of flask, and must
+     * distill or blend to go bigger (this is what pushes high-volume WAW work onto the stock-solution route).
+     * Solvents/buffers (no positive charge) are still allowed so you can always dilute or steady a full vial.
      */
     public static AddResult addReagent(PotState pot, Reagent r, RandomGenerator rng) {
+        if (pot.titer() >= VIAL_CAP && addsVolume(r)) {
+            return new AddResult(true, false, pot.stability() <= 0.0, pot.stability());
+        }
         double stabilityGoingIn = pot.stability();
         pot.incrementAdds();
 
@@ -86,7 +95,14 @@ public final class Engine {
         applyOppositionDrain(pot, OPPOSITION_DRAIN);
 
         boolean breached = pot.stability() <= 0.0;
-        return new AddResult(failed, breached, pot.stability());
+        return new AddResult(false, failed, breached, pot.stability());
+    }
+
+    /** Whether a reagent contributes positive charge (so it counts against the vial cap). */
+    private static boolean addsVolume(Reagent r) {
+        if (r.isVolatile()) return true;
+        for (double d : r.delta()) if (d > 0.0) return true;
+        return false;
     }
 
     private static void applyDelta(PotState pot, Reagent r, RandomGenerator rng) {

@@ -123,6 +123,11 @@ public final class Reagents {
     public static final Reagent ROTTEN_FLESH = reg(Reagent.of("rotten_flesh", "Rotten Flesh")
             .delta(GLUTTONY, 7).delta(SLOTH, 2).contam(3).stab(-1).tier(CRUDE)
             .source("zombies — dirty bulk").build());
+    // Pure Gluttony — added to complete the hub's tier ladder so Gluttony-dominant WAW weapons (Green Stem)
+    // can reach Analytical. NAME/SOURCE PROVISIONAL — retune to taste.
+    public static final Reagent RAVENING_DRAUGHT = reg(Reagent.of("ravening_draught", "Ravening Draught")
+            .delta(GLUTTONY, 11).contam(0.1).stab(-14).tier(PURE)
+            .source("slime + honey chain").build());
 
     // ---- Utilities: buffers, solvents, panic reset ---------------------------------
     public static final Reagent AMETHYST_SHARD = reg(Reagent.of("amethyst_shard", "Amethyst Shard")
