@@ -123,6 +123,13 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         PluginCommand cmd = getCommand("reliquary");
         if (cmd != null) cmd.setTabCompleter(this);
 
+        // The short extraction command (/cogito, aliases /ext /co) shares this class as executor + completer.
+        PluginCommand cogito = getCommand("cogito");
+        if (cogito != null) {
+            cogito.setExecutor(this);
+            cogito.setTabCompleter(this);
+        }
+
         getLogger().info("Reliquary opens. Its relics stir.");
     }
 
@@ -154,6 +161,12 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
             return true;
         }
 
+        // /cogito (aliases /ext /co): args ARE the extraction sub-args directly.
+        if (command.getName().equalsIgnoreCase("cogito")) {
+            extraction.handle(sender, args);
+            return true;
+        }
+
         if (args.length == 0 || args[0].equalsIgnoreCase("help")) {
             sendHelp(sender);
             return true;
@@ -170,7 +183,8 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
             case "admin" -> adminGive(sender, args);
             case "track" -> trackCmd(sender);
             case "purge" -> purgeCmd(sender, args);
-            case "ext", "extraction", "cogito" -> extraction.handle(sender, args);
+            case "ext", "extraction", "cogito" ->
+                    extraction.handle(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
             default -> sendHelp(sender);
         }
         return true;
@@ -389,22 +403,18 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
                                       @NotNull String alias, @NotNull String[] args) {
         if (!sender.hasPermission(PERMISSION)) return Collections.emptyList();
 
+        // /cogito (aliases /ext /co): args ARE the extraction sub-args.
+        if (command.getName().equalsIgnoreCase("cogito")) {
+            return extraction.tabComplete(args);
+        }
+
         if (args.length == 1) {
             return filter(List.of("give", "giveall", "admin", "list", "track", "purge", "ext", "help"), args[0]);
         }
+        // /reliquary ext ...: hand the tail (sub-args) to the extraction completer.
         if (args[0].equalsIgnoreCase("ext") || args[0].equalsIgnoreCase("extraction")
                 || args[0].equalsIgnoreCase("cogito")) {
-            if (args.length == 2) {
-                return filter(List.of("vial", "fuel", "reagents", "add", "assay", "lectern", "distill",
-                        "blend", "pour"), args[1]);
-            }
-            if (args.length == 3 && (args[1].equalsIgnoreCase("add") || args[1].equalsIgnoreCase("lectern"))) {
-                return filter(ExtractionCommand.reagentIds(), args[2]);
-            }
-            if (args.length == 3 && args[1].equalsIgnoreCase("pour")) {
-                return filter(ExtractionCommand.weaponIds(), args[2]);
-            }
-            return Collections.emptyList();
+            return extraction.tabComplete(java.util.Arrays.copyOfRange(args, 1, args.length));
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("giveall")) {
             return filter(List.of("relics", "egoequipment", "busego"), args[1]);

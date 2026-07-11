@@ -8,6 +8,10 @@ commands:
   reliquary:
     description: Manage and hand out relics.
     usage: /reliquary help
+  cogito:
+    description: The Cogito extraction testbed.
+    usage: /cogito help
+    aliases: [ext, co]
 permissions:
   reliquary.admin:
     description: Access to Reliquary's relic commands.

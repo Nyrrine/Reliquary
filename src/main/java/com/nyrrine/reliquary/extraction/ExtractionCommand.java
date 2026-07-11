@@ -21,8 +21,8 @@ import java.util.concurrent.ThreadLocalRandom;
  * add reagents to it (the Censer), consult the lectern's what-if, distill (the Centrifuge), and pour it into
  * the Well to manifest, near-miss, or breach.
  *
- * <p>Lives under the operator-only {@code /reliquary ext ...} subcommand. Operates on the Cogito potion in
- * the player's main hand.
+ * <p>Reached via the short {@code /cogito <sub> ...} command (aliases {@code /ext}, {@code /co}) or the
+ * equivalent {@code /reliquary ext <sub> ...}. Operates on the Cogito potion in the player's main hand.
  */
 public final class ExtractionCommand {
 
@@ -36,37 +36,70 @@ public final class ExtractionCommand {
     private static final TextColor GREY  = NamedTextColor.GRAY;
     private static final TextColor FAINT = TextColor.color(0x7A7A84);
 
-    /** Dispatch {@code /reliquary ext <sub> ...}. {@code args} is the full command args (args[0] == "ext"). */
-    public void handle(CommandSender sender, String[] args) {
+    /** The subcommands, in help/tab order. */
+    private static final List<String> SUBS = List.of(
+            "vial", "fuel", "reagents", "add", "assay", "lectern", "distill", "blend", "pour");
+
+    /**
+     * Dispatch an extraction subcommand. {@code a} is the sub-args where {@code a[0]} is the subcommand name
+     * and {@code a[1]...} its parameters — so both {@code /cogito add x} and {@code /reliquary ext add x}
+     * feed the same array shape here.
+     */
+    public void handle(CommandSender sender, String[] a) {
         if (!(sender instanceof Player player)) {
             sender.sendMessage(Component.text("Extraction is a player command.").color(NamedTextColor.RED));
             return;
         }
-        if (args.length < 2) { help(player); return; }
+        if (a.length < 1) { help(player); return; }
 
-        switch (args[1].toLowerCase()) {
+        switch (a[0].toLowerCase()) {
             case "vial"     -> giveVial(player);
-            case "fuel"     -> giveFuel(player, args);
+            case "fuel"     -> giveFuel(player, a);
             case "reagents" -> listReagents(player);
-            case "add"      -> add(player, args);
+            case "add"      -> add(player, a);
             case "assay"    -> assay(player);
-            case "lectern"  -> lectern(player, args);
+            case "lectern"  -> lectern(player, a);
             case "distill"  -> distill(player);
             case "blend"    -> blend(player);
-            case "pour"     -> pour(player, args);
+            case "pour"     -> pour(player, a);
             default          -> help(player);
         }
+    }
+
+    /** Tab completion for the extraction subcommands. {@code a[0]} = subcommand, {@code a[1]} = its arg. */
+    public List<String> tabComplete(String[] a) {
+        if (a.length == 1) return filter(SUBS, a[0]);
+        if (a.length == 2 && (a[0].equalsIgnoreCase("add") || a[0].equalsIgnoreCase("lectern"))) {
+            return filter(reagentIds(), a[1]);
+        }
+        if (a.length == 2 && a[0].equalsIgnoreCase("pour")) {
+            return filter(weaponIds(), a[1]);
+        }
+        return List.of();
+    }
+
+    private static List<String> filter(List<String> options, String prefix) {
+        String p = prefix.toLowerCase();
+        List<String> out = new ArrayList<>();
+        for (String o : options) if (o.toLowerCase().startsWith(p)) out.add(o);
+        return out;
     }
 
     // ---- item dispensers -----------------------------------------------------------
 
     private void giveVial(Player player) {
-        player.getInventory().addItem(Cogito.create(new PotState()));
-        player.sendMessage(msg("A blank Cogito vial forms in your hand.", GREEN));
+        ItemStack vial = Cogito.create(new PotState());
+        // Land it in the main hand when free, so the very next `add` just works.
+        if (player.getInventory().getItemInMainHand().getType().isAir()) {
+            player.getInventory().setItemInMainHand(vial);
+        } else {
+            player.getInventory().addItem(vial);
+        }
+        player.sendMessage(msg("A blank Cogito vial forms.", GREEN));
     }
 
-    private void giveFuel(Player player, String[] args) {
-        int n = parseInt(args, 2, 16);
+    private void giveFuel(Player player, String[] a) {
+        int n = parseInt(a, 1, 16);
         player.getInventory().addItem(Enkephalin.create(n));
         player.sendMessage(msg("Drew " + n + " Enkephalin.", GREEN));
     }
@@ -82,28 +115,24 @@ public final class ExtractionCommand {
 
     // ---- the Censer: add a reagent -------------------------------------------------
 
-    private void add(Player player, String[] args) {
-        if (args.length < 3) { player.sendMessage(msg("Usage: /reliquary ext add <reagentId>", GREY)); return; }
-        Reagent r = Reagents.byId(args[2].toLowerCase());
-        if (r == null) { player.sendMessage(msg("No such reagent: " + args[2], NamedTextColor.RED)); return; }
+    private void add(Player player, String[] a) {
+        if (a.length < 2) { player.sendMessage(msg("Usage: /cogito add <reagentId>", GREY)); return; }
+        Reagent r = Reagents.byId(a[1].toLowerCase());
+        if (r == null) { player.sendMessage(msg("No such reagent: " + a[1], NamedTextColor.RED)); return; }
 
-        ItemStack held = player.getInventory().getItemInMainHand();
-        PotState st = Cogito.read(held);
-        if (st == null) { player.sendMessage(msg("Hold a Cogito vial to work it.", NamedTextColor.RED)); return; }
+        Vial v = locateVial(player);
+        if (v == null) { noVial(player); return; }
+        PotState st = v.state();
 
-        if (st.titer() >= Engine.VIAL_CAP) {
-            Engine.AddResult probe = Engine.addReagent(st.copy(), r, new java.util.Random(0L));
-            if (probe.full()) {
-                player.sendMessage(msg(String.format(
-                        "The vial is full (%.0f titer cap). Distill it, or blend several vials for more volume.",
-                        Engine.VIAL_CAP), NamedTextColor.RED));
-                return;
-            }
+        if (st.titer() >= Engine.VIAL_CAP && Engine.addReagent(st.copy(), r, new java.util.Random(0L)).full()) {
+            player.sendMessage(msg(String.format(
+                    "The vial is full (%.0f titer cap). Distill it, or blend several vials for more volume.",
+                    Engine.VIAL_CAP), NamedTextColor.RED));
+            return;
         }
 
         Engine.AddResult result = Engine.addReagent(st, r, ThreadLocalRandom.current());
-        Cogito.write(held, st);
-        player.getInventory().setItemInMainHand(held);
+        writeVial(player, v);
 
         if (result.breached()) {
             player.sendMessage(msg("The pot RUPTURES — stability hit zero. Pour now and it breaches.",
@@ -127,10 +156,10 @@ public final class ExtractionCommand {
         showGauges(player, st);
     }
 
-    private void lectern(Player player, String[] args) {
-        if (args.length < 3) { player.sendMessage(msg("Usage: /reliquary ext lectern <reagentId>", GREY)); return; }
-        Reagent r = Reagents.byId(args[2].toLowerCase());
-        if (r == null) { player.sendMessage(msg("No such reagent: " + args[2], NamedTextColor.RED)); return; }
+    private void lectern(Player player, String[] a) {
+        if (a.length < 2) { player.sendMessage(msg("Usage: /cogito lectern <reagentId>", GREY)); return; }
+        Reagent r = Reagents.byId(a[1].toLowerCase());
+        if (r == null) { player.sendMessage(msg("No such reagent: " + a[1], NamedTextColor.RED)); return; }
         PotState st = held(player);
         if (st == null) return;
 
@@ -152,13 +181,12 @@ public final class ExtractionCommand {
     // ---- the Centrifuge: distill ---------------------------------------------------
 
     private void distill(Player player) {
-        ItemStack heldItem = player.getInventory().getItemInMainHand();
-        PotState st = Cogito.read(heldItem);
-        if (st == null) { player.sendMessage(msg("Hold a Cogito vial to distill.", NamedTextColor.RED)); return; }
+        Vial v = locateVial(player);
+        if (v == null) { noVial(player); return; }
+        PotState st = v.state();
         double before = st.noise();
         Engine.distill(st);
-        Cogito.write(heldItem, st);
-        player.getInventory().setItemInMainHand(heldItem);
+        writeVial(player, v);
         player.sendMessage(msg(String.format("Distilled — noise %.1f -> %.1f (pass %d).",
                 before, st.noise(), st.distillPasses()), GREEN));
         showGauges(player, st);
@@ -191,18 +219,21 @@ public final class ExtractionCommand {
 
     // ---- the Well: pour ------------------------------------------------------------
 
-    private void pour(Player player, String[] args) {
-        ItemStack heldItem = player.getInventory().getItemInMainHand();
-        PotState st = Cogito.read(heldItem);
-        if (st == null) { player.sendMessage(msg("Hold a Cogito vial to pour.", NamedTextColor.RED)); return; }
+    private void pour(Player player, String[] a) {
+        Vial v = locateVial(player);
+        if (v == null) { noVial(player); return; }
+        PotState st = v.state();
         if (st.isBlank()) { player.sendMessage(msg("The vial is empty.", NamedTextColor.RED)); return; }
 
-        String catalyst = args.length >= 3 ? args[2].toLowerCase() : null;
+        String catalyst = a.length >= 2 ? a[1].toLowerCase() : null;
         WellRoll.Result r = WellRoll.resolve(st, catalyst, 0.0, ThreadLocalRandom.current());
 
-        // The pour consumes the vial.
-        heldItem.setAmount(heldItem.getAmount() - 1);
-        player.getInventory().setItemInMainHand(heldItem.getAmount() <= 0 ? null : heldItem);
+        // The pour consumes one vial from wherever it was found.
+        ItemStack item = v.item();
+        item.setAmount(item.getAmount() - 1);
+        ItemStack remainder = item.getAmount() <= 0 ? null : item;
+        if (v.slot() < 0) player.getInventory().setItemInMainHand(remainder);
+        else player.getInventory().setItem(v.slot(), remainder);
 
         switch (r.outcome()) {
             case MANIFEST -> onManifest(player, r);
@@ -249,9 +280,36 @@ public final class ExtractionCommand {
     // ---- shared helpers ------------------------------------------------------------
 
     private PotState held(Player player) {
-        PotState st = Cogito.read(player.getInventory().getItemInMainHand());
-        if (st == null) player.sendMessage(msg("Hold a Cogito vial first.", NamedTextColor.RED));
-        return st;
+        Vial v = locateVial(player);
+        if (v == null) { noVial(player); return null; }
+        return v.state();
+    }
+
+    /** A located vial: its stack, the slot it lives in ({@code -1} = main hand), and its decoded state. */
+    private record Vial(ItemStack item, int slot, PotState state) {}
+
+    /** The Cogito vial in the main hand, else the first one anywhere in the inventory, else {@code null}. */
+    private Vial locateVial(Player player) {
+        ItemStack main = player.getInventory().getItemInMainHand();
+        PotState st = Cogito.read(main);
+        if (st != null) return new Vial(main, -1, st);
+        ItemStack[] contents = player.getInventory().getContents();
+        for (int i = 0; i < contents.length; i++) {
+            PotState s = Cogito.read(contents[i]);
+            if (s != null) return new Vial(contents[i], i, s);
+        }
+        return null;
+    }
+
+    /** Persist a mutated vial back to wherever it lives. */
+    private void writeVial(Player player, Vial v) {
+        Cogito.write(v.item(), v.state());
+        if (v.slot() < 0) player.getInventory().setItemInMainHand(v.item());
+        else player.getInventory().setItem(v.slot(), v.item());
+    }
+
+    private void noVial(Player player) {
+        player.sendMessage(msg("No Cogito vial found — run /cogito vial first.", NamedTextColor.RED));
     }
 
     private WeaponSpec nearest(PotState st) {
@@ -299,8 +357,8 @@ public final class ExtractionCommand {
     }
 
     private void help(Player player) {
-        player.sendMessage(msg("Extraction (testbed) — /reliquary ext ...", NamedTextColor.WHITE));
-        line(player, "vial", "brew a blank Cogito vial");
+        player.sendMessage(msg("Cogito extraction (testbed) — /cogito ...  (tab-completes)", NamedTextColor.WHITE));
+        line(player, "vial", "brew a blank Cogito vial (into your hand)");
         line(player, "fuel [n]", "draw Enkephalin");
         line(player, "reagents", "list reagent ids");
         line(player, "add <id>", "add a reagent to the held vial (the Censer)");
@@ -312,7 +370,7 @@ public final class ExtractionCommand {
     }
 
     private void line(Player player, String cmd, String desc) {
-        player.sendMessage(Component.text("  /reliquary ext " + cmd, GREY)
+        player.sendMessage(Component.text("  /cogito " + cmd, GREY)
                 .append(Component.text("  — " + desc, FAINT)));
     }
 
