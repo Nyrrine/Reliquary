@@ -92,9 +92,7 @@ public final class WeaponSignatures {
     public static final WeaponSpec HEAVEN = reg("heaven", "Heaven", WAW,
             SinProfile.builder().add(PRIDE, 80).add(WRATH, 20).build());
 
-    // ---- Bus E.G.O (grade assigned HE pending final call) ----
-    public static final WeaponSpec FLOWER_BURYING_WEDGE = reg("flower_burying_wedge", "Flower Burying Wedge", HE,
-            SinProfile.builder().add(GLOOM, 50).add(SLOTH, 30).add(GLUTTONY, 20).build());
+    // The bus E.G.O (Flower Burying Wedge) is NOT here — it's earned through its own mechanic, not the Well.
 
     /** Look a weapon up by id, or {@code null}. */
     public static WeaponSpec byId(String id) { return REGISTRY.get(id); }

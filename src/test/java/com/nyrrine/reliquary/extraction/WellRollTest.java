@@ -33,7 +33,7 @@ class WellRollTest {
 
     @Test
     void rosterIsFullyRegistered() {
-        assertEquals(25, WeaponSignatures.count(), "the full §27 roster (24 E.G.O + bus ego)");
+        assertEquals(24, WeaponSignatures.count(), "the full Well roster (24 E.G.O; bus ego is not Well-obtainable)");
         assertNotNull(WeaponSignatures.byId("solemn_lament"));
         assertSame(EgoGrade.WAW, WeaponSignatures.SOLEMN_LAMENT.grade());
     }
