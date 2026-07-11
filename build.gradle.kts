@@ -13,12 +13,22 @@ repositories {
 dependencies {
     // Paper 26.1.2 API (Mojang-mapped). compileOnly: the server provides it at runtime.
     compileOnly("io.papermc.paper:paper-api:26.1.2.build.74-stable")
+
+    // Headless unit tests for the extraction chemistry. The engine math is server-free, but the model
+    // enums carry Adventure colours, so the API is needed on the test classpath (it isn't at runtime).
+    testImplementation("io.papermc.paper:paper-api:26.1.2.build.74-stable")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(25))
     }
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks.processResources {

@@ -24,6 +24,7 @@ public final class PotState {
     private double noise = 0.0;       // accumulated contamination
     private double stability = 100.0; // breach gauge, 0–100
     private int adds = 0;             // reagent additions so far
+    private int distillPasses = 0;    // Centrifuge passes — drives diminishing distill returns
 
     /** A fresh blank pot: no composition, pristine gauges. */
     public PotState() {}
@@ -66,6 +67,10 @@ public final class PotState {
     public void setAdds(int v) { adds = Math.max(0, v); }
     public void incrementAdds() { adds++; }
 
+    public int distillPasses() { return distillPasses; }
+    public void setDistillPasses(int v) { distillPasses = Math.max(0, v); }
+    public void incrementDistillPasses() { distillPasses++; }
+
     // ---- derived ------------------------------------------------------------------
 
     /** Total charge across all sins — the pot's concentration / volume. */
@@ -95,6 +100,7 @@ public final class PotState {
         c.noise = noise;
         c.stability = stability;
         c.adds = adds;
+        c.distillPasses = distillPasses;
         return c;
     }
 
