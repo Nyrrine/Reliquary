@@ -1,0 +1,95 @@
+package com.nyrrine.reliquary.extraction;
+
+import org.junit.jupiter.api.Test;
+
+import java.util.random.RandomGenerator;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Headless tests for the Pocket Well resolution — the anti-luck guarantees the design leans on: the grade
+ * floor and volume gate seal luck inside your band, a Certified pour is a guaranteed manifest, and
+ * over-reaching breaches at the tier you reached for.
+ */
+class WellRollTest {
+
+    private static RandomGenerator seeded() { return new java.util.Random(99L); }
+
+    /** Build a pot at a target composition, volume, and purity (noise = 100 − purity, ceiling stays 100). */
+    private static PotState pour(SinProfile sig, double titer, double purity, double stability) {
+        PotState p = new PotState();
+        for (Sin s : Sin.values()) p.setCharge(s, sig.get(s) / 100.0 * titer);
+        p.setNoise(100.0 - purity);
+        p.setStability(stability);
+        return p;
+    }
+
+    @Test
+    void rosterIsFullyRegistered() {
+        assertEquals(25, WeaponSignatures.count(), "the full §27 roster (24 E.G.O + bus ego)");
+        assertNotNull(WeaponSignatures.byId("solemn_lament"));
+        assertSame(EgoGrade.WAW, WeaponSignatures.SOLEMN_LAMENT.grade());
+    }
+
+    @Test
+    void certifiedPourIsGuaranteedManifestOfTheCatalystTarget() {
+        // On-target WAW cogito at Primary Standard, big volume, catalyst loaded → guaranteed Solemn Lament.
+        PotState p = pour(WeaponSignatures.SOLEMN_LAMENT.signature(), 1000, 99.5, 85);
+        WellRoll.Result r = WellRoll.resolve(p, "solemn_lament", 0.0, seeded());
+
+        assertSame(WellRoll.Outcome.MANIFEST, r.outcome());
+        assertEquals("solemn_lament", r.weapon().id());
+        assertTrue(r.certified(), "Primary Standard + locked catalyst should certify");
+    }
+
+    @Test
+    void gradeFloorSealsWawOutOfSubAnalyticalPours() {
+        // Perfect Solemn Lament composition but only Reagent grade (88%) → WAW is not in the bucket.
+        PotState p = pour(WeaponSignatures.SOLEMN_LAMENT.signature(), 1000, 88.0, 80);
+        WellRoll.Result r = WellRoll.resolve(p, null, 0.0, seeded());
+
+        assertNotNull(r.weapon());
+        assertNotSame(EgoGrade.WAW, r.weapon().grade(),
+                "sub-Analytical cogito must never reach a WAW weapon (got " + r.weapon().id() + ")");
+    }
+
+    @Test
+    void volumeGateSealsWawOutOfThinPours() {
+        // Analytical grade and a perfect signature, but only a single vial of volume → WAW volume-gated out.
+        PotState p = pour(WeaponSignatures.SOLEMN_LAMENT.signature(), 120, 97.0, 85);
+        WellRoll.Result r = WellRoll.resolve(p, null, 0.0, seeded());
+
+        assertNotNull(r.weapon());
+        assertNotSame(EgoGrade.WAW, r.weapon().grade(),
+                "a thin pour can't reach WAW even at Analytical grade (got " + r.weapon().id() + ")");
+    }
+
+    @Test
+    void overReachingWithACatalystBreachesAtTheAimedTier() {
+        // Muddy, scattered, unstable crude cogito but a WAW catalyst loaded → over-reach → WAW-class breach.
+        SinProfile scattered = SinProfile.builder()
+                .add(Sin.WRATH, 1).add(Sin.PRIDE, 1).add(Sin.LUST, 1).add(Sin.GLOOM, 1)
+                .add(Sin.SLOTH, 1).add(Sin.ENVY, 1).add(Sin.GLUTTONY, 1).build();
+        PotState p = pour(scattered, 1000, 45.0, 5);
+        WellRoll.Result r = WellRoll.resolve(p, "solemn_lament", 0.6, seeded());
+
+        assertSame(WellRoll.Outcome.BREACH, r.outcome());
+        assertSame(EgoGrade.WAW, r.aimedGrade(), "the catalyst declares WAW intent → WAW breach severity");
+    }
+
+    @Test
+    void cleanZayinPourCanManifestWithoutACatalyst() {
+        // A tidy single-cluster ZAYIN target at reagent grade should manifest on its own often enough.
+        PotState p = pour(WeaponSignatures.PENITENCE.signature(), 200, 92.0, 80);
+        WellRoll.Result r = WellRoll.resolve(p, null, 0.0, seeded());
+
+        // Reachable and a strong match — outcome is a weapon on the ZAYIN/low band, never a WAW.
+        assertNotNull(r.weapon());
+        assertTrue(r.weapon().grade().minCogito().atMost(Grade.of(92.0)));
+        assertTrue(r.match() > 0.9, "a clean on-target pour should match tightly, was " + r.match());
+    }
+}
