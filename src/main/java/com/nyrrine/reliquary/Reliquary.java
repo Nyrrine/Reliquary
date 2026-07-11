@@ -3,6 +3,8 @@ package com.nyrrine.reliquary;
 import com.nyrrine.reliquary.core.RelicTracker;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.core.WeaponManager;
+import com.nyrrine.reliquary.busego.weapons.FlowerBuryingWedgeReckoning;
+import com.nyrrine.reliquary.busego.weapons.FlowerBuryingWedgeWeapon;
 import com.nyrrine.reliquary.ego.weapons.BeakWeapon;
 import com.nyrrine.reliquary.ego.weapons.ChristmasWeapon;
 import com.nyrrine.reliquary.ego.weapons.CobaltScarWeapon;
@@ -100,11 +102,16 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         weapons.register(new HeavenWeapon(this));
         weapons.register(new LoveAndHateWeapon(this));
 
+        // ---- bus ego ----
+        FlowerBuryingWedgeWeapon flowerWedge = new FlowerBuryingWedgeWeapon(this);
+        weapons.register(flowerWedge);
+
         weapons.start();
         getServer().getPluginManager().registerEvents(new GungnirOffhandGuard(gungnir), this);
         getServer().getPluginManager().registerEvents(new GungnirVibration(gungnir), this);
         getServer().getPluginManager().registerEvents(new LaevateinnDoubleJump(this, laevateinn), this);
         getServer().getPluginManager().registerEvents(new LaevateinnMelee(laevateinn), this);
+        getServer().getPluginManager().registerEvents(new FlowerBuryingWedgeReckoning(flowerWedge), this);
 
         this.tracker = new RelicTracker(this);
         tracker.start();
@@ -211,23 +218,29 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
     }
 
     /**
-     * /reliquary giveall &lt;relics|egoequipment&gt; [player] — hand over every weapon of a category.
-     * Relics are the bespoke weapons (Arayashiki/Gungnir/Lævateinn); E.G.O equipment is the Lobotomy
-     * Corp roster (package {@code ego.weapons}). Each item is tracked + engaged like a normal give.
+     * /reliquary giveall &lt;relics|egoequipment|busego&gt; [player] — hand over every weapon of a category.
+     * Relics are the bespoke weapons (Arayashiki/Gungnir/Lævateinn); E.G.O equipment is the Lobotomy Corp
+     * roster (package {@code ego.weapons}); bus ego is the {@code busego.weapons} roster. Each item is
+     * tracked + engaged like a normal give.
      */
     private void giveAll(CommandSender sender, String[] args) {
         if (args.length < 2) {
-            sender.sendMessage(Component.text("Usage: /reliquary giveall <relics|egoequipment> [player]")
+            sender.sendMessage(Component.text("Usage: /reliquary giveall <relics|egoequipment|busego> [player]")
                     .color(NamedTextColor.GRAY));
             return;
         }
         String cat = args[1].toLowerCase();
-        boolean wantEgo;
-        if (cat.equals("egoequipment") || cat.equals("ego")) wantEgo = true;
-        else if (cat.equals("relics") || cat.equals("relic")) wantEgo = false;
-        else {
-            sender.sendMessage(Component.text("Category must be 'relics' or 'egoequipment'.").color(NamedTextColor.RED));
-            return;
+        String want;   // which package fragment identifies the category
+        String label;  // human label for the result message
+        switch (cat) {
+            case "egoequipment", "ego" -> { want = ".ego.weapons.";    label = "E.G.O equipment"; }
+            case "busego", "bus"       -> { want = ".busego.weapons."; label = "bus ego"; }
+            case "relics", "relic"     -> { want = "";                 label = "relic(s)"; }
+            default -> {
+                sender.sendMessage(Component.text("Category must be 'relics', 'egoequipment', or 'busego'.")
+                        .color(NamedTextColor.RED));
+                return;
+            }
         }
 
         Player target;
@@ -247,15 +260,24 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
 
         int given = 0;
         for (Weapon w : weapons.all()) {
-            boolean isEgo = w.getClass().getName().contains(".ego.weapons.");
-            if (isEgo != wantEgo) continue;
+            if (!inCategory(w, want)) continue;
             ItemStack item = tracker.register(w.createItem(), w.id(), target.getName());
             target.getInventory().addItem(item);
             weapons.engage(w, target.getUniqueId());
             given++;
         }
-        sender.sendMessage(Component.text("Gave " + given + " " + (wantEgo ? "E.G.O equipment" : "relic(s)")
-                + " to " + target.getName() + ".").color(NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("Gave " + given + " " + label + " to " + target.getName() + ".")
+                .color(NamedTextColor.GRAY));
+    }
+
+    /**
+     * Whether weapon {@code w} belongs to the category identified by package fragment {@code want}.
+     * An empty fragment means "relics" — anything in neither the ego nor the bus-ego package.
+     */
+    private static boolean inCategory(Weapon w, String want) {
+        String cls = w.getClass().getName();
+        if (want.isEmpty()) return !cls.contains(".ego.weapons.") && !cls.contains(".busego.weapons.");
+        return cls.contains(want);
     }
 
     /** /reliquary admin <id> [player] — give an admin/debug variant of a relic (if it has one). */
@@ -345,7 +367,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         help(sender, "/reliquary help", "this help");
         help(sender, "/reliquary list", "list relic ids");
         help(sender, "/reliquary give <id> [player]", "give a relic to yourself or a player");
-        help(sender, "/reliquary giveall <relics|egoequipment> [player]", "give every weapon of a category");
+        help(sender, "/reliquary giveall <relics|egoequipment|busego> [player]", "give every weapon of a category");
         help(sender, "/reliquary admin <id> [player]", "give an admin/debug variant (e.g. Worthy Lævateinn)");
         help(sender, "/reliquary track", "list every relic and who holds it");
         help(sender, "/reliquary purge <player>", "remove all relics from a player");
@@ -365,7 +387,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
             return filter(List.of("give", "giveall", "admin", "list", "track", "purge", "help"), args[0]);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("giveall")) {
-            return filter(List.of("relics", "egoequipment"), args[1]);
+            return filter(List.of("relics", "egoequipment", "busego"), args[1]);
         }
         if (args.length == 3 && args[0].equalsIgnoreCase("giveall")) {
             return filter(onlinePlayerNames(), args[2]);
