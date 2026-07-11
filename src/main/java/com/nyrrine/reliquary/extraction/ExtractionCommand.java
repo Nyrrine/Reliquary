@@ -154,6 +154,40 @@ public final class ExtractionCommand {
         player.sendMessage(msg("Assay:", NamedTextColor.WHITE));
         player.sendMessage(assayLine(st.profile()));
         showGauges(player, st);
+        showNearest(player, st);
+    }
+
+    /** Show the closest weapon by shape and, if it isn't reachable yet, what grade/volume it still needs. */
+    private void showNearest(Player player, PotState st) {
+        if (st.isBlank()) return;
+        WeaponSpec near = nearestAny(st);
+        if (near == null) return;
+        double m = near.matchOf(st.profile());
+        player.sendMessage(Component.text("  Closest shape: ", FAINT)
+                .append(Component.text(near.display(), NamedTextColor.WHITE))
+                .append(Component.text(" (" + near.grade().display() + ")  " + pct(m) + " match", FAINT)));
+
+        List<String> lacking = new ArrayList<>();
+        if (!near.grade().minCogito().atMost(st.grade())) {
+            lacking.add("grade >=" + near.grade().minCogito().display() + " (have " + st.grade().display() + ")");
+        }
+        if (st.titer() < near.grade().minVolume()) {
+            lacking.add(String.format("volume >=%.0f (have %.0f)", near.grade().minVolume(), st.titer()));
+        }
+        if (!lacking.isEmpty()) {
+            player.sendMessage(Component.text("    to reach it: " + String.join(", ", lacking), FAINT));
+        }
+    }
+
+    /** The closest weapon purely by composition, ignoring the grade/volume gates. */
+    private WeaponSpec nearestAny(PotState st) {
+        WeaponSpec best = null;
+        double bestMatch = -1;
+        for (WeaponSpec w : WeaponSignatures.all()) {
+            double mm = w.matchOf(st.profile());
+            if (mm > bestMatch) { bestMatch = mm; best = w; }
+        }
+        return best;
     }
 
     private void lectern(Player player, String[] a) {
@@ -228,6 +262,13 @@ public final class ExtractionCommand {
         String catalyst = a.length >= 2 ? a[1].toLowerCase() : null;
         WellRoll.Result r = WellRoll.resolve(st, catalyst, 0.0, ThreadLocalRandom.current());
 
+        // Too thin/crude to reach ANY weapon (nothing cleared the grade floor + volume gate). Rather than
+        // a cryptic breach, explain the shortfall and keep the vial — this is the testbed being helpful.
+        if (r.outcome() == WellRoll.Outcome.BREACH && r.weapon() == null) {
+            player.sendMessage(msg(thinPourReason(st, catalyst), NamedTextColor.RED));
+            return;
+        }
+
         // The pour consumes one vial from wherever it was found.
         ItemStack item = v.item();
         item.setAmount(item.getAmount() - 1);
@@ -240,9 +281,11 @@ public final class ExtractionCommand {
             case NEAR_MISS -> player.sendMessage(msg("Near-miss — the Well settles on "
                     + (r.weapon() != null ? r.weapon().display() : "nothing")
                     + " (" + pct(r.match()) + " match). No weapon this time.", NamedTextColor.YELLOW));
-            case BREACH -> player.sendMessage(msg("BREACH — the Well ruptures. A "
-                    + r.aimedGrade().display() + "-class Abnormality would climb out. (Combat: coming soon.)",
-                    NamedTextColor.RED));
+            case BREACH -> player.sendMessage(msg(String.format(
+                    "BREACH — the Well ruptures. A %s-class Abnormality would climb out. "
+                    + "(your pour: %s match, %s, stability %d) (Combat: coming soon.)",
+                    r.aimedGrade().display(), pct(r.match()), r.cogitoGrade().display(),
+                    Math.round(st.stability())), NamedTextColor.RED));
         }
     }
 
@@ -310,6 +353,18 @@ public final class ExtractionCommand {
 
     private void noVial(Player player) {
         player.sendMessage(msg("No Cogito vial found — run /cogito vial first.", NamedTextColor.RED));
+    }
+
+    /** Why a pour couldn't reach any weapon, with the concrete shortfall, so testers know what to fix. */
+    private String thinPourReason(PotState st, String catalyst) {
+        WeaponSpec tgt = catalyst != null ? WeaponSignatures.byId(catalyst) : null;
+        double minVol = tgt != null ? tgt.grade().minVolume() : EgoGrade.ZAYIN.minVolume();
+        Grade minGrade = tgt != null ? tgt.grade().minCogito() : EgoGrade.ZAYIN.minCogito();
+        String who = tgt != null ? tgt.display() : "anything (even a ZAYIN)";
+        return String.format(
+                "Too weak to manifest %s — you have %.0f volume at %.1f%% (%s); it needs >=%.0f volume and "
+                + ">=%s grade. Add much more reagent, or blend vials for volume. (Vial kept.)",
+                who, st.titer(), st.purity(), st.grade().display(), minVol, minGrade.display());
     }
 
     private WeaponSpec nearest(PotState st) {
