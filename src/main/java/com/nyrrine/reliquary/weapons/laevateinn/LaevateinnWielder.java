@@ -191,11 +191,10 @@ public final class LaevateinnWielder {
         if (meta == null) return;
         meta.displayName(weapon.formName(form));
         meta.lore(weapon.formLore(form));
-        // Fresh slate: the old True-Form Blockbench model was removed, so wear no custom model data. This
-        // also scrubs any residual "laev_true" tag off items forged before the model was pulled. Re-add a
-        // case here once a new texture is embedded.
+        // Each form wears its own custom model — the resource pack maps CMD "laev0".."laev3" to the four
+        // Blockbench models (sealed forms 0-2, True Form 3); fallback is a vanilla netherite sword.
         var cmd = meta.getCustomModelDataComponent();
-        cmd.setStrings(java.util.List.of());
+        cmd.setStrings(java.util.List.of("laev" + form));
         meta.setCustomModelDataComponent(cmd);
         held.setItemMeta(meta);
         player.getInventory().setItemInMainHand(held);
@@ -243,6 +242,9 @@ public final class LaevateinnWielder {
                         new Particle.DustOptions(LaevateinnVfx.PURPLE, 1.4f));
             }
         }
+        // A massive netherite-coloured break — erupting from the FEET and climbing up the blade.
+        LaevateinnVfx.netheriteUnseal(plugin, world, player.getLocation(), form);
+
         LaevateinnVfx.twinkle(world, o, 8);
     }
 

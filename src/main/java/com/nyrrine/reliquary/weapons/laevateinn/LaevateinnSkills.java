@@ -17,6 +17,7 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
 import org.joml.Quaternionf;
@@ -77,10 +78,8 @@ public final class LaevateinnSkills {
 
     // ---- Bullseye (True Form shift-right-click) ------------------------------------
     private static final long BULLSEYE_CD_MS = 90000L;    // 1:30
-    private static final double BULLSEYE_RANGE = 22.0;    // how far it can lock a target
-    /** Tight lock cone — you have to actually aim at them; only a little assist for laggy-server aim. */
-    private static final double BULLSEYE_LOCK_DOT = 0.97; // ~14° half-angle (was 0.08 ≈ auto-snap)
-    private static final double THROW_SPEED = 1.3;        // the flaming sword's flight
+    private static final double THROW_SPEED = 2.5;        // the flaming sword's flight (fast, knife-like)
+    private static final double SPIN_RATE = 1.15;         // radians/tick — a fast, consistent end-over-end tumble
     private static final int THROW_MAX_TICKS = 40;
     private static final int BULLSEYE_CHARGE_TICKS = 12;  // wind-up before the kick-off
     private static final double LEAP_SPEED = 1.6;
@@ -343,62 +342,80 @@ public final class LaevateinnSkills {
         // Admin (Worthy) mode gets a 2s cooldown for debugging; otherwise the full 1:30.
         final long cd = weapon.isWorthy(player.getInventory().getItemInMainHand()) ? 2000L : BULLSEYE_CD_MS;
 
-        // You have to aim it at someone now — only a little auto-aim. Whiff and the blade just comes
-        // home and refunds half the cooldown, so a missed throw isn't a full commitment.
-        LivingEntity locked = frontTarget(player, BULLSEYE_RANGE, BULLSEYE_LOCK_DOT);
-        if (locked == null) {
-            missThrow(player, id, cd);
-            return;
-        }
+        // A STRAIGHT throw — no pre-lock. The blade flies dead-ahead where you're facing (Murder-Mystery
+        // knife style) and pierces the first body in its path; whiff and it flies home for half the cooldown.
         weapon.setUltReadyAt(id, now + cd);
-        weapon.setComboBusy(id, (long) (THROW_MAX_TICKS + BULLSEYE_CHARGE_TICKS + LEAP_MAX_TICKS + 10) * 50L);
+        // NB: no comboBusy root — abilities stay usable while the blade is out (her call).
         weapon.grantFallGrace(id, 9000L);
 
         final World world = player.getWorld();
-        final UUID tid = locked.getUniqueId();
-        // A real 3D netherite sword, spinning end-over-end and wrapped in flame (Murder-Mystery style).
+        final Vector dir = player.getEyeLocation().getDirection().normalize();
         final ItemDisplay sword = spawnThrownSword(world,
-                player.getEyeLocation().add(player.getEyeLocation().getDirection().multiply(0.6)));
+                player.getEyeLocation().add(dir.clone().multiply(0.6)));
         player.playSound(player.getLocation(), Sound.ITEM_TRIDENT_THROW, 1.0f, 0.8f);
         player.playSound(player.getLocation(), Sound.ENTITY_BLAZE_SHOOT, 1.0f, 0.7f);
 
         BukkitRunnable throwTask = new BukkitRunnable() {
-            int phase = 0; // 0 throw, 1 charge, 2 leap
+            int phase = 0; // 0 = fly straight & pierce, 1 = charge, 2 = leap, 3 = whiff-return
             int t = 0;
+            int spinTick = 0; // drives the continuous helicopter spin across flight phases
+            UUID tid = null; // the body the straight throw pierced (found in phase 0)
             @Override
             public void run() {
-                var e = plugin.getServer().getEntity(tid);
-                if (!player.isOnline() || !(e instanceof LivingEntity tgt) || tgt.isDead()) {
-                    // The mark escaped (or died) before the combo landed — treat it as a miss: half refund.
-                    if (player.isOnline()) weapon.setUltReadyAt(id, System.currentTimeMillis() + cd / 2);
+                if (!player.isOnline()) {
                     despawnSword(sword); weapon.setComboBusy(id, 0L); flightTasks.remove(this); cancel(); return;
                 }
-                Location tl = tgt.getLocation().add(0, 1.0, 0);
+                spinTick++;
 
-                if (phase == 0) { // the flaming sword spins to the target
+                if (phase == 0) { // ---- FLY STRAIGHT, pierce the first body in the path ----
                     Location sl = sword.getLocation();
-                    Vector to = tl.toVector().subtract(sl.toVector());
-                    double d = to.length();
-                    // Spin end-over-end + wrap it in flame.
-                    sword.setInterpolationDelay(0);
-                    sword.setTransformation(new Transformation(new Vector3f(),
-                            new Quaternionf().rotateX(t * 0.7f), new Vector3f(1.5f, 1.5f, 1.5f), new Quaternionf()));
-                    Location fl = sl.clone().add(0, 0.3, 0);
-                    world.spawnParticle(Particle.FLAME, fl, 6, 0.18, 0.18, 0.18, 0.02);
-                    world.spawnParticle(Particle.SMALL_FLAME, fl, 3, 0.15, 0.15, 0.15, 0.01);
-                    world.spawnParticle(Particle.DUST, fl, 1, 0.12, 0.12, 0.12, 0, LaevateinnVfx.PURPLE_FLAKE);
-                    if (d <= 1.4 || t >= THROW_MAX_TICKS) {
+                    spinBlade(sword, dir, spinTick);
+                    flameTrail(world, sl);
+                    RayTraceResult rt = world.rayTraceEntities(sl, dir, THROW_SPEED + 0.6, 0.65,
+                            en -> en instanceof LivingEntity && !en.getUniqueId().equals(player.getUniqueId()));
+                    if (rt != null && rt.getHitEntity() instanceof LivingEntity struck && !struck.isDead()) {
+                        tid = struck.getUniqueId();
+                        Location tl = struck.getLocation().add(0, 1.0, 0);
                         sword.teleport(tl);
-                        weapon.dealDamage(tgt, BULLSEYE_IMPACT, player);
-                        LaevateinnVfx.blunt(world, tgt.getLocation(), 1.4, LaevateinnVfx.ORANGE_PAL);
+                        weapon.dealDamage(struck, BULLSEYE_IMPACT, player);
+                        LaevateinnVfx.blunt(world, struck.getLocation(), 1.4, LaevateinnVfx.ORANGE_PAL);
                         world.spawnParticle(Particle.FLAME, tl, 24, 0.3, 0.4, 0.3, 0.06);
                         world.playSound(tl, Sound.ITEM_TRIDENT_HIT_GROUND, 1.0f, 0.7f);
                         phase = 1; t = 0; return;
                     }
-                    sword.teleport(sl.clone().add(to.multiply(Math.min(THROW_SPEED, d) / d)));
+                    Location next = sl.clone().add(dir.clone().multiply(THROW_SPEED));
+                    if (!next.getBlock().isPassable() || t >= THROW_MAX_TICKS) { // hit a wall / spent -> whiff
+                        weapon.setUltReadyAt(id, System.currentTimeMillis() + cd / 2);
+                        phase = 3; t = 0; return;
+                    }
+                    sword.teleport(next);
                     t++;
                     return;
                 }
+
+                if (phase == 3) { // ---- WHIFF: the blade sails home, still spinning ----
+                    Location sl = sword.getLocation();
+                    Vector back = player.getEyeLocation().toVector().subtract(sl.toVector());
+                    double d = back.length();
+                    spinBlade(sword, dir, spinTick);
+                    flameTrail(world, sl);
+                    if (d <= 1.4 || t >= THROW_MAX_TICKS * 2) {
+                        despawnSword(sword);
+                        player.playSound(player.getLocation(), Sound.ITEM_TRIDENT_RETURN, 0.8f, 1.1f);
+                        weapon.setComboBusy(id, 0L); flightTasks.remove(this); cancel(); return;
+                    }
+                    sword.teleport(sl.clone().add(back.multiply(Math.min(THROW_SPEED * 1.4, d) / d)));
+                    t++;
+                    return;
+                }
+
+                // phases 1 & 2 — the pierced body must still be alive
+                var e = plugin.getServer().getEntity(tid);
+                if (!(e instanceof LivingEntity tgt) || tgt.isDead()) {
+                    weapon.setUltReadyAt(id, System.currentTimeMillis() + cd / 2);
+                    despawnSword(sword); weapon.setComboBusy(id, 0L); flightTasks.remove(this); cancel(); return;
+                }
+                Location tl = tgt.getLocation().add(0, 1.0, 0);
 
                 if (phase == 1) { // charge up — fire gathers, then kick off the ground
                     sword.teleport(tl);
@@ -461,19 +478,56 @@ public final class LaevateinnSkills {
         if (kb.lengthSquared() > 1.0e-6) target.setVelocity(kb.normalize().multiply(0.6).setY(0.4));
     }
 
-    /** Spawn the molten 3D netherite sword (spinning, flame-wrapped) at a point, tracked for shutdown. */
+    /** Spawn the molten 3D Lævateinn blade (flies straight, flame-wrapped) at a point, tracked for shutdown. */
     private ItemDisplay spawnThrownSword(World world, Location at) {
         ItemDisplay sword = world.spawn(at, ItemDisplay.class, d -> {
-            d.setItemStack(new ItemStack(Material.NETHERITE_SWORD));
-            d.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.GROUND);
+            ItemStack model = new ItemStack(Material.NETHERITE_SWORD);
+            org.bukkit.inventory.meta.ItemMeta m = model.getItemMeta();
+            if (m != null) {
+                var cmd = m.getCustomModelDataComponent();
+                cmd.setStrings(java.util.List.of("laev3")); // the True-Form Lævateinn model
+                m.setCustomModelDataComponent(cmd);
+                model.setItemMeta(m);
+            }
+            d.setItemStack(model);
+            d.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.NONE); // raw model — only our aim rotation
             d.setPersistent(false);                           // never saved to the world
             d.setBrightness(new Display.Brightness(15, 15)); // glow like it's molten
-            d.setInterpolationDuration(3);                    // smooth the spin
+            d.setInterpolationDuration(1);                    // lerp each spin step over 1 tick — crisp fast spin
+            d.setTeleportDuration(2);                         // interpolate the flight between ticks — smooth motion
             d.setTransformation(new Transformation(new Vector3f(), new Quaternionf(),
                     new Vector3f(1.5f, 1.5f, 1.5f), new Quaternionf()));
         });
         thrownSwords.add(sword);
         return sword;
+    }
+
+    /**
+     * Spin the thrown blade FAST end-over-end in the VERTICAL plane of travel — a tumbling helicopter
+     * spin, never a flat horizontal one. The spin axis is built explicitly from the horizontal travel
+     * direction (its perpendicular), so the roll is well-defined and it looks the same at every yaw (the
+     * old {@code rotationTo} left the roll undefined — right only when thrown due south).
+     */
+    private static void spinBlade(ItemDisplay sword, Vector dir, int spinTick) {
+        Vector flat = new Vector(dir.getX(), 0, dir.getZ());
+        if (flat.lengthSquared() < 1.0e-6) flat = new Vector(0, 0, 1);
+        flat.normalize();
+        Vector axis = new Vector(0, 1, 0).crossProduct(flat); // horizontal, perpendicular to travel
+        if (axis.lengthSquared() < 1.0e-6) axis = new Vector(1, 0, 0);
+        axis.normalize();
+        float angle = (float) (SPIN_RATE * spinTick);
+        Quaternionf q = new Quaternionf().fromAxisAngleRad(
+                (float) axis.getX(), (float) axis.getY(), (float) axis.getZ(), angle);
+        sword.setInterpolationDelay(0);
+        sword.setTransformation(new Transformation(new Vector3f(), q, new Vector3f(1.5f, 1.5f, 1.5f), new Quaternionf()));
+    }
+
+    /** The molten blade's flame + purple-flake trail. */
+    private static void flameTrail(World world, Location sl) {
+        Location fl = sl.clone().add(0, 0.3, 0);
+        world.spawnParticle(Particle.FLAME, fl, 6, 0.18, 0.18, 0.18, 0.02);
+        world.spawnParticle(Particle.SMALL_FLAME, fl, 3, 0.15, 0.15, 0.15, 0.01);
+        world.spawnParticle(Particle.DUST, fl, 1, 0.12, 0.12, 0.12, 0, LaevateinnVfx.PURPLE_FLAKE);
     }
 
     /** Remove a thrown sword on a normal flight path and deregister it from shutdown tracking. */
@@ -482,69 +536,7 @@ public final class LaevateinnSkills {
         sword.remove();
     }
 
-    /** A whiffed throw: the blade sails out where you aimed, finds nothing, and returns — half cooldown. */
-    private void missThrow(Player player, UUID id, long cd) {
-        weapon.setUltReadyAt(id, System.currentTimeMillis() + cd / 2); // you kept the blade — only half the cost
-        final World world = player.getWorld();
-        final Vector dir = player.getEyeLocation().getDirection().normalize();
-        final ItemDisplay sword = spawnThrownSword(world,
-                player.getEyeLocation().add(dir.clone().multiply(0.6)));
-        player.playSound(player.getLocation(), Sound.ITEM_TRIDENT_THROW, 1.0f, 0.8f);
-        player.sendActionBar(Component.text("Threw wide — the blade returns.", TextColor.color(0x8C8A93)));
-
-        BukkitRunnable returnTask = new BukkitRunnable() {
-            int t = 0;
-            boolean returning = false;
-            @Override
-            public void run() {
-                if (!player.isOnline()) { despawnSword(sword); flightTasks.remove(this); cancel(); return; }
-                Location sl = sword.getLocation();
-                sword.setInterpolationDelay(0);
-                sword.setTransformation(new Transformation(new Vector3f(),
-                        new Quaternionf().rotateX(t * 0.7f), new Vector3f(1.5f, 1.5f, 1.5f), new Quaternionf()));
-                world.spawnParticle(Particle.FLAME, sl.clone().add(0, 0.3, 0), 5, 0.15, 0.15, 0.15, 0.02);
-                world.spawnParticle(Particle.SMALL_FLAME, sl.clone().add(0, 0.3, 0), 2, 0.12, 0.12, 0.12, 0.01);
-                if (!returning) {
-                    // Fly out until it has run half its reach or clips a wall, then turn back.
-                    if (t >= THROW_MAX_TICKS / 2 || !sl.getBlock().isPassable()) returning = true;
-                    else sword.teleport(sl.add(dir.clone().multiply(THROW_SPEED)));
-                } else {
-                    Location eye = player.getEyeLocation();
-                    Vector back = eye.toVector().subtract(sl.toVector());
-                    double d = back.length();
-                    if (d <= 1.4) {
-                        despawnSword(sword);
-                        player.playSound(player.getLocation(), Sound.ITEM_TRIDENT_RETURN, 0.8f, 1.1f);
-                        flightTasks.remove(this);
-                        cancel();
-                        return;
-                    }
-                    sword.teleport(sl.add(back.multiply(Math.min(THROW_SPEED * 1.4, d) / d)));
-                }
-                t++;
-            }
-        };
-        flightTasks.add(returnTask);
-        returnTask.runTaskTimer(plugin, 0L, 1L);
-    }
-
     // ---- shared --------------------------------------------------------------------
-
-    /** Nearest living entity within {@code range} inside a forward cone; null if none. */
-    private LivingEntity frontTarget(Player player, double range, double coneDot) {
-        Location eye = player.getEyeLocation();
-        Vector dir = eye.getDirection().normalize();
-        LivingEntity best = null;
-        double bestDist = Double.MAX_VALUE;
-        for (var e : player.getNearbyEntities(range, range, range)) {
-            if (e == player || !(e instanceof LivingEntity le)) continue;
-            Vector to = le.getLocation().add(0, 1, 0).toVector().subtract(eye.toVector());
-            double d = to.length();
-            if (d < 1.0e-3 || to.clone().normalize().dot(dir) < coneDot) continue;
-            if (d < bestDist) { bestDist = d; best = le; }
-        }
-        return best;
-    }
 
     private void onCooldown(Player player, long remainingMs, String name) {
         player.sendActionBar(Component.text(name + " — " + (remainingMs / 1000 + 1) + "s",

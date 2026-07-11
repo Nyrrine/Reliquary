@@ -60,7 +60,8 @@ public final class LaevateinnWeapon implements Weapon {
      * package is on a long leash. A slow, heavy signature move, not a mobility toy. 45s across forms.
      */
     public long slamCdMs(int form) {
-        return 45000L;
+        // 5s off every form (45 -> 40); True Form (max) drops all the way to 20s.
+        return form >= MAX_FORM ? 20000L : 40000L;
     }
     /** You count as "in combat" for this long after landing a hit; heat holds, then cools. */
     public static final long COMBAT_WINDOW_MS = 15000L;
@@ -392,6 +393,10 @@ public final class LaevateinnWeapon implements Weapon {
         meta.lore(formLore(0));
         meta.setUnbreakable(true);
         meta.getPersistentDataContainer().set(bladeKey, PersistentDataType.BYTE, (byte) 1);
+        // Stamp the form-0 model up front so it shows correctly before the wielder's first repaint.
+        var cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(java.util.List.of("laev0"));
+        meta.setCustomModelDataComponent(cmd);
         item.setItemMeta(meta);
         return item;
     }

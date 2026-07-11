@@ -5,6 +5,7 @@ import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Particle;
+import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.FallingBlock;
@@ -49,6 +50,70 @@ final class LaevateinnVfx {
 
     /** Small purple "flakes" — the diamond sparks that ride the true-form fire. */
     static final Particle.DustOptions PURPLE_FLAKE = new Particle.DustOptions(PURPLE, 0.9f);
+
+    // Netherite unseal palette — dark grey-purple steel.
+    static final Color NETH_LIGHT = Color.fromRGB(0x9C, 0x90, 0xA0); // netherite highlight
+    static final Color NETH       = Color.fromRGB(0x55, 0x4A, 0x57); // netherite body
+    static final Color NETH_DARK  = Color.fromRGB(0x2C, 0x25, 0x2E); // netherite shadow
+    private static final double UNSEAL_BLADE_LEN = 2.6;              // how far the effect climbs the big blade
+
+    /**
+     * A massive netherite-coloured burst wrapped around the BLADE as a seal gives way. The blade is a big
+     * blocky greatsword, so the effect is a tall column along it: netherite steel shears loose with a heavy
+     * metallic crack, and an expanding grey-purple shockwave climbs the length of the blade, denser and more
+     * violent the more seals have broken. One capped runnable — O(active wielders).
+     *
+     * @param base the blade's grip/base; the effect climbs ~{@value #UNSEAL_BLADE_LEN} blocks up from here
+     */
+    static void netheriteUnseal(Reliquary plugin, World world, Location base, int form) {
+        final double len = UNSEAL_BLADE_LEN;
+        final double scale = 1.0 + 0.25 * form;                    // bigger, more violent as more seals break
+        final Location mid = base.clone().add(0, len * 0.5, 0);
+
+        // The instant break — netherite steel shears off the whole blade + a heavy metallic crack.
+        world.spawnParticle(Particle.ITEM, mid, (int) (46 * scale), 0.35, len * 0.5, 0.35, 0.28,
+                new org.bukkit.inventory.ItemStack(org.bukkit.Material.NETHERITE_SCRAP));
+        world.spawnParticle(Particle.CRIT, mid, (int) (22 * scale), 0.35, len * 0.45, 0.35, 0.25);
+        world.playSound(base, Sound.BLOCK_ANVIL_LAND, 0.9f, 0.5f);
+        world.playSound(base, Sound.BLOCK_NETHERITE_BLOCK_BREAK, 1.0f, 0.6f);
+        world.playSound(base, Sound.ITEM_TRIDENT_THUNDER, 0.7f, 0.5f);
+
+        final Particle.DustOptions core = new Particle.DustOptions(NETH_LIGHT, (float) (1.4 * scale));
+        final Particle.DustOptions body = new Particle.DustOptions(NETH, (float) (1.9 * scale));
+        final Particle.DustOptions dark = new Particle.DustOptions(NETH_DARK, (float) (2.2 * scale));
+
+        new BukkitRunnable() {
+            int t = 0;
+            final int life = 14;
+            final ThreadLocalRandom rng = ThreadLocalRandom.current();
+            @Override
+            public void run() {
+                if (t >= life) { cancel(); return; }
+                // an expanding shockwave ring that climbs the blade as it grows
+                double r = 0.4 + t * 0.32 * scale;
+                double ringY = len * (0.15 + 0.6 * (t / (double) life));
+                Location rc = base.clone().add(0, ringY, 0);
+                int pts = Math.max(10, (int) (r * 13));
+                for (int i = 0; i < pts; i++) {
+                    double a = (Math.PI * 2 * i) / pts;
+                    Location p = rc.clone().add(Math.cos(a) * r, 0, Math.sin(a) * r);
+                    world.spawnParticle(Particle.DUST, p, 1, 0.02, 0.02, 0.02, 0, (i & 1) == 0 ? body : dark);
+                    if ((i % 4) == 0) world.spawnParticle(Particle.DUST, p, 1, 0, 0, 0, 0, core);
+                }
+                // dense netherite motes wrapping the whole blade column
+                int motes = (int) (10 * scale);
+                for (int k = 0; k < motes; k++) {
+                    double h = rng.nextDouble() * len;
+                    double rr = 0.18 + rng.nextDouble() * 0.28;
+                    double a = rng.nextDouble(0, Math.PI * 2);
+                    Location p = base.clone().add(Math.cos(a) * rr, h, Math.sin(a) * rr);
+                    world.spawnParticle(Particle.DUST, p, 1, 0.03, 0.05, 0.03, 0,
+                            rng.nextBoolean() ? body : (rng.nextBoolean() ? dark : core));
+                }
+                t++;
+            }
+        }.runTaskTimer(plugin, 0L, 1L);
+    }
 
     /**
      * The True-Form left-click — a big, flashy orange slash: an oversized arc with a white-hot edge,
