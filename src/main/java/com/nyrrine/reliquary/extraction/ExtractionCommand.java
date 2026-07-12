@@ -99,9 +99,35 @@ public final class ExtractionCommand {
         if (a.length < 2) { player.sendMessage(msg("Usage: /cogito track <weapon_id>", GREY)); return; }
         WeaponSpec w = WeaponSignatures.byId(a[1].toLowerCase());
         if (w == null) { player.sendMessage(msg("No such weapon: " + a[1], NamedTextColor.RED)); return; }
-        weaponTracker.track(player.getUniqueId(), w.id());
-        for (Component line : weaponTracker.shoppingList(player, w.id())) player.sendMessage(line);
-        player.sendMessage(msg("Tracking " + w.display() + " — needed items nearby will glow.", GREEN));
+        trackAndGuide(player, w.id());
+    }
+
+    /** Start (or refresh) a forge quest for a weapon and print its quest steps to chat. */
+    private void trackAndGuide(Player player, String weaponId) {
+        if (WeaponSignatures.byId(weaponId) == null) return;
+        weaponTracker.track(player.getUniqueId(), weaponId);
+        for (Component line : weaponTracker.shoppingList(player, weaponId)) player.sendMessage(line);
+        player.sendMessage(msg("Needed items nearby will glow. Re-check anytime at the Assay; "
+                + "/cogito untrack to stop.", FAINT));
+    }
+
+    /**
+     * The Assay readout on an empty hand (chat, not the book). If you're on a forge quest it reprints your
+     * next step + checklist; otherwise it explains what the Assay does. The full manual is /cogito guide.
+     */
+    public void assayOverview(Player player) {
+        String tracked = weaponTracker.tracked(player.getUniqueId());
+        if (tracked != null) {
+            for (Component line : weaponTracker.shoppingList(player, tracked)) player.sendMessage(line);
+            player.sendMessage(msg("Hold an item to identify it · /cogito untrack to stop · "
+                    + "/cogito guide for the manual.", FAINT));
+            return;
+        }
+        player.sendMessage(msg("The Assay", NamedTextColor.WHITE));
+        player.sendMessage(msg("• Hold an item and right-click to identify it — a weapon or catalyst starts a "
+                + "step-by-step forge quest.", FAINT));
+        player.sendMessage(msg("• /cogito track <weapon> — begin a forge quest (tab-completes).", FAINT));
+        player.sendMessage(msg("• /cogito guide — open the full manual.", FAINT));
     }
 
     /** Tab completion for the extraction subcommands. {@code a[0]} = subcommand, {@code a[1]} = its arg. */
@@ -247,6 +273,16 @@ public final class ExtractionCommand {
             player.sendMessage(msg("Catalyst — guarantees " + (w != null ? w.display() : cw)
                     + (w != null ? " (" + w.grade().display() + ")" : "")
                     + ". Pour it with a matching cogito to lock the extraction (+ Certified at 99%+).", GOLD));
+            trackAndGuide(player, cw);
+            return;
+        }
+        // An E.G.O weapon in hand — the Assay reads it and starts a forge quest for it.
+        Weapon wpn = plugin.weapons().fromItem(item);
+        if (wpn != null) {
+            WeaponSpec w = WeaponSignatures.byId(wpn.id());
+            player.sendMessage(msg((w != null ? w.display() : wpn.id())
+                    + (w != null ? " (" + w.grade().display() + ")" : "") + " — a manifested E.G.O.", GOLD));
+            trackAndGuide(player, wpn.id());
             return;
         }
 

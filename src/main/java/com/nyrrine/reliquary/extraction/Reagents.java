@@ -181,9 +181,9 @@ public final class Reagents {
 
     // ---- Experiences & Emotions (volatile memories) --------------------------------
     // Raw memory-charge: potent sin payloads on a dirty, volatile carrier (Crude) that gambles a taint.
-    public static final Reagent BOTTLE_OF_ENCHANTING = reg(Reagent.of("bottle_of_enchanting", "Prize Pottery Sherd")
+    public static final Reagent BOTTLE_OF_ENCHANTING = reg(Reagent.of("bottle_of_enchanting", "Polished Granite Stairs")
             .delta(PRIDE, 14).contam(2).stab(-2).tier(CRUDE).inflicts(Taint.FEVER, 0.25)
-            .item(Material.PRIZE_POTTERY_SHERD).source("a moment of triumph").build());
+            .item(Material.POLISHED_GRANITE_STAIRS).source("a moment of triumph").build());
     public static final Reagent WRITTEN_BOOK = reg(Reagent.of("written_book", "Written Book")
             .delta(GLOOM, 10).delta(ENVY, 6).contam(2).stab(-2).tier(CRUDE).inflicts(Taint.GRIEF_BLOOM, 0.30)
             .item(Material.WRITTEN_BOOK).source("a confession").build());

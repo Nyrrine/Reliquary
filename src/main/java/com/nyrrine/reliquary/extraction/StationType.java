@@ -24,7 +24,7 @@ public enum StationType {
     ALEMBIC   (Material.BLAST_FURNACE,     "Alembic",     Material.BLAZE_POWDER,        Material.AMETHYST_SHARD),
     CENSER    (Material.BREWING_STAND,     "Censer",      Material.GHAST_TEAR,          Material.AMETHYST_SHARD),
     CENTRIFUGE(Material.GRINDSTONE,        "Centrifuge",  Material.REDSTONE_BLOCK,      Material.AMETHYST_SHARD),
-    MANIFOLD  (Material.CHISELED_BOOKSHELF,"Manifold",    Material.ENDER_PEARL,         Material.AMETHYST_SHARD),
+    MANIFOLD  (Material.CHISELED_BOOKSHELF,"Manifold",    Material.PAPER,               Material.AMETHYST_SHARD),
     WELL      (Material.CONDUIT,           "Pocket Well", Material.NETHER_STAR,         Material.AMETHYST_SHARD),
     CRUCIBLE  (Material.SMITHING_TABLE,    "Crucible",    Material.MAGMA_BLOCK,         Material.AMETHYST_SHARD),
     LECTERN   (Material.LECTERN,           "Assay",       Material.GLOW_INK_SAC,        Material.AMETHYST_SHARD);

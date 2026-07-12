@@ -80,8 +80,8 @@ public final class StationListener implements Listener {
         var held = player.getInventory().getItemInMainHand();
         switch (type) {
             case LECTERN    -> {
-                if (held == null || held.getType().isAir()) extraction.openGuide(player); // empty hand → the manual
-                else extraction.describeItem(player, held);                               // holding → identify it
+                if (held == null || held.getType().isAir()) extraction.assayOverview(player); // empty hand → chat assay
+                else extraction.describeItem(player, held);        // holding → identify it (weapon/catalyst → track)
             }
             case FONT       -> extraction.stationFont(player, event.getClickedBlock().getLocation(), held);
             case ALEMBIC    -> extraction.stationAlembic(player, player.isSneaking());

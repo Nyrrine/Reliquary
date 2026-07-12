@@ -50,40 +50,109 @@ public final class WeaponTracker {
         List<Component> out = new ArrayList<>();
         WeaponSpec spec = WeaponSignatures.byId(weaponId);
         if (spec == null) { out.add(Component.text("Unknown weapon.", NamedTextColor.RED)); return out; }
-
-        out.add(Component.text("Tracking " + spec.display() + " (" + spec.grade().display() + ")",
-                NamedTextColor.AQUA));
-
-        // The sins it leans on → which refined reagent to climb.
-        out.add(Component.text("Lean into:", NamedTextColor.GRAY));
-        for (Sin s : dominantSins(spec, 3)) {
-            String pure = RefinedReagent.pureId(s), std = RefinedReagent.standardId(s);
-            String climb = std != null ? std : pure;
-            Reagent r = climb != null ? Reagents.byId(climb) : null;
-            out.add(Component.text("  • " + s.display() + " → " + (r != null ? r.display() : "raw " + s.display()),
-                    s.color()));
-        }
-
-        // Catalyst grind still outstanding (for a guaranteed pull) — the real, grade-scaled cost.
         Catalysts.Recipe rec = Catalysts.forWeapon(weaponId);
-        if (rec != null) {
-            out.add(Component.text("Catalyst grind (for a guaranteed pull):", NamedTextColor.GRAY));
-            for (var e : CatalystCost.components(rec, spec.grade()).entrySet()) {
+
+        Map<String, Integer> refined = rec != null ? CatalystCost.refinedTax(spec) : Map.of();
+        Map<Material, Integer> grind = rec != null ? CatalystCost.components(rec, spec.grade()) : Map.of();
+        int enkNeed = rec != null ? CatalystCost.enkephalin(rec, spec.grade()) : 0;
+
+        out.add(Component.text("◆ QUEST — Extract " + spec.display() + " (" + spec.grade().display() + ")",
+                NamedTextColor.GOLD));
+        // The single most useful next action — the quest arrow.
+        out.add(Component.text("→ NEXT: ", NamedTextColor.YELLOW)
+                .append(nextStep(player, spec, refined, grind, enkNeed)));
+
+        // What to aim the brew at.
+        StringBuilder aim = new StringBuilder();
+        for (Sin s : dominantSins(spec, 3)) aim.append(s.display()).append("  ");
+        out.add(Component.text("Aim your cogito at: " + aim.toString().trim(), NamedTextColor.GRAY));
+
+        // Refined-reagent checklist.
+        if (!refined.isEmpty()) {
+            out.add(Component.text("Refined reagents:", NamedTextColor.GRAY));
+            for (var e : refined.entrySet()) {
+                int have = countRefined(player, e.getKey());
+                boolean done = have >= e.getValue();
+                Reagent rr = Reagents.byId(e.getKey());
+                out.add(Component.text((done ? "  ✔ " : "  • ") + (rr != null ? rr.display() : e.getKey())
+                        + "  " + have + "/" + e.getValue(), done ? NamedTextColor.GREEN : NamedTextColor.AQUA));
+            }
+        }
+        // Catalyst grind checklist.
+        if (!grind.isEmpty()) {
+            out.add(Component.text("Catalyst grind:", NamedTextColor.GRAY));
+            for (var e : grind.entrySet()) {
                 int have = countType(player, e.getKey());
                 boolean done = have >= e.getValue();
                 out.add(Component.text((done ? "  ✔ " : "  • ") + prettyMat(e.getKey())
-                        + "  " + have + "/" + e.getValue(),
-                        done ? NamedTextColor.GREEN : NamedTextColor.YELLOW));
+                        + "  " + have + "/" + e.getValue(), done ? NamedTextColor.GREEN : NamedTextColor.YELLOW));
             }
-            for (var e : CatalystCost.refinedTax(spec).entrySet()) {
-                Reagent rr = Reagents.byId(e.getKey());
-                out.add(Component.text("  • " + (rr != null ? rr.display() : e.getKey())
-                        + " (refined) ×" + e.getValue(), NamedTextColor.AQUA));
-            }
-            out.add(Component.text("  + " + CatalystCost.enkephalin(rec, spec.grade()) + " Enkephalin",
-                    NamedTextColor.GRAY));
+            int enk = countEnkephalin(player);
+            out.add(Component.text((enk >= enkNeed ? "  ✔ " : "  • ") + "Enkephalin  " + enk + "/" + enkNeed,
+                    enk >= enkNeed ? NamedTextColor.GREEN : NamedTextColor.YELLOW));
         }
         return out;
+    }
+
+    /** The quest arrow — the first unmet milestone, phrased as a beginner-friendly instruction. */
+    private Component nextStep(Player player, WeaponSpec spec, Map<String, Integer> refined,
+                              Map<Material, Integer> grind, int enkNeed) {
+        if (!hasVial(player)) {
+            return Component.text("Make a Cogito vial — feed emotion items to the Font, then right-click the "
+                    + "Alembic to render the Raw Cogito into a vial.", NamedTextColor.WHITE);
+        }
+        for (var e : refined.entrySet()) {
+            int have = countRefined(player, e.getKey());
+            if (have >= e.getValue()) continue;
+            Sin s = sinOfRefined(e.getKey());
+            Reagent rr = Reagents.byId(e.getKey());
+            String raw = s != null ? prettyMat(SinConcentrate.rawFor(s)) : "raw sin items";
+            return Component.text("Craft " + (e.getValue() - have) + "× more "
+                    + (rr != null ? rr.display() : e.getKey()) + " — gather " + raw
+                    + ", craft 8 → a Concentrate, then 4 Concentrate + Amethyst → a Pure at a crafting table.",
+                    NamedTextColor.WHITE);
+        }
+        for (var e : grind.entrySet()) {
+            int have = countType(player, e.getKey());
+            if (have < e.getValue()) {
+                return Component.text("Gather " + (e.getValue() - have) + " more " + prettyMat(e.getKey())
+                        + " for the catalyst grind.", NamedTextColor.WHITE);
+            }
+        }
+        int enk = countEnkephalin(player);
+        if (enk < enkNeed) {
+            return Component.text("Render " + (enkNeed - enk) + " more Enkephalin — sneak-right-click the "
+                    + "Alembic holding Raw Cogito.", NamedTextColor.WHITE);
+        }
+        List<Sin> top = dominantSins(spec, 1);
+        String topSin = top.isEmpty() ? "its sins" : top.get(0).display();
+        return Component.text("You have everything! Forge the catalyst at the Crucible, brew a cogito heavy in "
+                + topSin + " (buffer with Amethyst, distill last), then sneak-pour at the Well.",
+                NamedTextColor.GREEN);
+    }
+
+    private boolean hasVial(Player player) {
+        for (ItemStack it : player.getInventory().getContents()) if (Cogito.matches(it)) return true;
+        return false;
+    }
+
+    private int countRefined(Player player, String reagentId) {
+        int c = 0;
+        for (ItemStack it : player.getInventory().getContents())
+            if (it != null && reagentId.equals(RefinedReagent.idOf(it))) c += it.getAmount();
+        return c;
+    }
+
+    private int countEnkephalin(Player player) {
+        int c = 0;
+        for (ItemStack it : player.getInventory().getContents()) if (Enkephalin.matches(it)) c += it.getAmount();
+        return c;
+    }
+
+    private Sin sinOfRefined(String reagentId) {
+        for (Sin s : Sin.values())
+            if (reagentId.equals(RefinedReagent.pureId(s)) || reagentId.equals(RefinedReagent.standardId(s))) return s;
+        return null;
     }
 
     /** The weapon's biggest-share sins (up to {@code n}). */

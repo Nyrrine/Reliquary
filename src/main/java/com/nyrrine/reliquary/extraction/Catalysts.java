@@ -42,12 +42,12 @@ public final class Catalysts {
         recipe("soda", 3, Material.WHITE_CANDLE, 5, Material.ORANGE_CANDLE, 4, Material.YELLOW_CANDLE, 3);
 
         // ---- TETH — a real handful of parts, one grind-gate (4 types, counts 3–12, enkephalin 6) ----
-        recipe("beak", 6, Material.PURPLE_CANDLE, 4, Material.PUFFERFISH, 6, Material.ENDER_PEARL, 4,
+        recipe("beak", 6, Material.PURPLE_CANDLE, 4, Material.PUFFERFISH, 6, Material.JUNGLE_STAIRS, 4,
                 Material.INK_SAC, 5);
         recipe("fourth_match_flame", 6, Material.OXIDIZED_COPPER, 8, Material.TUFF, 10, Material.CALCITE, 12,
                 Material.POLISHED_TUFF, 6);
-        recipe("red_eyes", 6, Material.DRIPSTONE_BLOCK, 6, Material.SCULK, 8, Material.PACKED_MUD, 10,
-                Material.ECHO_SHARD, 3);
+        recipe("red_eyes", 6, Material.DRIPSTONE_BLOCK, 6, Material.CHISELED_RED_SANDSTONE, 8, Material.PACKED_MUD, 10,
+                Material.POLISHED_DIORITE_STAIRS, 3);
         recipe("regret", 6, Material.MANGROVE_ROOTS, 8, Material.SPORE_BLOSSOM, 4, Material.BIG_DRIPLEAF, 6,
                 Material.SMALL_DRIPLEAF, 5);
         recipe("logging", 6, Material.AZALEA, 8, Material.GLOW_LICHEN, 10, Material.SHROOMLIGHT, 4,
@@ -70,13 +70,13 @@ public final class Catalysts {
                 Material.BRAIN_CORAL_BLOCK, 8, Material.BUBBLE_CORAL_FAN, 8);
         recipe("life_for_a_daredevil", 12, Material.HORN_CORAL, 8, Material.WAXED_CHISELED_COPPER, 8,
                 Material.SWEET_BERRIES, 14, Material.HORN_CORAL_BLOCK, 8, Material.FIRE_CORAL_BLOCK, 8);
-        recipe("laetitia", 12, Material.ANGLER_POTTERY_SHERD, 6, Material.ARCHER_POTTERY_SHERD, 8,
-                Material.LIGHTNING_ROD, 8, Material.PRIZE_POTTERY_SHERD, 6, Material.BLADE_POTTERY_SHERD, 6);
+        recipe("laetitia", 12, Material.BAMBOO_MOSAIC, 6, Material.ACACIA_TRAPDOOR, 8,
+                Material.LIGHTNING_ROD, 8, Material.MOSSY_COBBLESTONE_WALL, 6, Material.BAMBOO_FENCE_GATE, 6);
 
         // ---- WAW — the multi-stack endgame grind (6 types, counts 8–18, enkephalin 24) ----
-        recipe("solemn_lament", 24, Material.MUD_BRICKS, 14, Material.DECORATED_POT, 10,
+        recipe("solemn_lament", 24, Material.MUD_BRICKS, 14, Material.MUD_BRICK_WALL, 10,
                 Material.PURPLE_WOOL, 10, Material.OXIDIZED_COPPER_GRATE, 12,
-                Material.MUDDY_MANGROVE_ROOTS, 10, Material.SHEAF_POTTERY_SHERD, 8);
+                Material.MUDDY_MANGROVE_ROOTS, 10, Material.STRIPPED_JUNGLE_WOOD, 8);
         recipe("sword_of_tears", 24, Material.BREEZE_ROD, 16, Material.GHAST_TEAR, 10,
                 Material.MAGMA_BLOCK, 18, Material.CRYING_OBSIDIAN, 12,
                 Material.MAGMA_CREAM, 12, Material.BLAZE_ROD, 10);
