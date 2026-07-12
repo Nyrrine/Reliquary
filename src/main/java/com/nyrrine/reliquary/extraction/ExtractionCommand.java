@@ -182,7 +182,7 @@ public final class ExtractionCommand {
         List<WellRoll.Chance> pool = WellRoll.pool(st);
 
         if (!pool.isEmpty()) {
-            player.sendMessage(msg("Well odds if you pour now:", NamedTextColor.WHITE));
+            player.sendMessage(msg("If you pour now you'll extract:", NamedTextColor.WHITE));
             int shown = 0;
             for (WellRoll.Chance c : pool) {
                 if (shown >= 4) break;
@@ -193,10 +193,11 @@ public final class ExtractionCommand {
                         .append(Component.text("   " + pct(c.match()) + " match", FAINT)));
                 shown++;
             }
-            double success = WellRoll.successChance(st);
-            player.sendMessage(Component.text(
-                    String.format("  Overall: ~%d%% you pull one, else near-miss / breach. "
-                            + "Load a catalyst (pour <id>) to guarantee it.", Math.round(success * 100)), FAINT));
+            double breach = WellRoll.breachChance(st, 0.0);
+            String risk = breach < 0.02 ? "steady — safe to pour"
+                    : String.format("%d%% chance it ruptures — steady it first (buffer/distill)", Math.round(breach * 100));
+            player.sendMessage(Component.text("  " + risk + ".  Catalyst (pour <id>) guarantees the exact weapon.",
+                    breach < 0.02 ? FAINT : NamedTextColor.GOLD));
         }
 
         // What you're closest to but can't yet reach — the thing to keep brewing toward.

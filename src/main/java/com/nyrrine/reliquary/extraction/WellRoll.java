@@ -26,27 +26,23 @@ public final class WellRoll {
 
     private WellRoll() {}
 
-    /** Below this match, a failed pour always breaches rather than near-missing. */
-    public static final double NEARMISS_MIN = 0.5;
-    /** A catalyst only locks onto its target if the pour is at least this close to it. */
+    /** A catalyst only locks onto its target if the pour is at least this close to it (a guaranteed pull). */
     public static final double SNAP_MIN = 0.85;
-    /** How sharply the gacha favours your best-matched weapon (weight = match^this). Higher = more targeted,
-     *  lower = more of a lottery across the whole reachable pool. */
-    public static final double GACHA_SHARPNESS = 8.0;
-    /** Steepness of the yield curve: whether a pour produces a weapon at all is {@code (match × purity)^this}.
-     *  Above 1 it punishes mediocre pours and rewards well-crafted ones — so crafting clearly beats RNG. */
-    public static final double SUCCESS_STEEPNESS = 2.0;
-    /** Purity at/above which a locked catalyst certifies the pour to a guaranteed manifest. */
+    /** Only weapons at least this well-matched are in the pool at all — the "range of sins you chose". Keeps
+     *  the small off-chance a neighbour, never a wildcard. */
+    public static final double POOL_MATCH_FLOOR = 0.60;
+    /** How sharply the gacha favours your best-matched weapon (weight = match^this). High, so a pour shaped
+     *  cleanly onto one signature comes out as that weapon ~90% of the time; the rest is close neighbours. */
+    public static final double GACHA_SHARPNESS = 18.0;
+    /** Purity at/above which a locked catalyst certifies the pour (Certified, 100% lore). */
     public static final double CERTIFIED_PURITY = Grade.PRIMARY_STANDARD.minPurity();
 
-    // Breach-chance weights (§28.6) — how a failed pour tips toward rupture.
-    public static final double BREACH_BASE = 0.05;
-    public static final double BREACH_W_MATCH = 0.45;
-    public static final double BREACH_W_PURITY = 0.25;
-    public static final double BREACH_W_STAB = 0.15;
-    public static final double BREACH_W_RESIDUE = 0.30;
+    // A valid pour yields a weapon; it only ruptures if the pot was too UNSTABLE to pour (you didn't steady
+    // it) — quality/match no longer cause a "you got nothing". Breach scales with how shaky the pour was.
+    public static final double BREACH_W_STAB = 0.9;      // weight on (1 - stability)^2
+    public static final double BREACH_W_RESIDUE = 0.30;  // Well spray-and-pray taint
 
-    /** Which rung a pour resolved to. */
+    /** Which rung a pour resolved to. (NEAR_MISS is retained for compatibility but no longer produced.) */
     public enum Outcome { MANIFEST, NEAR_MISS, BREACH }
 
     /**
@@ -93,34 +89,22 @@ public final class WellRoll {
         }
 
         if (pool.isEmpty()) {
-            // Nothing cleared the gates — a hollow pour just ruptures at the aimed tier.
+            // Nothing in your sin-range cleared the gates — a hollow / over-reach pour ruptures at the aimed tier.
             return new Result(Outcome.BREACH, null, 0.0, false, cogitoGrade, purity, aimed);
         }
 
         double bestMatch = pool.get(0).match();
 
-        // Does the pour manifest anything at all? Quality (best match × purity) on a STEEP curve — a mediocre
-        // gamble usually fails, a well-crafted pour reliably yields. This is where crafting beats RNG.
-        double pSuccess = Math.pow(clamp01(bestMatch * (purity / 100.0)), SUCCESS_STEEPNESS);
-        if (rng.nextDouble() < pSuccess) {
-            // The gacha: pull a weapon from the pool weighted by how well the mix matches each. Your cogito
-            // tilts the odds toward what you shaped it for; the roll still decides which one you actually get.
-            WeaponSpec pulled = weightedPick(pool, rng);
-            return new Result(Outcome.MANIFEST, pulled, bestMatch, false, cogitoGrade, purity, pulled.grade());
+        // A valid pour yields a weapon UNLESS the pot was too unstable to pour — then the Well ruptures. This
+        // is the only "you got nothing": it's a handling failure (you didn't steady the pot), not bad luck.
+        if (rng.nextDouble() < breachChance(pour, wellResidue)) {
+            return new Result(Outcome.BREACH, pool.get(0).weapon(), bestMatch, false, cogitoGrade, purity, aimed);
         }
 
-        // Failed the pull — near-miss (nearest neighbour) or breach.
-        double breachChance = clamp01(BREACH_BASE
-                + BREACH_W_MATCH * (1.0 - bestMatch)
-                + BREACH_W_PURITY * (1.0 - purity / 100.0)
-                + BREACH_W_STAB * (1.0 - pour.stability() / 100.0)
-                + BREACH_W_RESIDUE * clamp01(wellResidue));
-
-        WeaponSpec nearest = pool.get(0).weapon();
-        if (bestMatch < NEARMISS_MIN || rng.nextDouble() < breachChance) {
-            return new Result(Outcome.BREACH, nearest, bestMatch, false, cogitoGrade, purity, aimed);
-        }
-        return new Result(Outcome.NEAR_MISS, nearest, bestMatch, false, cogitoGrade, purity, nearest.grade());
+        // The gacha (which weapon): almost always your best match, with a small off-chance of a neighbour in
+        // the sins you chose. Craft cleanly onto one signature and it comes out ~90% of the time.
+        WeaponSpec pulled = weightedPick(pool, rng);
+        return new Result(Outcome.MANIFEST, pulled, bestMatch, false, cogitoGrade, purity, pulled.grade());
     }
 
     /** A weapon's odds of being pulled from the Well right now: its composition match and normalized pull %. */
@@ -142,6 +126,7 @@ public final class WellRoll {
         for (WeaponSpec w : WeaponSignatures.all()) {
             if (!w.reachableBy(g, titer)) continue;
             double m = w.matchOf(prof);
+            if (m < POOL_MATCH_FLOOR) continue; // out of your sin-range — not a possible pull
             double wt = Math.pow(Math.max(0.0, m), GACHA_SHARPNESS);
             weighted.add(new Chance(w, m, wt)); // stash the raw weight in odds for now
             total += wt;
@@ -154,13 +139,11 @@ public final class WellRoll {
         return out;
     }
 
-    /** The chance this pour yields a weapon at all (before which one) — the steep quality curve. 0 if nothing
-     *  is reachable. A catalyst-locked pour ignores this (guaranteed). */
-    public static double successChance(PotState pour) {
-        List<Chance> pool = pool(pour);
-        if (pool.isEmpty()) return 0.0;
-        double quality = Math.max(0.0, Math.min(1.0, pool.get(0).match() * pour.purity() / 100.0));
-        return Math.pow(quality, SUCCESS_STEEPNESS);
+    /** Chance a pour ruptures instead of yielding a weapon — purely a function of how unstable the pot is
+     *  when poured (plus Well residue). A steadied pot is safe; a shaky one is a gamble. */
+    public static double breachChance(PotState pour, double wellResidue) {
+        double shaky = 1.0 - Math.max(0.0, Math.min(1.0, pour.stability() / 100.0));
+        return Math.max(0.0, Math.min(1.0, BREACH_W_STAB * shaky * shaky + BREACH_W_RESIDUE * Math.max(0.0, wellResidue)));
     }
 
     private static WeaponSpec weightedPick(List<Chance> pool, RandomGenerator rng) {

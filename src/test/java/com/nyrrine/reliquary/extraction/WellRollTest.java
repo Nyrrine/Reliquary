@@ -9,7 +9,6 @@ import java.util.random.RandomGenerator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,24 +50,18 @@ class WellRollTest {
 
     @Test
     void gradeFloorSealsWawOutOfSubAnalyticalPours() {
-        // Perfect Solemn Lament composition but only Reagent grade (88%) → WAW is not in the bucket.
+        // Perfect Solemn Lament composition but only Reagent grade (88%) → WAW is not even in the pool.
         PotState p = pour(WeaponSignatures.SOLEMN_LAMENT.signature(), 1000, 88.0, 80);
-        WellRoll.Result r = WellRoll.resolve(p, null, 0.0, seeded());
-
-        assertNotNull(r.weapon());
-        assertNotSame(EgoGrade.WAW, r.weapon().grade(),
-                "sub-Analytical cogito must never reach a WAW weapon (got " + r.weapon().id() + ")");
+        assertTrue(WellRoll.pool(p).stream().noneMatch(c -> c.weapon().grade() == EgoGrade.WAW),
+                "sub-Analytical cogito must never put a WAW weapon in the pool");
     }
 
     @Test
     void volumeGateSealsWawOutOfThinPours() {
         // Analytical grade and a perfect signature, but only a single vial of volume → WAW volume-gated out.
         PotState p = pour(WeaponSignatures.SOLEMN_LAMENT.signature(), 120, 97.0, 85);
-        WellRoll.Result r = WellRoll.resolve(p, null, 0.0, seeded());
-
-        assertNotNull(r.weapon());
-        assertNotSame(EgoGrade.WAW, r.weapon().grade(),
-                "a thin pour can't reach WAW even at Analytical grade (got " + r.weapon().id() + ")");
+        assertTrue(WellRoll.pool(p).stream().noneMatch(c -> c.weapon().grade() == EgoGrade.WAW),
+                "a thin pour can't put WAW in the pool even at Analytical grade");
     }
 
     @Test
