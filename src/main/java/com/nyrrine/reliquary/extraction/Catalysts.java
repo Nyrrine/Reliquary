@@ -75,7 +75,7 @@ public final class Catalysts {
                 Material.TURTLE_EGG, 6, Material.TROPICAL_FISH, 10);
         recipe("green_stem", 16, Material.PUMPKIN_PIE, 8, Material.GLOW_BERRIES, 12,
                 Material.FERMENTED_SPIDER_EYE, 6, Material.RABBIT_FOOT, 6);
-        recipe("screaming_wedge", 16, Material.RABBIT_HIDE, 10, Material.SNIFFER_EGG, 8,
+        recipe("screaming_wedge", 16, Material.RABBIT_HIDE, 10, Material.SUSPICIOUS_STEW, 8,
                 Material.WARPED_WART_BLOCK, 8, Material.CRIMSON_NYLIUM, 12);
         recipe("heaven", 16, Material.WARPED_NYLIUM, 12, Material.SOUL_LANTERN, 8, Material.COPPER_BULB, 10,
                 Material.LANTERN, 8);
