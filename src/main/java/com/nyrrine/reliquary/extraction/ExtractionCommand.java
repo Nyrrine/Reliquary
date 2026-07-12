@@ -45,7 +45,7 @@ public final class ExtractionCommand {
 
     /** The subcommands, in help/tab order. */
     private static final List<String> SUBS = List.of(
-            "vial", "fuel", "giveall", "stations", "reagents", "add", "assay", "lectern", "distill", "blend",
+            "vial", "fuel", "giveall", "stations", "reagents", "add", "assay", "distill", "blend",
             "recipes", "forge", "pour");
 
     /**
@@ -67,8 +67,7 @@ public final class ExtractionCommand {
             case "stations" -> giveStations(player);
             case "reagents" -> listReagents(player);
             case "add"      -> add(player, a);
-            case "assay"    -> assay(player);
-            case "lectern"  -> lectern(player, a);
+            case "assay"    -> assay(player, a);
             case "distill"  -> distill(player);
             case "blend"    -> blend(player);
             case "recipes"  -> recipes(player, a);
@@ -81,7 +80,7 @@ public final class ExtractionCommand {
     /** Tab completion for the extraction subcommands. {@code a[0]} = subcommand, {@code a[1]} = its arg. */
     public List<String> tabComplete(String[] a) {
         if (a.length == 1) return filter(SUBS, a[0]);
-        if (a.length == 2 && (a[0].equalsIgnoreCase("add") || a[0].equalsIgnoreCase("lectern"))) {
+        if (a.length == 2 && (a[0].equalsIgnoreCase("add") || a[0].equalsIgnoreCase("assay"))) {
             return filter(reagentIds(), a[1]);
         }
         if (a.length == 2 && (a[0].equalsIgnoreCase("pour") || a[0].equalsIgnoreCase("recipes")
@@ -143,19 +142,15 @@ public final class ExtractionCommand {
      */
     public void describeItem(Player player, ItemStack item) {
         if (item == null || item.getType().isAir()) {
-            player.sendMessage(msg("Hold an item and right-click the lectern to identify it.", GREY));
+            // Nothing meaningful in hand — fall back to the vial in the bag so a bare assay still works.
+            Vial v = locateVial(player);
+            if (v != null) { assayPot(player, v.state()); return; }
+            player.sendMessage(msg("Hold an item (or a Cogito vial) to identify it.", GREY));
             return;
         }
 
         PotState st = Cogito.read(item);
-        if (st != null) {
-            player.sendMessage(msg("— Cogito vial —", NamedTextColor.WHITE));
-            player.sendMessage(assayLine(st.profile()));
-            showGauges(player, st);
-            showTaints(player, st);
-            showPool(player, st);
-            return;
-        }
+        if (st != null) { assayPot(player, st); return; }
         if (Enkephalin.matches(item)) {
             player.sendMessage(msg("Enkephalin — distilled mental energy. Fuels the Centrifuge (distilling) "
                     + "and the Well (pours + forging).", GREEN));
@@ -383,10 +378,16 @@ public final class ExtractionCommand {
 
     // ---- assay + lectern -----------------------------------------------------------
 
-    private void assay(Player player) {
-        PotState st = held(player);
-        if (st == null) return;
-        player.sendMessage(msg("Assay:", NamedTextColor.WHITE));
+    /** Assay = query state. Bare: identify the held item (Cogito → full readout, else its info — same as the
+     *  Lectern). With a reagent id: the lectern's what-if projection. */
+    private void assay(Player player, String[] a) {
+        if (a.length >= 2) { whatIf(player, a); return; }
+        describeItem(player, player.getInventory().getItemInMainHand());
+    }
+
+    /** The full Cogito readout — composition, gauges, active afflictions, and live Well odds. */
+    private void assayPot(Player player, PotState st) {
+        player.sendMessage(msg("— Cogito assay —", NamedTextColor.WHITE));
         player.sendMessage(assayLine(st.profile()));
         showGauges(player, st);
         showTaints(player, st);
@@ -501,18 +502,18 @@ public final class ExtractionCommand {
         return best;
     }
 
-    private void lectern(Player player, String[] a) {
-        if (a.length < 2) { player.sendMessage(msg("Usage: /cogito lectern <reagentId>", GREY)); return; }
+    /** The what-if projection: assay <reagentId> shows what the pot WOULD look like after that reagent. */
+    private void whatIf(Player player, String[] a) {
         Reagent r = Reagents.byId(a[1].toLowerCase());
         if (r == null) { player.sendMessage(msg("No such reagent: " + a[1], NamedTextColor.RED)); return; }
         PotState st = held(player);
         if (st == null) return;
 
-        // Project onto a copy — the lectern never touches the real pot, and never rolls a failure.
+        // Project onto a copy — this never touches the real pot, and never rolls a failure.
         PotState projected = st.copy();
         Engine.AddResult ignored = Engine.addReagent(projected, r, new java.util.Random(0L));
 
-        player.sendMessage(msg("Lectern — if you add " + r.display() + ":", NamedTextColor.WHITE));
+        player.sendMessage(msg("What-if — if you add " + r.display() + ":", NamedTextColor.WHITE));
         player.sendMessage(assayLine(projected.profile()));
         showGauges(player, projected);
         WeaponSpec near = nearest(projected);
@@ -879,8 +880,8 @@ public final class ExtractionCommand {
         line(player, "giveall", "dispense every reagent + catalyst component (creative)");
         line(player, "reagents", "list reagent ids");
         line(player, "add <id>", "add a reagent to the held vial (the Censer)");
-        line(player, "assay", "reveal the held vial's composition");
-        line(player, "lectern <id>", "what-if: project a reagent without committing");
+        line(player, "assay [reagentId]", "identify the held item; with a reagent id = what-if projection");
+        line(player, "stations", "get the 7 craftable station blocks");
         line(player, "distill", "run the held vial through the Centrifuge");
         line(player, "blend", "blend all charged vials you carry (the Manifold)");
         line(player, "recipes [id]", "what a weapon's catalyst costs to forge");
