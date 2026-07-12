@@ -37,6 +37,7 @@ public final class StationListener implements Listener {
         if (type == null) return;
         stations.unregister(event.getBlock());
         if (type == StationType.FONT) extraction.clearFont(event.getBlock().getLocation()); // reset compost fill
+        if (type == StationType.CENSER) extraction.censerReturnOnBreak(event.getBlock().getLocation()); // return seated vial
         event.setDropItems(false); // don't drop the plain vanilla block
         if (event.getPlayer().getGameMode() != GameMode.CREATIVE) {
             event.getBlock().getWorld().dropItemNaturally(event.getBlock().getLocation().add(0.5, 0.5, 0.5),
@@ -84,7 +85,8 @@ public final class StationListener implements Listener {
             }
             case FONT       -> extraction.stationFont(player, event.getClickedBlock().getLocation(), held);
             case ALEMBIC    -> extraction.stationAlembic(player, player.isSneaking());
-            case CENSER     -> extraction.stationCenser(player, held);
+            case CENSER     -> extraction.stationCenser(player, held,
+                    event.getClickedBlock().getLocation(), player.isSneaking());
             case CENTRIFUGE -> extraction.stationCentrifuge(player);
             case MANIFOLD   -> extraction.stationManifold(player);
             case CRUCIBLE   -> extraction.stationCrucible(player, player.isSneaking());

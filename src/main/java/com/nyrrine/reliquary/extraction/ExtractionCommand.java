@@ -291,6 +291,11 @@ public final class ExtractionCommand {
         }
 
         writeVial(player, v);
+        reagentFeedback(player, r, result, st);
+    }
+
+    /** The shared feedback after a reagent lands — used by the inventory path and the Censer station path. */
+    private void reagentFeedback(Player player, Reagent r, Engine.AddResult result, PotState st) {
         if (result.stepFailed()) {
             player.sendMessage(msg("Your hand slips — the " + r.display() + " never enters the pot (wasted). "
                     + "The batch survives, but the fumble cost a little purity + stability. Retry.",
@@ -414,26 +419,121 @@ public final class ExtractionCommand {
         }
     }
 
-    /** The Censer (Brewing Stand): the held reagent item is titrated into your vial (spends one). */
-    public void stationCenser(Player player, ItemStack held) {
-        Reagent r = Reagents.fromItem(held);
-        if (r == null) {
-            player.sendMessage(msg("The Censer doesn't take that — hold a reagent item.", NamedTextColor.RED));
+    /** A Censer that is holding a vial: the vial item, its floating display, and the block it sits on. */
+    private record CenserSlot(ItemStack vial, org.bukkit.entity.ItemDisplay display, org.bukkit.Location block) {}
+
+    private final Map<String, CenserSlot> censers = new HashMap<>();
+
+    /**
+     * The Censer (Brewing Stand) is a stateful vessel. Right-click <b>holding a Cogito vial</b> to seat it in
+     * the Censer (it lifts and turns above the stand); then right-click <b>holding reagents</b> to titrate them
+     * into the seated vial one at a time. Sneak-right-click (or empty hand) lifts the vial back out.
+     */
+    public void stationCenser(Player player, ItemStack held, org.bukkit.Location loc, boolean sneaking) {
+        String k = locKey(loc);
+        CenserSlot slot = censers.get(k);
+
+        if (sneaking) { // take the vial back out
+            if (slot == null) { player.sendActionBar(msg("The Censer is empty.", FAINT)); return; }
+            censerRetrieve(player, k);
             return;
         }
-        Vial v = locateVial(player);
-        if (v == null) { noVial(player); return; }
-        // Full-vial guard BEFORE spending the reagent — applyReagent would otherwise no-op and eat the item.
-        PotState st = v.state();
+
+        if (Cogito.matches(held)) { // seat a vial
+            if (slot != null) { player.sendActionBar(msg("A vial is already seated — sneak-click to lift it out.",
+                    NamedTextColor.RED)); return; }
+            censerSeat(player, k, loc, held);
+            return;
+        }
+
+        Reagent r = Reagents.fromItem(held);
+        if (r != null) { // titrate into the seated vial
+            if (slot == null) { player.sendActionBar(msg("Seat a Cogito vial first — right-click holding one.",
+                    NamedTextColor.RED)); return; }
+            censerFeed(player, slot, held, r);
+            return;
+        }
+
+        player.sendActionBar(msg(slot == null
+                ? "Right-click holding a Cogito vial to seat it."
+                : "Right-click holding a reagent to titrate it in (sneak to lift the vial out).", FAINT));
+    }
+
+    private void censerSeat(Player player, String k, org.bukkit.Location loc, ItemStack held) {
+        ItemStack one = held.clone();
+        one.setAmount(1);
+        held.setAmount(held.getAmount() - 1);
+        player.getInventory().setItemInMainHand(held.getAmount() <= 0 ? null : held);
+        org.bukkit.Location at = loc.clone().add(0.5, 1.05, 0.5);
+        org.bukkit.entity.ItemDisplay disp = loc.getWorld().spawn(at, org.bukkit.entity.ItemDisplay.class, d -> {
+            d.setItemStack(one);
+            d.setBillboard(org.bukkit.entity.Display.Billboard.VERTICAL);
+            d.setPersistent(false);
+            d.setBrightness(new org.bukkit.entity.Display.Brightness(15, 15));
+            var tr = d.getTransformation();
+            tr.getScale().set(0.6f);
+            d.setTransformation(tr);
+        });
+        censers.put(k, new CenserSlot(one, disp, loc.clone()));
+        player.playSound(loc, Sound.BLOCK_BREWING_STAND_BREW, 0.6f, 1.6f);
+        player.sendActionBar(msg("Vial seated — titrate reagents in.", GREEN));
+    }
+
+    private void censerRetrieve(Player player, String k) {
+        CenserSlot slot = censers.remove(k);
+        if (slot == null) return;
+        if (slot.display().isValid()) slot.display().remove();
+        giveOrDrop(player, slot.vial());
+        player.playSound(slot.block(), Sound.BLOCK_BREWING_STAND_BREW, 0.6f, 1.0f);
+        player.sendActionBar(msg("Lifted the vial out.", GREEN));
+    }
+
+    private void censerFeed(Player player, CenserSlot slot, ItemStack held, Reagent r) {
+        ItemStack vialItem = slot.vial();
+        PotState st = Cogito.read(vialItem);
+        if (st == null) { censers.remove(locKey(slot.block())); if (slot.display().isValid()) slot.display().remove(); return; }
+
         if (st.titer() >= Engine.VIAL_CAP && Engine.addReagent(st.copy(), r, new java.util.Random(0L)).full()) {
-            player.sendMessage(msg(String.format(
-                    "The vial is full (%.0f titer cap). Distill it, or blend several vials for more volume.",
+            player.sendActionBar(msg(String.format("The vial is full (%.0f cap) — distill or blend it.",
                     Engine.VIAL_CAP), NamedTextColor.RED));
             return;
         }
+        // spend one reagent from hand
         held.setAmount(held.getAmount() - 1);
         player.getInventory().setItemInMainHand(held.getAmount() <= 0 ? null : held);
-        applyReagent(player, r);
+
+        Engine.AddResult result = Engine.addReagent(st, r, ThreadLocalRandom.current());
+        if (result.breached()) {
+            censers.remove(locKey(slot.block()));
+            if (slot.display().isValid()) slot.display().remove();
+            slot.block().getWorld().playSound(slot.block(), Sound.BLOCK_GLASS_BREAK, 1.0f, 0.7f);
+            slot.block().getWorld().playSound(slot.block(), Sound.ENTITY_GENERIC_EXPLODE, 0.4f, 1.5f);
+            slot.block().getWorld().spawnParticle(org.bukkit.Particle.SMOKE,
+                    slot.block().clone().add(0.5, 1.1, 0.5), 25, 0.2, 0.2, 0.2, 0.02);
+            player.sendMessage(msg("The pot RUPTURES in the Censer — the batch is LOST. "
+                    + "Buffer with amethyst_shard before stability bottoms out.", NamedTextColor.RED));
+            return;
+        }
+        Cogito.write(vialItem, st);
+        if (slot.display().isValid()) slot.display().setItemStack(vialItem); // reflect the new colour/composition
+        reagentFeedback(player, r, result, st);
+    }
+
+    /** Return a seated vial when its Censer is broken (don't lose the player's work). */
+    public void censerReturnOnBreak(org.bukkit.Location loc) {
+        CenserSlot slot = censers.remove(locKey(loc));
+        if (slot == null) return;
+        if (slot.display().isValid()) slot.display().remove();
+        loc.getWorld().dropItemNaturally(loc.clone().add(0.5, 0.5, 0.5), slot.vial());
+    }
+
+    /** Drop every seated vial back into the world on shutdown so none are lost. */
+    public void censerDropAll() {
+        for (CenserSlot slot : censers.values()) {
+            if (slot.display().isValid()) slot.display().remove();
+            slot.block().getWorld().dropItemNaturally(slot.block().clone().add(0.5, 0.5, 0.5), slot.vial());
+        }
+        censers.clear();
     }
 
     /** The Centrifuge (Grindstone): distill the held vial. */
