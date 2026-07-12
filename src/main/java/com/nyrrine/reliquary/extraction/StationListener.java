@@ -1,35 +1,46 @@
 package com.nyrrine.reliquary.extraction;
 
-import org.bukkit.Material;
+import org.bukkit.GameMode;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 
 /**
- * The lab stations (§35) as block front-ends. Right-click the assigned block and it runs that step of the
- * pipeline on you, calling the same logic as the matching {@code /cogito} command:
- *
- * <ul>
- *   <li><b>Cauldron</b> → the Font (draw Enkephalin)</li>
- *   <li><b>Blast Furnace</b> → the Alembic (make a vial)</li>
- *   <li><b>Brewing Stand</b> → the Censer (titrate the held reagent item into your vial)</li>
- *   <li><b>Grindstone</b> → the Centrifuge (distill)</li>
- *   <li><b>Chiseled Bookshelf</b> → the Manifold (blend)</li>
- *   <li><b>Vault</b> → the Pocket Well (right-click = pour, sneak = forge the best catalyst you can afford)</li>
- * </ul>
- *
- * <p>The event is cancelled so the vanilla block GUI doesn't also fire. (Until attunement lands in §35.1,
- * <i>any</i> block of these types is a station — fine on a private lab server.) The Lectern is handled by
- * {@link LecternInfo}.
+ * The lab stations (§35) as crafted, placed custom blocks. Placing a station item registers that block's
+ * location as a station ({@link Stations}); breaking it gives the station item back and de-registers it.
+ * Right-clicking a <i>registered</i> station block runs its pipeline step (the same logic as the matching
+ * {@code /cogito} command). Ordinary blocks of the same type are untouched.
  */
 public final class StationListener implements Listener {
 
     private final ExtractionCommand extraction;
+    private final Stations stations;
 
-    public StationListener(ExtractionCommand extraction) {
+    public StationListener(ExtractionCommand extraction, Stations stations) {
         this.extraction = extraction;
+        this.stations = stations;
+    }
+
+    @EventHandler
+    public void onPlace(BlockPlaceEvent event) {
+        StationType type = StationType.fromItem(event.getItemInHand());
+        if (type != null) stations.register(event.getBlockPlaced(), type);
+    }
+
+    @EventHandler
+    public void onBreak(BlockBreakEvent event) {
+        StationType type = stations.typeAt(event.getBlock());
+        if (type == null) return;
+        stations.unregister(event.getBlock());
+        event.setDropItems(false); // don't drop the plain vanilla block
+        if (event.getPlayer().getGameMode() != GameMode.CREATIVE) {
+            event.getBlock().getWorld().dropItemNaturally(event.getBlock().getLocation().add(0.5, 0.5, 0.5),
+                    type.createItem());
+        }
     }
 
     @EventHandler
@@ -38,18 +49,19 @@ public final class StationListener implements Listener {
         if (event.getHand() != EquipmentSlot.HAND) return; // main hand only — no off-hand double-fire
         if (event.getClickedBlock() == null) return;
 
+        StationType type = stations.typeAt(event.getClickedBlock());
+        if (type == null) return; // an ordinary block — leave it vanilla
+
+        event.setCancelled(true); // it's a station — suppress the vanilla GUI and run the step
         var player = event.getPlayer();
-        switch (event.getClickedBlock().getType()) {
-            case CAULDRON, WATER_CAULDRON -> { event.setCancelled(true); extraction.stationFont(player); }
-            case BLAST_FURNACE -> { event.setCancelled(true); extraction.stationAlembic(player); }
-            case BREWING_STAND -> {
-                event.setCancelled(true);
-                extraction.stationCenser(player, player.getInventory().getItemInMainHand());
-            }
-            case GRINDSTONE -> { event.setCancelled(true); extraction.stationCentrifuge(player); }
-            case CHISELED_BOOKSHELF -> { event.setCancelled(true); extraction.stationManifold(player); }
-            case VAULT -> { event.setCancelled(true); extraction.stationWell(player, player.isSneaking()); }
-            default -> { /* not a station block */ }
+        switch (type) {
+            case LECTERN    -> extraction.describeItem(player, player.getInventory().getItemInMainHand());
+            case FONT       -> extraction.stationFont(player);
+            case ALEMBIC    -> extraction.stationAlembic(player);
+            case CENSER     -> extraction.stationCenser(player, player.getInventory().getItemInMainHand());
+            case CENTRIFUGE -> extraction.stationCentrifuge(player);
+            case MANIFOLD   -> extraction.stationManifold(player);
+            case WELL       -> extraction.stationWell(player, player.isSneaking());
         }
     }
 }

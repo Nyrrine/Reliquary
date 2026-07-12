@@ -64,6 +64,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
     private WeaponManager weapons;
     private RelicTracker tracker;
     private ExtractionCommand extraction;
+    private com.nyrrine.reliquary.extraction.Stations stations;
 
     @Override
     public void onEnable() {
@@ -120,10 +121,11 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
 
         this.extraction = new ExtractionCommand(this);
         new com.nyrrine.reliquary.extraction.CogitoTicker(this).start();
+        this.stations = new com.nyrrine.reliquary.extraction.Stations(this);
+        stations.load();
+        stations.registerRecipes();
         getServer().getPluginManager().registerEvents(
-                new com.nyrrine.reliquary.extraction.LecternInfo(extraction), this);
-        getServer().getPluginManager().registerEvents(
-                new com.nyrrine.reliquary.extraction.StationListener(extraction), this);
+                new com.nyrrine.reliquary.extraction.StationListener(extraction, stations), this);
 
         PluginCommand cmd = getCommand("reliquary");
         if (cmd != null) cmd.setTabCompleter(this);
@@ -141,6 +143,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
     @Override
     public void onDisable() {
         if (weapons != null) weapons.disable();
+        if (stations != null) stations.save();
     }
 
     public WeaponManager weapons() {

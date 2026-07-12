@@ -45,7 +45,7 @@ public final class ExtractionCommand {
 
     /** The subcommands, in help/tab order. */
     private static final List<String> SUBS = List.of(
-            "vial", "fuel", "giveall", "reagents", "add", "assay", "lectern", "distill", "blend",
+            "vial", "fuel", "giveall", "stations", "reagents", "add", "assay", "lectern", "distill", "blend",
             "recipes", "forge", "pour");
 
     /**
@@ -64,6 +64,7 @@ public final class ExtractionCommand {
             case "vial"     -> giveVial(player);
             case "fuel"     -> giveFuel(player, a);
             case "giveall"  -> giveAll(player);
+            case "stations" -> giveStations(player);
             case "reagents" -> listReagents(player);
             case "add"      -> add(player, a);
             case "assay"    -> assay(player);
@@ -114,6 +115,13 @@ public final class ExtractionCommand {
         int n = parseInt(a, 1, 16);
         giveOrDrop(player, Enkephalin.create(n));
         player.sendMessage(msg("Drew " + n + " Enkephalin.", GREEN));
+    }
+
+    /** Hand over the 7 crafted station items (for testing without gathering the recipe parts). */
+    private void giveStations(Player player) {
+        for (StationType t : StationType.values()) giveOrDrop(player, t.createItem());
+        player.sendMessage(msg("Dispensed the " + StationType.values().length
+                + " station blocks — place them and right-click. (They're also craftable.)", GREEN));
     }
 
     /** Dispense one of everything the system uses — a vial, fuel, every reagent's item form, and every
