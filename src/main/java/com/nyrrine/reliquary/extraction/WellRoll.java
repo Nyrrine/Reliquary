@@ -33,7 +33,7 @@ public final class WellRoll {
     public static final double POOL_MATCH_FLOOR = 0.60;
     /** How sharply the gacha favours your best-matched weapon (weight = match^this). High, so a pour shaped
      *  cleanly onto one signature comes out as that weapon ~90% of the time; the rest is close neighbours. */
-    public static final double GACHA_SHARPNESS = 18.0;
+    public static final double GACHA_SHARPNESS = 28.0;
     /** Purity at/above which a locked catalyst certifies the pour (Certified, 100% lore). */
     public static final double CERTIFIED_PURITY = Grade.PRIMARY_STANDARD.minPurity();
 

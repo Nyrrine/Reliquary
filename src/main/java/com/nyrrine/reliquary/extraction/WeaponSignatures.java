@@ -85,9 +85,9 @@ public final class WeaponSignatures {
             SinProfile.builder().add(LUST, 50).add(ENVY, 50).build());
     public static final WeaponSpec SWORD_OF_TEARS = reg("sword_of_tears", "Sword of Sharpened Tears", WAW,
             SinProfile.builder().add(GLOOM, 50).add(PRIDE, 30).add(ENVY, 20).build());
-    public static final WeaponSpec GREEN_STEM = reg("green_stem", "Green Stem", WAW,
+    public static final WeaponSpec GREEN_STEM = reg("green_stem", "Green Stem", HE,
             SinProfile.builder().add(GLUTTONY, 40).add(ENVY, 40).add(LUST, 20).build());
-    public static final WeaponSpec SCREAMING_WEDGE = reg("screaming_wedge", "Screaming Wedge", WAW,
+    public static final WeaponSpec SCREAMING_WEDGE = reg("screaming_wedge", "Screaming Wedge", HE,
             SinProfile.builder().add(GLOOM, 50).add(WRATH, 30).add(SLOTH, 20).build());
     public static final WeaponSpec HEAVEN = reg("heaven", "Heaven", WAW,
             SinProfile.builder().add(PRIDE, 80).add(WRATH, 20).build());
