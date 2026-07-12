@@ -160,8 +160,8 @@ public final class ExtractionCommand {
         for (Catalysts.Recipe rec : Catalysts.all()) mats.addAll(rec.components().keySet());
         for (Material m : mats) giveOrDrop(player, new ItemStack(m, 16));
         int refined = 0;
-        for (String id : RefinedReagent.ids()) { giveOrDrop(player, RefinedReagent.create(id, 8)); refined++; }
-        for (Sin s : Sin.values()) giveOrDrop(player, SinConcentrate.create(s, 16));
+        for (String id : RefinedReagent.ids()) { giveOrDrop(player, RefinedReagent.create(id, 64)); refined++; }
+        for (Sin s : Sin.values()) giveOrDrop(player, SinConcentrate.create(s, 32));
         player.sendMessage(msg("Dispensed a vial, 64 Enkephalin, " + mats.size()
                 + " item types (reagents + catalyst components), " + refined
                 + " refined chain reagents, and 7 sin concentrates. Overflow is at your feet.", GREEN));
@@ -567,10 +567,37 @@ public final class ExtractionCommand {
     }
 
     private boolean canAfford(Player player, Catalysts.Recipe rec) {
-        for (var e : rec.components().entrySet()) {
+        WeaponSpec w = WeaponSignatures.byId(rec.weaponId());
+        EgoGrade g = w != null ? w.grade() : EgoGrade.ZAYIN;
+        for (var e : CatalystCost.components(rec, g).entrySet()) {
             if (countMaterial(player, e.getKey()) < e.getValue()) return false;
         }
-        return countEnkephalin(player) >= rec.enkephalin();
+        if (w != null) for (var e : CatalystCost.refinedTax(w).entrySet()) {
+            if (countRefined(player, e.getKey()) < e.getValue()) return false;
+        }
+        return countEnkephalin(player) >= CatalystCost.enkephalin(rec, g);
+    }
+
+    /** How many of a specific refined reagent (by id, via its PDC tag) the player holds. */
+    private int countRefined(Player player, String reagentId) {
+        int c = 0;
+        for (ItemStack it : player.getInventory().getContents()) {
+            if (it != null && reagentId.equals(RefinedReagent.idOf(it))) c += it.getAmount();
+        }
+        return c;
+    }
+
+    /** Remove {@code n} of a specific refined reagent (by id) from the player's inventory. */
+    private void consumeRefined(Player player, String reagentId, int n) {
+        ItemStack[] contents = player.getInventory().getContents();
+        for (int i = 0; i < contents.length && n > 0; i++) {
+            ItemStack it = contents[i];
+            if (it == null || !reagentId.equals(RefinedReagent.idOf(it))) continue;
+            int take = Math.min(n, it.getAmount());
+            it.setAmount(it.getAmount() - take);
+            n -= take;
+            player.getInventory().setItem(i, it.getAmount() <= 0 ? null : it);
+        }
     }
 
     /** Open the in-game manual (the Assay's guide) — a written book so newcomers aren't flying blind. */
@@ -861,10 +888,15 @@ public final class ExtractionCommand {
             }
             player.sendMessage(msg(w.display() + " Catalyst (" + w.grade().display() + ") — forge needs:",
                     NamedTextColor.WHITE));
-            for (var e : rec.components().entrySet()) {
+            for (var e : CatalystCost.components(rec, w.grade()).entrySet()) {
                 player.sendMessage(msg("  " + e.getValue() + "x " + pretty(e.getKey()), FAINT));
             }
-            player.sendMessage(msg("  + " + rec.enkephalin() + " Enkephalin", FAINT));
+            for (var e : CatalystCost.refinedTax(w).entrySet()) {
+                Reagent rr = Reagents.byId(e.getKey());
+                player.sendMessage(msg("  " + e.getValue() + "x " + (rr != null ? rr.display() : e.getKey())
+                        + " (refined)", TextColor.color(0xB8F0E4)));
+            }
+            player.sendMessage(msg("  + " + CatalystCost.enkephalin(rec, w.grade()) + " Enkephalin", FAINT));
             return;
         }
         player.sendMessage(msg("Catalyst recipes (" + Catalysts.count() + " defined) — /cogito recipes <id>:",
@@ -886,22 +918,33 @@ public final class ExtractionCommand {
             return;
         }
 
-        // Check everything up front, list all shortfalls at once.
+        // Steep, grade-scaled cost: the multiplied vanilla grind + Enkephalin + the refined-reagent tax.
+        var components = CatalystCost.components(rec, w.grade());
+        int enkCost = CatalystCost.enkephalin(rec, w.grade());
+        var refinedTax = CatalystCost.refinedTax(w);
+
         List<String> missing = new ArrayList<>();
-        for (var e : rec.components().entrySet()) {
+        for (var e : components.entrySet()) {
             int have = countMaterial(player, e.getKey());
             if (have < e.getValue()) missing.add((e.getValue() - have) + " more " + pretty(e.getKey()));
         }
+        for (var e : refinedTax.entrySet()) {
+            int have = countRefined(player, e.getKey());
+            Reagent rr = Reagents.byId(e.getKey());
+            if (have < e.getValue()) missing.add((e.getValue() - have) + " more "
+                    + (rr != null ? rr.display() : e.getKey()));
+        }
         int enk = countEnkephalin(player);
-        if (enk < rec.enkephalin()) missing.add((rec.enkephalin() - enk) + " more Enkephalin");
+        if (enk < enkCost) missing.add((enkCost - enk) + " more Enkephalin");
         if (!missing.isEmpty()) {
             player.sendMessage(msg("The forge is short: " + String.join(", ", missing) + ".", NamedTextColor.RED));
             return;
         }
 
         // Consume and forge.
-        for (var e : rec.components().entrySet()) consumeMaterial(player, e.getKey(), e.getValue());
-        consumeEnkephalin(player, rec.enkephalin());
+        for (var e : components.entrySet()) consumeMaterial(player, e.getKey(), e.getValue());
+        for (var e : refinedTax.entrySet()) consumeRefined(player, e.getKey(), e.getValue());
+        consumeEnkephalin(player, enkCost);
         giveOrDrop(player, Catalyst.create(w));
         player.sendMessage(msg("The Well forges the " + w.display() + " Catalyst — pour it with a matching "
                 + w.grade().display() + " cogito to guarantee the extraction.", GREEN));

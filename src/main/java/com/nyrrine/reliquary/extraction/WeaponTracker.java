@@ -64,17 +64,24 @@ public final class WeaponTracker {
                     s.color()));
         }
 
-        // Catalyst grind still outstanding (for a guaranteed pull).
-        Map<Material, Integer> need = neededComponents(weaponId);
-        if (!need.isEmpty()) {
+        // Catalyst grind still outstanding (for a guaranteed pull) — the real, grade-scaled cost.
+        Catalysts.Recipe rec = Catalysts.forWeapon(weaponId);
+        if (rec != null) {
             out.add(Component.text("Catalyst grind (for a guaranteed pull):", NamedTextColor.GRAY));
-            for (Map.Entry<Material, Integer> e : need.entrySet()) {
+            for (var e : CatalystCost.components(rec, spec.grade()).entrySet()) {
                 int have = countType(player, e.getKey());
                 boolean done = have >= e.getValue();
                 out.add(Component.text((done ? "  ✔ " : "  • ") + prettyMat(e.getKey())
                         + "  " + have + "/" + e.getValue(),
                         done ? NamedTextColor.GREEN : NamedTextColor.YELLOW));
             }
+            for (var e : CatalystCost.refinedTax(spec).entrySet()) {
+                Reagent rr = Reagents.byId(e.getKey());
+                out.add(Component.text("  • " + (rr != null ? rr.display() : e.getKey())
+                        + " (refined) ×" + e.getValue(), NamedTextColor.AQUA));
+            }
+            out.add(Component.text("  + " + CatalystCost.enkephalin(rec, spec.grade()) + " Enkephalin",
+                    NamedTextColor.GRAY));
         }
         return out;
     }
