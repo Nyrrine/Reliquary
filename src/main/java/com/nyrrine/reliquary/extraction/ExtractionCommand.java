@@ -1037,7 +1037,8 @@ public final class ExtractionCommand {
             if (sin != null) {
                 player.sendMessage(msg(sin.display() + " Concentrate — craft at a table:", NamedTextColor.WHITE));
                 player.sendMessage(msg("  " + SinConcentrate.RAW_PER_CONCENTRATE + "x "
-                        + pretty(SinConcentrate.rawFor(sin)), FAINT));
+                        + pretty(SinConcentrate.rawFor(sin)) + "  +  1x Iron Nugget  +  1x "
+                        + pretty(SinConcentrate.secondaryFor(sin)), FAINT));
                 return;
             }
 

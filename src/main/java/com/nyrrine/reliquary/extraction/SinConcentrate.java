@@ -29,29 +29,42 @@ public final class SinConcentrate {
     private SinConcentrate() {}
 
     /** Raw sin items crushed into one Concentrate. */
-    public static final int RAW_PER_CONCENTRATE = 8;
+    public static final int RAW_PER_CONCENTRATE = 6;
 
     private static final NamespacedKey TAG = new NamespacedKey("reliquary", "sin_concentrate");
 
-    /** The cheap raw vanilla item that carries each sin's affinity (crushed into the Concentrate). */
+    /** The primary MOB DROP crushed into each sin's Concentrate. */
     private static final Map<Sin, Material> RAW = new EnumMap<>(Sin.class);
+    /** A SECOND mob's drop each Concentrate also needs — forces grinding a different mob, not one spawner. */
+    private static final Map<Sin, Material> SECONDARY = new EnumMap<>(Sin.class);
     /** The Concentrate's carrier icon (a spare dye per sin; PDC-tagged + renamed, only the tagged one counts). */
     private static final Map<Sin, Material> CARRIER = new EnumMap<>(Sin.class);
     static {
         // Raw = an accessible-but-stack-hungry MOB DROP per sin; carrier dye = the Limbus sin colour.
-        RAW.put(Sin.WRATH, Material.GUNPOWDER);       CARRIER.put(Sin.WRATH, Material.RED_DYE);        // creeper — red
-        RAW.put(Sin.GLOOM, Material.BONE);            CARRIER.put(Sin.GLOOM, Material.LIGHT_BLUE_DYE);  // skeleton — blue
-        RAW.put(Sin.PRIDE, Material.GOLD_NUGGET);     CARRIER.put(Sin.PRIDE, Material.BLUE_DYE);        // piglin — dark blue
-        RAW.put(Sin.LUST, Material.LEATHER);          CARRIER.put(Sin.LUST, Material.ORANGE_DYE);       // cow — orange
-        RAW.put(Sin.SLOTH, Material.STRING);          CARRIER.put(Sin.SLOTH, Material.YELLOW_DYE);      // spider — yellow
-        RAW.put(Sin.ENVY, Material.SPIDER_EYE);       CARRIER.put(Sin.ENVY, Material.PURPLE_DYE);       // spider — violet
-        RAW.put(Sin.GLUTTONY, Material.ROTTEN_FLESH); CARRIER.put(Sin.GLUTTONY, Material.GREEN_DYE);    // zombie — green
+        // SECONDARY = another mob's drop (a cross-mob binder), so no sin can be farmed from one spawner.
+        RAW.put(Sin.WRATH, Material.GUNPOWDER);       SECONDARY.put(Sin.WRATH, Material.BONE);         CARRIER.put(Sin.WRATH, Material.RED_DYE);        // creeper + skeleton
+        RAW.put(Sin.GLOOM, Material.BONE);            SECONDARY.put(Sin.GLOOM, Material.STRING);       CARRIER.put(Sin.GLOOM, Material.LIGHT_BLUE_DYE);  // skeleton + spider
+        RAW.put(Sin.PRIDE, Material.GOLD_NUGGET);     SECONDARY.put(Sin.PRIDE, Material.ROTTEN_FLESH); CARRIER.put(Sin.PRIDE, Material.BLUE_DYE);        // piglin + zombie
+        RAW.put(Sin.LUST, Material.LEATHER);          SECONDARY.put(Sin.LUST, Material.SPIDER_EYE);    CARRIER.put(Sin.LUST, Material.ORANGE_DYE);       // cow + spider
+        RAW.put(Sin.SLOTH, Material.STRING);          SECONDARY.put(Sin.SLOTH, Material.LEATHER);      CARRIER.put(Sin.SLOTH, Material.YELLOW_DYE);      // spider + cow
+        RAW.put(Sin.ENVY, Material.SPIDER_EYE);       SECONDARY.put(Sin.ENVY, Material.GUNPOWDER);     CARRIER.put(Sin.ENVY, Material.PURPLE_DYE);       // spider + creeper
+        RAW.put(Sin.GLUTTONY, Material.ROTTEN_FLESH); SECONDARY.put(Sin.GLUTTONY, Material.GOLD_NUGGET);CARRIER.put(Sin.GLUTTONY, Material.GREEN_DYE);    // zombie + piglin
     }
 
     private static final TextColor FAINT = TextColor.color(0x7A7A84);
 
     /** The raw vanilla item that feeds a sin's Concentrate. */
     public static Material rawFor(Sin s) { return RAW.get(s); }
+
+    /** The second mob drop a sin's Concentrate also needs. */
+    public static Material secondaryFor(Sin s) { return SECONDARY.get(s); }
+
+    private static String prettyMat(Material m) {
+        String[] parts = m.name().toLowerCase(java.util.Locale.ROOT).split("_");
+        StringBuilder sb = new StringBuilder();
+        for (String p : parts) sb.append(Character.toUpperCase(p.charAt(0))).append(p.substring(1)).append(' ');
+        return sb.toString().trim();
+    }
 
     /** A crafted, tagged Concentrate for {@code sin}. */
     public static ItemStack create(Sin sin, int amount) {
@@ -63,7 +76,8 @@ public final class SinConcentrate {
                 .color(sin.color()).decoration(TextDecoration.ITALIC, false));
         meta.lore(List.of(
                 Component.text("Refined crafting component.", FAINT).decoration(TextDecoration.ITALIC, false),
-                Component.text(RAW_PER_CONCENTRATE + "× raw " + sin.display() + " → 1.", FAINT)
+                Component.text(RAW_PER_CONCENTRATE + "× " + prettyMat(RAW.get(sin)) + " + Iron Nugget + "
+                        + prettyMat(SECONDARY.get(sin)) + ".", FAINT)
                         .decoration(TextDecoration.ITALIC, false),
                 Component.text("Not for the Censer — feeds Pure/Standard reagents.", FAINT)
                         .decoration(TextDecoration.ITALIC, true)));
@@ -94,7 +108,9 @@ public final class SinConcentrate {
             ItemStack result = create(s, 1);
             if (result == null) continue;
             ShapelessRecipe recipe = new ShapelessRecipe(key, result);
-            recipe.addIngredient(RAW_PER_CONCENTRATE, RAW.get(s)); // 8 raw of this sin
+            recipe.addIngredient(RAW_PER_CONCENTRATE, RAW.get(s)); // 6 primary mob drops
+            recipe.addIngredient(Material.IRON_NUGGET);            // + a little iron (mining/iron farm)
+            recipe.addIngredient(SECONDARY.get(s));               // + a second mob's drop (forces variety)
             Bukkit.addRecipe(recipe);
         }
     }

@@ -176,7 +176,7 @@ public final class RefinedReagent {
             String[] l = LADDER.get(s);
             if (l[0].equals(reagentId)) { // Pure
                 return List.of(CONCENTRATE_PER_PURE + "× " + s.display() + " Concentrate",
-                        "1× Amethyst Shard");
+                        "1× Amethyst Shard", "1× Iron Ingot");
             }
             if (l[1].equals(reagentId)) { // Standard
                 Reagent pure = Reagents.byId(l[0]);
@@ -207,6 +207,7 @@ public final class RefinedReagent {
             var concentrate = new org.bukkit.inventory.RecipeChoice.ExactChoice(SinConcentrate.create(sin, 1));
             for (int i = 0; i < CONCENTRATE_PER_PURE; i++) pure.addIngredient(concentrate);
             pure.addIngredient(Material.AMETHYST_SHARD);
+            pure.addIngredient(Material.IRON_INGOT); // a little iron binds the concentrates into a Pure
             addRecipe(plugin, pureId, pure);
 
             // Standard = 4 Pure(exact) + 1 gated item.
