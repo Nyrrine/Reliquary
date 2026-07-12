@@ -382,6 +382,59 @@ public final class ExtractionCommand {
     /** The Manifold (Chiseled Bookshelf): blend all charged vials you carry. */
     public void stationManifold(Player player) { blend(player); }
 
+    /** The Crucible (Smithing Table): right-click forges the best catalyst you can afford; sneak = sublimate. */
+    public void stationCrucible(Player player, boolean sneaking) {
+        if (sneaking) {
+            player.sendMessage(msg("Sublimation — refining cogito for WAW/ALEPH — isn't wired yet. Coming soon.",
+                    FAINT));
+            return;
+        }
+        Catalysts.Recipe best = null;
+        EgoGrade bestGrade = null;
+        for (Catalysts.Recipe rec : Catalysts.all()) {
+            if (!canAfford(player, rec)) continue;
+            WeaponSpec w = WeaponSignatures.byId(rec.weaponId());
+            EgoGrade g = w != null ? w.grade() : EgoGrade.ZAYIN;
+            if (best == null || g.ordinal() > bestGrade.ordinal()) { best = rec; bestGrade = g; }
+        }
+        if (best == null) {
+            player.sendMessage(msg("The Crucible has nothing to forge — gather a catalyst's grind components "
+                    + "first (right-click the Assay for the guide, or /cogito recipes <id>).", NamedTextColor.RED));
+            return;
+        }
+        forge(player, new String[]{"forge", best.weaponId()});
+        player.playSound(player.getLocation(), Sound.BLOCK_ANVIL_USE, 0.7f, 0.8f);
+    }
+
+    private boolean canAfford(Player player, Catalysts.Recipe rec) {
+        for (var e : rec.components().entrySet()) {
+            if (countMaterial(player, e.getKey()) < e.getValue()) return false;
+        }
+        return countEnkephalin(player) >= rec.enkephalin();
+    }
+
+    /** Open the in-game manual (the Assay's guide) — a written book so newcomers aren't flying blind. */
+    public void openGuide(Player player) {
+        ItemStack book = new ItemStack(Material.WRITTEN_BOOK);
+        org.bukkit.inventory.meta.BookMeta bm = (org.bukkit.inventory.meta.BookMeta) book.getItemMeta();
+        bm.author(Component.text("The Pocket Well"));
+        bm.title(Component.text("Extraction Primer"));
+        bm.addPages(
+                page("§lE.G.O EXTRACTION\n\nYou don't craft a weapon — you §omanifest a mind§r.\n\nBrew §2Cogito§0 from emotion, refine it, and pour it into the §5Well§0. Get the chemistry right and the weapon you shaped it for climbs out."),
+                page("§lTHE LOOP\n\n1. §5Font§0 — feed emotions → Enkephalin + Raw Cogito\n2. §5Alembic§0 — Raw + Enkephalin → a vial\n3. §5Censer§0 — add reagents (titrate)\n4. §5Centrifuge§0 — distill (purity up)\n5. §5Manifold§0 — blend vials\n6. §5Well§0 — pour → weapon"),
+                page("§lREADING A VIAL\n\n§2Green shade§0 = purity (dark=crude, bright=pure).\n\n• §lPurity/Grade§r — Crude→Certified. Higher grade unlocks higher-tier weapons.\n• §lStability§r — don't let it hit 0 or the pot ruptures.\n• §lVolume§r — bigger pours reach rarer weapons."),
+                page("§lTHE 7 SINS\n\nWrath·Pride·Lust (§chot§0) and Gloom·Sloth·Envy (§9cold§0) resonate within their group. §5Gluttony§0 is the neutral hub.\n\nOpposed pairs bleed stability: Pride✕Gloom, Wrath✕Sloth, Lust✕Envy. Steady them with §5Honeycomb§0."),
+                page("§lAFFLICTIONS\n\nThe pot is a live mind — it gets §csick§0 (the vial changes colour).\n\nEach taint has a timer. §aCure it in time§0 (the right item) and it clears clean; §cignore it§0 and the damage §lscars§r for good. Read it at the Assay."),
+                page("§lCATALYSTS\n\nA per-weapon key that §lguarantees§r the exact weapon (cuts the luck).\n\n1. §5/cogito recipes <id>§0 — see its cost\n2. Gather the grind, §5forge§0 it at the Crucible\n3. Carry it, pour at the Well → guaranteed."),
+                page("§lTIPS\n\n• Fewest, cleanest touches win — every add dirties the pot.\n• Buffer §5early§0, distill §5last§0.\n• Hold an item over the Assay to identify it.\n• Peer into the Well (right-click) to preview your most-likely pull before you commit."));
+        book.setItemMeta(bm);
+        player.openBook(book);
+    }
+
+    private static Component page(String text) {
+        return net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection().deserialize(text);
+    }
+
     /**
      * The Pocket Well — an ominous chamber. Right-click <b>peers in</b>: it reveals (floating inside) the
      * weapon your current cogito is most likely to manifest, without consuming anything. Sneak-right-click

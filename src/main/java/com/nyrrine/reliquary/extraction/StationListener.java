@@ -62,14 +62,18 @@ public final class StationListener implements Listener {
 
         event.setCancelled(true); // it's a station — suppress the vanilla GUI and run the step
         var player = event.getPlayer();
+        var held = player.getInventory().getItemInMainHand();
         switch (type) {
-            case LECTERN    -> extraction.describeItem(player, player.getInventory().getItemInMainHand());
-            case FONT       -> extraction.stationFont(player,
-                    event.getClickedBlock().getLocation(), player.getInventory().getItemInMainHand());
+            case LECTERN    -> {
+                if (held == null || held.getType().isAir()) extraction.openGuide(player); // empty hand → the manual
+                else extraction.describeItem(player, held);                               // holding → identify it
+            }
+            case FONT       -> extraction.stationFont(player, event.getClickedBlock().getLocation(), held);
             case ALEMBIC    -> extraction.stationAlembic(player);
-            case CENSER     -> extraction.stationCenser(player, player.getInventory().getItemInMainHand());
+            case CENSER     -> extraction.stationCenser(player, held);
             case CENTRIFUGE -> extraction.stationCentrifuge(player);
             case MANIFOLD   -> extraction.stationManifold(player);
+            case CRUCIBLE   -> extraction.stationCrucible(player, player.isSneaking());
             case WELL       -> extraction.stationWell(player,
                     event.getClickedBlock().getLocation(), player.isSneaking());
         }

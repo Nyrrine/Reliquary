@@ -26,6 +26,7 @@ public enum StationType {
     CENTRIFUGE(Material.GRINDSTONE,        "Centrifuge",  Material.REDSTONE_BLOCK,      Material.AMETHYST_SHARD),
     MANIFOLD  (Material.CHISELED_BOOKSHELF,"Manifold",    Material.ENDER_PEARL,         Material.AMETHYST_SHARD),
     WELL      (Material.CONDUIT,           "Pocket Well", Material.NETHER_STAR,         Material.AMETHYST_SHARD),
+    CRUCIBLE  (Material.SMITHING_TABLE,    "Crucible",    Material.MAGMA_BLOCK,         Material.AMETHYST_SHARD),
     LECTERN   (Material.LECTERN,           "Assay",       Material.GLOW_INK_SAC,        Material.AMETHYST_SHARD);
 
     /** PDC tag on a station ITEM, holding the enum name. Blocks are tracked by location in {@link Stations}. */
