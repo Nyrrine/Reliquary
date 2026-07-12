@@ -62,6 +62,11 @@ public final class Cogito {
     private static final TextColor FAINT = TextColor.color(0x7A7A84);
     private static final TextColor BODY  = TextColor.color(0xB8B8C0);
 
+    // Stability breach-gauge tell: safe green > 60, uneasy yellow 30–60, critical red < 30.
+    private static final TextColor STAB_GOOD = TextColor.color(0x4ADF7A);
+    private static final TextColor STAB_WARN = TextColor.color(0xE8D23B);
+    private static final TextColor STAB_BAD  = TextColor.color(0xE23B3B);
+
     // ---- item I/O ------------------------------------------------------------------
 
     /** Whether an item is a Cogito potion. */
@@ -134,7 +139,11 @@ public final class Cogito {
         if (!blank && worst != null) tint = blendToward(tint, worst.rgb(), 0.6);
 
         meta.setColor(tint);
-        meta.addItemFlags(ItemFlag.HIDE_ADDITIONAL_TOOLTIP); // suppress the vanilla "no effects" line
+        // Strip every vanilla-potion tell so ONLY our readout shows: no base effect, no "No Effects"
+        // line, no potion-type name in the tooltip — just our green tint + custom lore.
+        meta.clearCustomEffects();
+        meta.setBasePotionType(org.bukkit.potion.PotionType.WATER);
+        meta.addItemFlags(ItemFlag.HIDE_ADDITIONAL_TOOLTIP); // suppress the vanilla effects/"no effects" line
         meta.setEnchantmentGlintOverride(!blank && grade == Grade.CERTIFIED); // certified vials catch the light
 
         var cmd = meta.getCustomModelDataComponent();
@@ -157,24 +166,69 @@ public final class Cogito {
         return out;
     }
 
+    /**
+     * The at-a-glance composition readout: grade+purity headline, vitals, the full emotional signature, and
+     * any active afflictions — everything the Assay would tell you, on hover, so a vial never needs the
+     * lectern just to be identified. Data lines are upright; flavour/labels are italic.
+     */
     private static List<Component> lore(PotState state, Grade grade, double purity) {
         List<Component> out = new ArrayList<>();
-        out.add(line(grade.display() + " grade", grade.color()));
-        out.add(line(String.format("Purity  %.1f%%", purity), BODY));
-        out.add(line(String.format("Stability  %d / 100", Math.round(state.stability())), BODY));
-        out.add(line(String.format("Volume  %d", Math.round(state.titer())), BODY));
-        if (!state.taints().isEmpty()) {
-            out.add(Component.empty());
-            for (var e : state.taints().entrySet()) {
-                Taint t = e.getKey();
-                out.add(line(String.format("⚠ %s (%.0fs) — cure: %s",
-                        t.display(), e.getValue(), t.cureId()), t.color()));
+        SinProfile profile = state.profile();
+
+        // Headline — the identity of the vial, in its grade's colour: "Analytical · 96.4%".
+        out.add(line(String.format(java.util.Locale.ROOT, "%s · %.1f%%", grade.display(), purity), grade.color()));
+
+        // Vitals — volume in body grey, stability tinted by how close it is to breaching.
+        long vol = Math.round(state.titer());
+        long stab = Math.round(state.stability());
+        out.add(Component.text("", BODY).decoration(TextDecoration.ITALIC, false)
+                .append(Component.text("Volume ", FAINT))
+                .append(Component.text(Long.toString(vol), BODY))
+                .append(Component.text("    ", FAINT))
+                .append(Component.text("Stability ", FAINT))
+                .append(Component.text(stab + "/100", stabilityColor(state.stability()))));
+
+        // Emotional signature — every meaningful share (≥1%), high→low, each tinted with its sin's hue.
+        out.add(Component.empty());
+        out.add(line("Signature", FAINT, true));
+        List<Sin> ordered = new ArrayList<>();
+        for (Sin s : Sin.values()) if (profile.get(s) >= 1.0) ordered.add(s);
+        ordered.sort((a, b) -> Double.compare(profile.get(b), profile.get(a)));
+        if (ordered.isEmpty()) {
+            out.add(line("trace only", FAINT, true));
+        } else {
+            for (Sin s : ordered) {
+                out.add(line(String.format(java.util.Locale.ROOT, "%s %d%%",
+                        s.display(), Math.round(profile.get(s))), s.color()));
             }
         }
-        out.add(Component.empty());
-        out.add(line("Composition unassayed.", FAINT, true));
-        out.add(line("Assay at a lectern to reveal.", FAINT, true));
+
+        // Afflictions — name + remaining time in the taint's signal colour, symptom beneath in flavour italics,
+        // so a sick vial visibly shows its problem on hover.
+        if (!state.taints().isEmpty()) {
+            out.add(Component.empty());
+            for (java.util.Map.Entry<Taint, Double> e : sortedTaints(state)) {
+                Taint t = e.getKey();
+                out.add(line(String.format(java.util.Locale.ROOT, "⚠ %s — %ds left",
+                        t.display(), Math.round(e.getValue())), t.color()));
+                out.add(line(t.symptom(), FAINT, true));
+            }
+        }
         return out;
+    }
+
+    /** Green/yellow/red by how far the breach gauge is from failing. */
+    private static TextColor stabilityColor(double stability) {
+        if (stability > 60.0) return STAB_GOOD;
+        if (stability >= 30.0) return STAB_WARN;
+        return STAB_BAD;
+    }
+
+    /** Active taints ordered most-urgent-first (least time remaining). */
+    private static List<java.util.Map.Entry<Taint, Double>> sortedTaints(PotState state) {
+        List<java.util.Map.Entry<Taint, Double>> entries = new ArrayList<>(state.taints().entrySet());
+        entries.sort(java.util.Map.Entry.comparingByValue());
+        return entries;
     }
 
     // ---- taint serialization -------------------------------------------------------

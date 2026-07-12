@@ -53,6 +53,9 @@ public final class Reagents {
     public static final Reagent REFINED_CINDER = reg(Reagent.of("refined_cinder", "Refined Cinder")
             .delta(WRATH, 22).contam(0.05).stab(-30).tier(STANDARD).inflicts(Taint.FEVER, 0.25)
             .source("processed blaze chain").build());
+    public static final Reagent EMBER_DISTILLATE = reg(Reagent.of("ember_distillate", "Ember Distillate")
+            .delta(WRATH, 11).contam(0.1).stab(-15).tier(PURE)
+            .source("redstone + blaze chain").build());
 
     // ---- Gloom (blue) --------------------------------------------------------------
     public static final Reagent INK_SAC = reg(Reagent.of("ink_sac", "Glow Ink Sac")
@@ -84,6 +87,9 @@ public final class Reagents {
     public static final Reagent MIRROR_POLISH = reg(Reagent.of("mirror_polish", "Mirror Polish")
             .delta(PRIDE, 20).contam(0.05).stab(-28).tier(STANDARD)
             .source("gated: Chiseled Quartz").build());
+    public static final Reagent BURNISHED_VANITY = reg(Reagent.of("burnished_vanity", "Burnished Vanity")
+            .delta(PRIDE, 11).contam(0.1).stab(-15).tier(PURE)
+            .source("gold + nugget chain").build());
 
     // ---- Lust (orange) -------------------------------------------------------------
     public static final Reagent GLOW_BERRIES = reg(Reagent.of("glow_berries", "Glow Berries")
@@ -95,6 +101,9 @@ public final class Reagents {
     public static final Reagent NECTAR_DRAUGHT = reg(Reagent.of("nectar_draught", "Nectar Draught")
             .delta(LUST, 11).contam(0.1).stab(-15).tier(PURE)
             .source("honey chain").build());
+    public static final Reagent AMBER_RAPTURE = reg(Reagent.of("amber_rapture", "Amber Rapture")
+            .delta(LUST, 20).contam(0.05).stab(-28).tier(STANDARD)
+            .source("gated: honey chain + Weathered Copper").build());
 
     // ---- Sloth (yellow) ------------------------------------------------------------
     public static final Reagent SOUL_SAND = reg(Reagent.of("soul_sand", "Soul Sand")
@@ -106,6 +115,9 @@ public final class Reagents {
     public static final Reagent VERDIGRIS_REST = reg(Reagent.of("verdigris_rest", "Verdigris Rest")
             .delta(SLOTH, 19).contam(0.05).stab(-28).tier(STANDARD)
             .source("gated: Oxidized Copper").build());
+    public static final Reagent LETHE_DRAUGHT = reg(Reagent.of("lethe_draught", "Lethe Draught")
+            .delta(SLOTH, 11).contam(0.1).stab(-15).tier(PURE)
+            .source("soul sand + fermented chain").build());
 
     // ---- Envy (violet) -------------------------------------------------------------
     public static final Reagent PUFFERFISH = reg(Reagent.of("pufferfish", "Pufferfish")
@@ -117,6 +129,9 @@ public final class Reagents {
     public static final Reagent VERDANT_SPITE = reg(Reagent.of("verdant_spite", "Verdant Spite")
             .delta(ENVY, 11).contam(0.1).stab(-15).tier(PURE)
             .source("pufferfish chain").build());
+    public static final Reagent RANCOROUS_BLOOM = reg(Reagent.of("rancorous_bloom", "Rancorous Bloom")
+            .delta(ENVY, 20).contam(0.05).stab(-28).tier(STANDARD)
+            .source("gated: pitcher chain + Chiseled Quartz").build());
 
     // ---- Gluttony (green — the safe hub) -------------------------------------------
     public static final Reagent SLIME_BALL = reg(Reagent.of("slime_ball", "Glistering Melon Slice")
@@ -130,6 +145,9 @@ public final class Reagents {
     public static final Reagent RAVENING_DRAUGHT = reg(Reagent.of("ravening_draught", "Ravening Draught")
             .delta(GLUTTONY, 11).contam(0.1).stab(-14).tier(PURE)
             .source("slime + honey chain").build());
+    public static final Reagent GLUTTONS_FEAST = reg(Reagent.of("gluttons_feast", "Glutton's Feast")
+            .delta(GLUTTONY, 20).contam(0.05).stab(-28).tier(STANDARD)
+            .source("gated: melon chain + Weathered Copper").build());
 
     // ---- Utilities: buffers, solvents, panic reset ---------------------------------
     public static final Reagent AMETHYST_SHARD = reg(Reagent.of("amethyst_shard", "Amethyst Shard")

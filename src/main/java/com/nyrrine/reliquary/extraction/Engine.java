@@ -57,6 +57,31 @@ public final class Engine {
     public static final double DISSONANCE_SHARE = 20.0;
     public static final double DISSONANCE_CHANCE = 0.25;
 
+    // ---- spontaneous-ailment tuning (STARTER — variety layer, not material-locked) --
+    /** Floor chance of a spontaneous ailment on any clean add — afflictions can strike even a pristine pot. */
+    public static final double RANDOM_AIL_BASE = 0.04;
+    /** How much accumulated noise raises the spontaneous-ailment chance (per point of noise). */
+    public static final double RANDOM_AIL_NOISE_K = 0.003;
+    /** How much instability (100 − stability) raises the spontaneous-ailment chance (per point). */
+    public static final double RANDOM_AIL_INSTAB_K = 0.0015;
+    /** Upper clamp on the per-add spontaneous-ailment chance. */
+    public static final double RANDOM_AIL_MAX = 0.6;
+
+    /** Base chance a distillation pass sparks a fault (concentrating can crash a solute out). */
+    public static final double DISTILL_AIL_BASE = 0.05;
+    /** How much noise raises the per-pass distill-ailment chance (per point of noise). */
+    public static final double DISTILL_AIL_NOISE_K = 0.004;
+    /** Upper clamp on the per-pass distill-ailment chance. */
+    public static final double DISTILL_AIL_MAX = 0.5;
+
+    // ---- blend-abuse punishment tuning (STARTER — super-linear in extra vials) ------
+    /** Stability fatigue per extra vial in a blend (linear in N−1). */
+    public static final double BLEND_STAB_FATIGUE = 5.0;
+    /** Base of the blend random-ailment curve (scaled by (N−1)^1.7). */
+    public static final double BLEND_AIL_BASE = 0.06;
+    /** Upper clamp on the blend random-ailment chance. */
+    public static final double BLEND_AIL_MAX = 0.90;
+
     /** Outcome of a single reagent addition, for the station to narrate. */
     public record AddResult(boolean full, boolean stepFailed, boolean breached, double stabilityAfter,
                             Taint inflicted, java.util.Set<Taint> cured) {}
@@ -114,6 +139,18 @@ public final class Engine {
                 pot.inflict(r.inflicts().taint());
                 inflicted = r.inflicts().taint();
             }
+
+            // Spontaneous-ailment layer (independent of the material): on top of the reagent-specific roll,
+            // an ailment can arise on its own — more likely as the pot gets noisier and shakier — so
+            // afflictions feel random and varied and even a clean pot is never fully safe. The taint chosen is
+            // random among those not already present, so it isn't locked to the reagent. Prefer reporting it.
+            double pSpontaneous = clamp(RANDOM_AIL_BASE
+                    + RANDOM_AIL_NOISE_K * pot.noise()
+                    + RANDOM_AIL_INSTAB_K * (100.0 - pot.stability()), 0.0, RANDOM_AIL_MAX);
+            if (rng.nextDouble() < pSpontaneous) {
+                Taint spontaneous = inflictRandomAbsentTaint(pot, rng);
+                if (spontaneous != null) inflicted = spontaneous;
+            }
         }
 
         // Opposition drain — the opposed pairs now coexisting bleed stability every touch.
@@ -163,6 +200,21 @@ public final class Engine {
             pot.setFluxCharges(pot.fluxCharges() - 1);
         }
         pot.addStability(-drain);
+    }
+
+    /** Inflict a taint chosen uniformly at random from those the pot does NOT already have, returning it
+     *  (or {@code null} if the pot already carries every taint). Keeps ailments varied run-to-run. */
+    private static Taint inflictRandomAbsentTaint(PotState pot, RandomGenerator rng) {
+        java.util.List<Taint> absent = new java.util.ArrayList<>();
+        for (Taint t : Taint.values()) if (!pot.hasTaint(t)) absent.add(t);
+        if (absent.isEmpty()) return null;
+        Taint pick = absent.get(rng.nextInt(absent.size()));
+        pot.inflict(pick);
+        return pick;
+    }
+
+    private static double clamp(double v, double lo, double hi) {
+        return v < lo ? lo : (v > hi ? hi : v);
     }
 
     /** Whether the pot straddles an opposition bridge hard enough to risk Dissonance this add. */
@@ -217,11 +269,45 @@ public final class Engine {
     }
 
     /**
+     * Distill with a spontaneous-fault roll: does everything {@link #distill(PotState)} does, then — because
+     * concentrating a batch can crash a solute out or spark a runaway — rolls a small chance to inflict a
+     * random not-yet-present taint. The chance rises with the pot's noise. Only rolls if the pass succeeded.
+     * {@code rng} drives the fault roll. Old callers of {@link #distill(PotState)} are unaffected.
+     */
+    public static boolean distill(PotState pot, RandomGenerator rng) {
+        if (!distill(pot)) return false;
+        double pDistillAil = clamp(DISTILL_AIL_BASE + DISTILL_AIL_NOISE_K * pot.noise(), 0.0, DISTILL_AIL_MAX);
+        if (rng.nextDouble() < pDistillAil) inflictRandomAbsentTaint(pot, rng);
+        return true;
+    }
+
+    /**
      * Blend finished pots (the Manifold): sum charge, take the strictest ceiling, titer-weighted-average the
-     * noise plus a small blend penalty, and pay a one-time opposition tax for any opposed pair the mix brings
-     * together (the blender buffers once instead of every add). Returns a new pot; inputs are unchanged.
+     * noise, and pay a one-time opposition tax for any opposed pair the mix brings together (the blender
+     * buffers once instead of every add). Returns a new pot; inputs are unchanged.
+     *
+     * <p>This no-rng entry point delegates to {@link #blend(List, RandomGenerator)} with a fixed-seed RNG so
+     * it stays deterministic while still applying the full anti-abuse punishment described there. Callers that
+     * want fresh randomness (the station) should call the rng overload directly.
      */
     public static PotState blend(List<PotState> pots) {
+        return blend(pots, new java.util.Random(0L));
+    }
+
+    /**
+     * Blend finished pots with the full <b>anti-abuse curve</b> — mega-merging many charged vials is actively
+     * punished, super-linearly, so a blend of 2 clean stocks stays clean but stacking 5–6 is a real gamble:
+     * <ul>
+     *   <li><b>Escalating noise</b> {@code BLEND_PENALTY·(N−1)²} injected into the result (quadratic in extra
+     *       vials — directly cuts purity): N=2→0.25, N=3→1.0, N=4→2.25, N=5→4.0, N=6→6.25.</li>
+     *   <li><b>Stability fatigue</b> {@code BLEND_STAB_FATIGUE·(N−1)} subtracted from the blended stability.</li>
+     *   <li><b>Rising ailment chance</b> {@code min(BLEND_AIL_MAX, BLEND_AIL_BASE·(N−1)^1.7)} to inflict a
+     *       random not-yet-present taint (up to two for N≥5): N=2→~6%, N=3→~20%, N=4→~37%, N=5→~61%, N=6→~85%.</li>
+     * </ul>
+     * The one-time opposition tax still applies. {@code rng} drives the ailment roll and taint pick. Returns a
+     * new pot; inputs are unchanged.
+     */
+    public static PotState blend(List<PotState> pots, RandomGenerator rng) {
         PotState out = new PotState();
         if (pots.isEmpty()) return out;
 
@@ -243,13 +329,24 @@ public final class Engine {
             minPasses = Math.min(minPasses, p.distillPasses());
         }
 
+        int n = pots.size();
+        double blendNoise = BLEND_PENALTY * (n - 1) * (n - 1);   // quadratic in extra vials
+        double blendStabHit = BLEND_STAB_FATIGUE * (n - 1);      // linear stability fatigue
+
         out.capCeiling(ceiling);
-        out.setNoise(noiseAccum / totalTiter + BLEND_PENALTY);
-        out.setStability(stabAccum / totalTiter);
+        out.setNoise(noiseAccum / totalTiter + blendNoise);
+        out.setStability(stabAccum / totalTiter - blendStabHit);
         out.setAdds(maxAdds);
         out.setDistillPasses(minPasses == Integer.MAX_VALUE ? 0 : minPasses);
 
         applyOppositionDrain(out, OPPOSITION_BLEND);
+
+        // Rising random-ailment chance — merging many charged vials is likely to crash something out.
+        double pBlendAil = Math.min(BLEND_AIL_MAX, BLEND_AIL_BASE * Math.pow(n - 1, 1.7));
+        if (rng.nextDouble() < pBlendAil) {
+            inflictRandomAbsentTaint(out, rng);
+            if (n >= 5 && rng.nextDouble() < pBlendAil) inflictRandomAbsentTaint(out, rng); // up to a 2nd
+        }
         return out;
     }
 

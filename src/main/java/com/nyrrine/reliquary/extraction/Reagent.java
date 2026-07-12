@@ -68,6 +68,44 @@ public record Reagent(
     /** Whether it rolls a volatile magnitude each use. */
     public boolean isVolatile() { return roll != null; }
 
+    /**
+     * A compact, human-readable one-liner of what this reagent does — its per-sin deltas
+     * ("+20 Gloom, -8 Wrath"), its tier and purity ceiling, its signed stability delta, any flux
+     * charges, and any taints it cures. Reused by the tooltip/guide so the numbers stay in one place.
+     */
+    public String effectSummary() {
+        java.util.StringJoiner shifts = new java.util.StringJoiner(", ");
+        for (Sin s : Sin.values()) {
+            double d = delta[s.index()];
+            if (d != 0) shifts.add(signed(d) + " " + s.display());
+        }
+        if (roll != null) {
+            shifts.add("+" + fmt(roll.min()) + ".." + fmt(roll.max()) + " " + roll.sin().display());
+        }
+        StringBuilder out = new StringBuilder(shifts.length() == 0 ? "no shift" : shifts.toString());
+        String tn = tier.name().toLowerCase(java.util.Locale.ROOT);
+        out.append(" · ").append(Character.toUpperCase(tn.charAt(0))).append(tn.substring(1))
+           .append(" (ceiling ").append(fmt(tier.ceiling())).append("%)");
+        if (stab != 0) out.append(" · stab ").append(signed(stab));
+        if (flux > 0) out.append(" · flux ").append(flux);
+        if (cures != null && !cures.isEmpty()) {
+            java.util.StringJoiner c = new java.util.StringJoiner("/");
+            for (Taint t : cures) c.add(t.display());
+            out.append(" · cures ").append(c);
+        }
+        return out.toString();
+    }
+
+    /** Format a magnitude without a trailing ".0" for whole numbers. */
+    public static String fmt(double v) {
+        return v == Math.rint(v) ? Long.toString((long) v) : String.valueOf(v);
+    }
+
+    /** A signed magnitude ("+20", "-8"); zero renders as "0". */
+    public static String signed(double v) {
+        return (v > 0 ? "+" : "") + fmt(v);
+    }
+
     // ---- builder -------------------------------------------------------------------
 
     /** Start building a reagent {@code id} shown as {@code display}. */

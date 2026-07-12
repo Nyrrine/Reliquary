@@ -218,7 +218,7 @@ class EngineTest {
 
     @Test
     void reagentTableIsFullyRegistered() {
-        assertEquals(44, Reagents.count(), "the full starter fingerprint table should be present");
+        assertEquals(50, Reagents.count(), "the full starter fingerprint table should be present");
         assertNotNull(Reagents.byId("knell_extract"));
         assertSame(Reagent.Tier.STANDARD, Reagents.KNELL_EXTRACT.tier());
         assertTrue(Reagents.BLAZE_ROD.isVolatile());

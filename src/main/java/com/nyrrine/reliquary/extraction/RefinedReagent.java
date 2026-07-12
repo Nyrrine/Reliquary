@@ -12,6 +12,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -44,6 +45,13 @@ public final class RefinedReagent {
         CARRIER.put("verdigris_rest",   Material.GREEN_DYE);    // Sloth  · Standard
         CARRIER.put("verdant_spite",    Material.LIME_DYE);     // Envy   · Pure
         CARRIER.put("ravening_draught", Material.SUGAR);        // Gluttony · Pure
+        // Completing the 7-sin ladder: a Pure refined form for every sin, plus Standards where warranted.
+        CARRIER.put("ember_distillate", Material.RED_DYE);      // Wrath    · Pure
+        CARRIER.put("burnished_vanity", Material.BLUE_DYE);     // Pride    · Pure
+        CARRIER.put("lethe_draught",    Material.YELLOW_DYE);   // Sloth    · Pure
+        CARRIER.put("amber_rapture",    Material.ORANGE_DYE);   // Lust     · Standard
+        CARRIER.put("rancorous_bloom",  Material.PURPLE_DYE);   // Envy     · Standard
+        CARRIER.put("gluttons_feast",   Material.CYAN_DYE);     // Gluttony · Standard
     }
 
     private static final TextColor NAME = TextColor.color(0xB8F0E4);
@@ -63,11 +71,31 @@ public final class RefinedReagent {
         ItemStack item = new ItemStack(carrier, amount);
         ItemMeta meta = item.getItemMeta();
         meta.displayName(Component.text(r.display()).color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(List.of(
-                Component.text(tierLabel(r.tier()) + " reagent — titrate at the Censer.", FAINT)
-                        .decoration(TextDecoration.ITALIC, false),
-                Component.text("High purity: a scalpel at any grade.", FAINT)
-                        .decoration(TextDecoration.ITALIC, true)));
+        List<Component> lore = new ArrayList<>();
+        lore.add(Component.text(tierLabel(r.tier()) + " reagent — titrate at the Censer.", FAINT)
+                .decoration(TextDecoration.ITALIC, false));
+        // Exact numbers so players see what an add does on hover (data lines: faint, non-italic).
+        for (Sin s : Sin.values()) {
+            double d = r.delta()[s.index()];
+            if (d != 0) lore.add(Component.text(Reagent.signed(d) + " " + s.display(), FAINT)
+                    .decoration(TextDecoration.ITALIC, false));
+        }
+        if (r.roll() != null) {
+            lore.add(Component.text("+" + Reagent.fmt(r.roll().min()) + ".." + Reagent.fmt(r.roll().max())
+                    + " " + r.roll().sin().display(), FAINT).decoration(TextDecoration.ITALIC, false));
+        }
+        String stats = "Ceiling " + Reagent.fmt(r.tierCeiling()) + "%";
+        if (r.stab() != 0) stats += "  ·  Stability " + Reagent.signed(r.stab());
+        if (r.flux() > 0) stats += "  ·  Flux " + r.flux();
+        lore.add(Component.text(stats, FAINT).decoration(TextDecoration.ITALIC, false));
+        if (r.cures() != null && !r.cures().isEmpty()) {
+            java.util.StringJoiner c = new java.util.StringJoiner("/");
+            for (Taint t : r.cures()) c.add(t.display());
+            lore.add(Component.text("Cures " + c, FAINT).decoration(TextDecoration.ITALIC, false));
+        }
+        lore.add(Component.text("High purity: a scalpel at any grade.", FAINT)
+                .decoration(TextDecoration.ITALIC, true));
+        meta.lore(lore);
         meta.setEnchantmentGlintOverride(true);
         meta.getPersistentDataContainer().set(TAG, PersistentDataType.STRING, reagentId);
         var cmd = meta.getCustomModelDataComponent();
@@ -111,6 +139,20 @@ public final class RefinedReagent {
         recipe(plugin, "mirror_polish", Material.DIAMOND, Material.CHISELED_QUARTZ_BLOCK,
                 Material.AMETHYST_SHARD);
         recipe(plugin, "verdigris_rest", Material.FERMENTED_SPIDER_EYE, Material.SOUL_SAND,
+                Material.WEATHERED_COPPER, Material.AMETHYST_SHARD);
+        // --- ladder completion: new Pures (sin bases + amethyst) ---
+        recipe(plugin, "ember_distillate", Material.REDSTONE, Material.BLAZE_POWDER,
+                Material.MAGMA_CREAM, Material.AMETHYST_SHARD);
+        recipe(plugin, "burnished_vanity", Material.GOLD_INGOT, Material.GOLD_NUGGET,
+                Material.GOLD_NUGGET, Material.AMETHYST_SHARD);
+        recipe(plugin, "lethe_draught", Material.SOUL_SAND, Material.SOUL_SAND,
+                Material.FERMENTED_SPIDER_EYE, Material.AMETHYST_SHARD);
+        // --- ladder completion: new Standards (sin bases + a gated patina/chiseled item) ---
+        recipe(plugin, "amber_rapture", Material.HONEY_BOTTLE, Material.GLOW_BERRIES,
+                Material.WEATHERED_COPPER, Material.AMETHYST_SHARD);
+        recipe(plugin, "rancorous_bloom", Material.PITCHER_PLANT, Material.PUFFERFISH,
+                Material.CHISELED_QUARTZ_BLOCK, Material.AMETHYST_SHARD);
+        recipe(plugin, "gluttons_feast", Material.GLISTERING_MELON_SLICE, Material.SLIME_BALL,
                 Material.WEATHERED_COPPER, Material.AMETHYST_SHARD);
     }
 
