@@ -56,7 +56,8 @@ public final class StationListener implements Listener {
         var player = event.getPlayer();
         switch (type) {
             case LECTERN    -> extraction.describeItem(player, player.getInventory().getItemInMainHand());
-            case FONT       -> extraction.stationFont(player);
+            case FONT       -> extraction.stationFont(player,
+                    event.getClickedBlock().getLocation(), player.getInventory().getItemInMainHand());
             case ALEMBIC    -> extraction.stationAlembic(player);
             case CENSER     -> extraction.stationCenser(player, player.getInventory().getItemInMainHand());
             case CENTRIFUGE -> extraction.stationCentrifuge(player);

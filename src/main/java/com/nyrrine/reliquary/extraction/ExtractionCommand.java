@@ -32,7 +32,8 @@ import java.util.concurrent.ThreadLocalRandom;
 public final class ExtractionCommand {
 
     private final Reliquary plugin;
-    private final Map<UUID, Long> fontCooldown = new HashMap<>(); // the Font's fuel-draw cooldown
+    private final Map<String, Integer> fontProgress = new HashMap<>(); // Font compost fill, per block location
+    private static final int FONT_THRESHOLD = 24; // resonance accumulated per 1 Enkephalin yielded
 
     public ExtractionCommand(Reliquary plugin) {
         this.plugin = plugin;
@@ -289,18 +290,65 @@ public final class ExtractionCommand {
 
     // ---- stations: block front-ends (§35) — each calls the same logic as its /cogito command ----
 
-    /** The Font (Cauldron): draw Enkephalin, cooldown-gated so it isn't an infinite tap. */
-    public void stationFont(Player player) {
-        long now = System.currentTimeMillis();
-        long ready = fontCooldown.getOrDefault(player.getUniqueId(), 0L);
-        if (now < ready) {
-            player.sendActionBar(msg("The Font is replenishing… " + ((ready - now) / 1000 + 1) + "s", FAINT));
+    /**
+     * The Font (Cauldron) — a composter for feelings. Feed it an <b>emotion-resonating item</b> (any reagent
+     * / memory) and it accumulates resonance; each {@link #FONT_THRESHOLD} yields Enkephalin (stronger emotions
+     * fill faster). It also fills a <b>glass bottle</b> into a blank Cogito vial — the accessible entry point.
+     */
+    public void stationFont(Player player, org.bukkit.Location loc, ItemStack held) {
+        if (held == null || held.getType().isAir()) {
+            player.sendActionBar(msg("Feed the Font a resonating item (a reagent / memory) — or a glass bottle.",
+                    FAINT));
             return;
         }
-        fontCooldown.put(player.getUniqueId(), now + 5000L);
-        giveOrDrop(player, Enkephalin.create(4));
-        player.sendMessage(msg("The Font yields 4 Enkephalin.", GREEN));
-        player.playSound(player.getLocation(), Sound.ITEM_BUCKET_FILL, 0.7f, 1.3f);
+        // Glass bottle → a blank Cogito vial.
+        if (held.getType() == Material.GLASS_BOTTLE) {
+            consumeOneMainHand(player, held);
+            giveOrDrop(player, Cogito.create(new PotState()));
+            player.sendMessage(msg("The Font wells up and fills the bottle with raw Cogito.", GREEN));
+            player.playSound(player.getLocation(), Sound.ITEM_BOTTLE_FILL, 0.8f, 1.1f);
+            return;
+        }
+        // Compost a resonating item → Enkephalin.
+        int resonance = resonanceOf(held);
+        if (resonance <= 0) {
+            player.sendMessage(msg("The Font doesn't stir for that — it takes emotion-resonating items "
+                    + "(reagents, memories) or a glass bottle.", NamedTextColor.RED));
+            return;
+        }
+        consumeOneMainHand(player, held);
+        String k = locKey(loc);
+        int prog = fontProgress.getOrDefault(k, 0) + resonance;
+        int yield = prog / FONT_THRESHOLD;
+        fontProgress.put(k, prog % FONT_THRESHOLD);
+        player.playSound(player.getLocation(), Sound.BLOCK_COMPOSTER_FILL, 0.7f, 1.2f);
+        if (yield > 0) {
+            giveOrDrop(player, Enkephalin.create(yield));
+            player.sendMessage(msg("The Font condenses the resonance into " + yield + " Enkephalin.", GREEN));
+            player.playSound(player.getLocation(), Sound.BLOCK_COMPOSTER_READY, 0.8f, 1.0f);
+        } else {
+            player.sendActionBar(msg("Resonance building… " + (fontProgress.get(k) * 100 / FONT_THRESHOLD) + "%",
+                    FAINT));
+        }
+    }
+
+    /** How much Enkephalin-fuel an item's emotional charge is worth (its positive sin magnitude). */
+    private int resonanceOf(ItemStack item) {
+        Reagent r = Reagents.byItem(item.getType());
+        if (r == null) return 0;
+        double sum = 0;
+        for (Sin s : Sin.values()) sum += Math.max(0.0, r.delta()[s.index()]);
+        if (r.isVolatile()) sum += r.roll().max();
+        return (int) Math.max(1, Math.round(sum));
+    }
+
+    private void consumeOneMainHand(Player player, ItemStack held) {
+        held.setAmount(held.getAmount() - 1);
+        player.getInventory().setItemInMainHand(held.getAmount() <= 0 ? null : held);
+    }
+
+    private static String locKey(org.bukkit.Location loc) {
+        return loc.getWorld().getName() + "," + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ();
     }
 
     /** The Alembic (Blast Furnace): spend 1 Enkephalin → a blank Cogito vial. */
