@@ -36,6 +36,7 @@ public final class StationListener implements Listener {
         StationType type = stations.typeAt(event.getBlock());
         if (type == null) return;
         stations.unregister(event.getBlock());
+        if (type == StationType.FONT) extraction.clearFont(event.getBlock().getLocation()); // reset compost fill
         event.setDropItems(false); // don't drop the plain vanilla block
         if (event.getPlayer().getGameMode() != GameMode.CREATIVE) {
             event.getBlock().getWorld().dropItemNaturally(event.getBlock().getLocation().add(0.5, 0.5, 0.5),
@@ -43,12 +44,14 @@ public final class StationListener implements Listener {
         }
     }
 
-    /** Enkephalin is an unthrowable bottle of essence — cancel the vanilla throw on any right-click with it. */
+    /**
+     * Enkephalin is an unthrowable bottle of essence — cancel the vanilla XP-bottle throw on any right-click
+     * with it. Checks the acting hand's item ({@code getItem()}), so it holds for the off hand too.
+     */
     @EventHandler
     public void onThrow(PlayerInteractEvent event) {
-        if (event.getHand() != EquipmentSlot.HAND) return;
         if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
-        if (Enkephalin.matches(event.getPlayer().getInventory().getItemInMainHand())) event.setCancelled(true);
+        if (Enkephalin.matches(event.getItem())) event.setCancelled(true);
     }
 
     @EventHandler

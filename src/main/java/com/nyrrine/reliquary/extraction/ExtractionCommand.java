@@ -284,6 +284,14 @@ public final class ExtractionCommand {
     }
 
     private void destroyVial(Player player, Vial v) {
+        ItemStack item = v.item();
+        if (item.getAmount() > 1) {
+            // Only the one vial being worked ruptures — the rest of a blank stack survives.
+            item.setAmount(item.getAmount() - 1);
+            if (v.slot() < 0) player.getInventory().setItemInMainHand(item);
+            else player.getInventory().setItem(v.slot(), item);
+            return;
+        }
         if (v.slot() < 0) player.getInventory().setItemInMainHand(null);
         else player.getInventory().setItem(v.slot(), null);
     }
@@ -292,9 +300,14 @@ public final class ExtractionCommand {
 
     /**
      * The Font (Cauldron) — a composter for feelings. Feed it an <b>emotion-resonating item</b> (any reagent
-     * / memory) and it accumulates resonance; each {@link #FONT_THRESHOLD} yields Enkephalin (stronger emotions
-     * fill faster). It also fills a <b>glass bottle</b> into a blank Cogito vial — the accessible entry point.
+     * / memory) and it accumulates resonance; each {@link #FONT_THRESHOLD} yields exactly one Enkephalin and
+     * one Raw Cogito (stronger emotions fill faster), which the Alembic then distills into a blank vial.
      */
+    /** Forget a broken Font's compost fill so a new Font placed at the same spot starts empty. */
+    public void clearFont(org.bukkit.Location loc) {
+        fontProgress.remove(locKey(loc));
+    }
+
     public void stationFont(Player player, org.bukkit.Location loc, ItemStack held) {
         int resonance = resonanceOf(held);
         if (resonance <= 0) {
@@ -370,7 +383,16 @@ public final class ExtractionCommand {
             player.sendMessage(msg("The Censer doesn't take that — hold a reagent item.", NamedTextColor.RED));
             return;
         }
-        if (locateVial(player) == null) { noVial(player); return; }
+        Vial v = locateVial(player);
+        if (v == null) { noVial(player); return; }
+        // Full-vial guard BEFORE spending the reagent — applyReagent would otherwise no-op and eat the item.
+        PotState st = v.state();
+        if (st.titer() >= Engine.VIAL_CAP && Engine.addReagent(st.copy(), r, new java.util.Random(0L)).full()) {
+            player.sendMessage(msg(String.format(
+                    "The vial is full (%.0f titer cap). Distill it, or blend several vials for more volume.",
+                    Engine.VIAL_CAP), NamedTextColor.RED));
+            return;
+        }
         held.setAmount(held.getAmount() - 1);
         player.getInventory().setItemInMainHand(held.getAmount() <= 0 ? null : held);
         applyReagent(player, r);
@@ -942,9 +964,20 @@ public final class ExtractionCommand {
 
     /** Persist a mutated vial back to wherever it lives. */
     private void writeVial(Player player, Vial v) {
-        Cogito.write(v.item(), v.state());
-        if (v.slot() < 0) player.getInventory().setItemInMainHand(v.item());
-        else player.getInventory().setItem(v.slot(), v.item());
+        ItemStack item = v.item();
+        if (item.getAmount() > 1) {
+            // Blank vials share identical meta and stack; writing the charged state onto the whole stack
+            // would duplicate the charge across every unit. Split off exactly one, hand back the charged
+            // single, and leave the rest of the stack as untouched blanks.
+            item.setAmount(item.getAmount() - 1);
+            if (v.slot() < 0) player.getInventory().setItemInMainHand(item);
+            else player.getInventory().setItem(v.slot(), item);
+            giveOrDrop(player, Cogito.create(v.state()));
+            return;
+        }
+        Cogito.write(item, v.state());
+        if (v.slot() < 0) player.getInventory().setItemInMainHand(item);
+        else player.getInventory().setItem(v.slot(), item);
     }
 
     private void noVial(Player player) {

@@ -35,7 +35,11 @@ public final class Stations {
 
     /** The station type at a block, or {@code null} if it's an ordinary block. */
     public StationType typeAt(Block block) {
-        return placed.get(key(block.getLocation()));
+        StationType t = placed.get(key(block.getLocation()));
+        // Guard against a registry that outlived its block (explosion, piston, WorldEdit, fluid): if the
+        // block no longer matches the station's base material, it isn't a station — don't honor a ghost.
+        if (t != null && block.getType() != t.base()) return null;
+        return t;
     }
 
     public void register(Block block, StationType type) {
