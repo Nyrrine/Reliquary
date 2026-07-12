@@ -71,7 +71,7 @@ public final class RefinedReagent {
         if (carrier == null || r == null) return null;
         ItemStack item = new ItemStack(carrier, amount);
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text(r.display()).color(NAME).decoration(TextDecoration.ITALIC, false));
+        meta.displayName(Component.text(r.display()).color(sinColor(r)).decoration(TextDecoration.ITALIC, false));
         List<Component> lore = new ArrayList<>();
         lore.add(Component.text(tierLabel(r.tier()) + " reagent — titrate at the Censer.", FAINT)
                 .decoration(TextDecoration.ITALIC, false));
@@ -119,6 +119,13 @@ public final class RefinedReagent {
         return meta.getPersistentDataContainer().get(TAG, PersistentDataType.STRING);
     }
 
+    /** Colour a refined reagent's name by its dominant sin (QoL — reads as its sin at a glance). */
+    private static TextColor sinColor(Reagent r) {
+        Sin dom = null; double best = 0.0;
+        for (Sin s : Sin.values()) { double d = r.delta()[s.index()]; if (d > best) { best = d; dom = s; } }
+        return dom != null ? dom.color() : NAME;
+    }
+
     private static String tierLabel(Reagent.Tier t) {
         String n = t.name().toLowerCase(Locale.ROOT);
         return Character.toUpperCase(n.charAt(0)) + n.substring(1);
@@ -162,6 +169,31 @@ public final class RefinedReagent {
 
     /** The Standard refined reagent id for a sin's ladder, or {@code null}. */
     public static String standardId(Sin s) { String[] l = LADDER.get(s); return l == null ? null : l[1]; }
+
+    /** Human-readable crafting-recipe lines for a refined reagent id (empty if it isn't one). */
+    public static List<String> recipeLines(String reagentId) {
+        for (Sin s : LADDER.keySet()) {
+            String[] l = LADDER.get(s);
+            if (l[0].equals(reagentId)) { // Pure
+                return List.of(CONCENTRATE_PER_PURE + "× " + s.display() + " Concentrate",
+                        "1× Amethyst Shard");
+            }
+            if (l[1].equals(reagentId)) { // Standard
+                Reagent pure = Reagents.byId(l[0]);
+                Material gate = STANDARD_GATE.getOrDefault(reagentId, Material.WEATHERED_COPPER);
+                return List.of(PURE_PER_STANDARD + "× " + (pure != null ? pure.display() : l[0]),
+                        "1× " + prettyMat(gate));
+            }
+        }
+        return List.of();
+    }
+
+    private static String prettyMat(Material m) {
+        String[] parts = m.name().toLowerCase(Locale.ROOT).split("_");
+        StringBuilder sb = new StringBuilder();
+        for (String p : parts) sb.append(Character.toUpperCase(p.charAt(0))).append(p.substring(1)).append(' ');
+        return sb.toString().trim();
+    }
 
     /** Register (idempotently) the Pure and Standard refining recipes for every sin's ladder. */
     public static void registerRecipes(Plugin plugin) {

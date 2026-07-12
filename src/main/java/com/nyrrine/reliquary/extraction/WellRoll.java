@@ -26,8 +26,11 @@ public final class WellRoll {
 
     private WellRoll() {}
 
-    /** A catalyst only locks onto its target if the pour is at least this close to it (a guaranteed pull). */
-    public static final double SNAP_MIN = 0.85;
+    /** A catalyst only bites once the target is your top pull AND its odds clear this bar. Below it, nothing. */
+    public static final double CATALYST_MIN_ODDS = 0.70;
+    /** ZAYIN/TETH/HE catalyst: each stacked catalyst adds a random bump in [MIN,MAX] to the target's odds. */
+    public static final double CATALYST_BUFF_MIN = 0.01;
+    public static final double CATALYST_BUFF_MAX = 0.15;
     /** Only weapons at least this well-matched are in the pool at all — the "range of sins you chose". Keeps
      *  the small off-chance a neighbour, never a wildcard. */
     public static final double POOL_MATCH_FLOOR = 0.60;
@@ -67,44 +70,80 @@ public final class WellRoll {
                                  RandomGenerator rng) {
         double purity = pour.purity();
         Grade cogitoGrade = Grade.of(purity);
-        double titer = pour.titer();
-        SinProfile profile = pour.profile();
 
-        List<Chance> pool = pool(pour); // reachable weapons + their pull odds, best first
-
-        // Catalyst: a reachable target you're already close to is LOCKED — a guaranteed pull (the RNG-cut).
         WeaponSpec target = catalystTargetId == null ? null : WeaponSignatures.byId(catalystTargetId);
-        boolean locked = target != null && target.reachableBy(cogitoGrade, titer)
-                && target.matchOf(profile) >= SNAP_MIN;
 
-        // The grade you reached for — a catalyst declares intent even if unreachable (over-reach → breach).
+        // Apex (WAW/ALEPH) weapons MANDATE their catalyst: drop any apex weapon that isn't the inserted target,
+        // so a WAW/ALEPH can never be pulled without a matching Radiant Cogito.
+        List<Chance> pool = filterApex(pool(pour), catalystTargetId);
         EgoGrade aimed = target != null ? target.grade()
                 : (pool.isEmpty() ? EgoGrade.ZAYIN : pool.get(0).weapon().grade());
 
-        if (locked) {
-            // Guaranteed manifest of the target; Primary Standard purity also stamps it Certified (100%).
-            boolean certified = purity >= CERTIFIED_PURITY - 1.0e-9;
-            return new Result(Outcome.MANIFEST, target, target.matchOf(profile), certified,
-                    cogitoGrade, purity, target.grade());
-        }
-
         if (pool.isEmpty()) {
-            // Nothing in your sin-range cleared the gates — a hollow / over-reach pour ruptures at the aimed tier.
+            // Nothing in range cleared the gates — a hollow / over-reach pour ruptures at the aimed tier.
             return new Result(Outcome.BREACH, null, 0.0, false, cogitoGrade, purity, aimed);
         }
 
         double bestMatch = pool.get(0).match();
 
-        // A valid pour yields a weapon UNLESS the pot was too unstable to pour — then the Well ruptures. This
-        // is the only "you got nothing": it's a handling failure (you didn't steady the pot), not bad luck.
+        // A valid pour yields a weapon UNLESS the pot was too unstable to pour — then the Well ruptures.
         if (rng.nextDouble() < breachChance(pour, wellResidue)) {
             return new Result(Outcome.BREACH, pool.get(0).weapon(), bestMatch, false, cogitoGrade, purity, aimed);
         }
 
-        // The gacha (which weapon): almost always your best match, with a small off-chance of a neighbour in
-        // the sins you chose. Craft cleanly onto one signature and it comes out ~90% of the time.
+        // Catalyst effect — only when the target is your TOP pull and its odds clear the 70% bar.
+        if (target != null && pool.get(0).weapon().id().equals(target.id())
+                && pool.get(0).odds() >= CATALYST_MIN_ODDS) {
+            boolean certified = purity >= CERTIFIED_PURITY - 1.0e-9;
+            if (target.grade().isApex()) {
+                // Apex: the catalyst is the requirement (no buff) — top pull + past 70% → it manifests.
+                return new Result(Outcome.MANIFEST, target, pool.get(0).match(), certified,
+                        cogitoGrade, purity, target.grade());
+            }
+            // ZAYIN/TETH/HE: a random 1–15% odds bump per stacked catalyst (up to 3).
+            int count = Math.max(1, pour.catalystCount());
+            double buff = 0.0;
+            for (int i = 0; i < count; i++) {
+                buff += CATALYST_BUFF_MIN + rng.nextDouble() * (CATALYST_BUFF_MAX - CATALYST_BUFF_MIN);
+            }
+            double boosted = Math.min(1.0, pool.get(0).odds() + buff);
+            if (rng.nextDouble() < boosted) {
+                return new Result(Outcome.MANIFEST, target, pool.get(0).match(), certified,
+                        cogitoGrade, purity, target.grade());
+            }
+        }
+
+        // An apex target that didn't clear its gate can't be pulled by luck — drop apex weapons before the gacha.
+        if (target != null && target.grade().isApex()) {
+            List<Chance> lower = new ArrayList<>();
+            for (Chance c : pool) if (!c.weapon().grade().isApex()) lower.add(c);
+            if (lower.isEmpty()) {
+                return new Result(Outcome.BREACH, pool.get(0).weapon(), bestMatch, false, cogitoGrade, purity, aimed);
+            }
+            pool = lower;
+        }
+
+        // The gacha (which weapon): almost always your best match, with a small off-chance of a neighbour.
         WeaponSpec pulled = weightedPick(pool, rng);
         return new Result(Outcome.MANIFEST, pulled, bestMatch, false, cogitoGrade, purity, pulled.grade());
+    }
+
+    /** Drop apex (WAW/ALEPH) weapons that aren't the inserted catalyst's target, then renormalize the odds. */
+    private static List<Chance> filterApex(List<Chance> pool, String catalystTargetId) {
+        boolean dropped = false;
+        List<Chance> kept = new ArrayList<>();
+        for (Chance c : pool) {
+            if (c.weapon().grade().isApex() && !c.weapon().id().equals(catalystTargetId)) { dropped = true; continue; }
+            kept.add(c);
+        }
+        if (!dropped) return pool;
+        double sum = 0.0;
+        for (Chance c : kept) sum += c.odds();
+        if (sum <= 0.0) return kept;
+        List<Chance> norm = new ArrayList<>();
+        for (Chance c : kept) norm.add(new Chance(c.weapon(), c.match(), c.odds() / sum));
+        norm.sort((a, b) -> Double.compare(b.odds(), a.odds()));
+        return norm;
     }
 
     /** A weapon's odds of being pulled from the Well right now: its composition match and normalized pull %. */

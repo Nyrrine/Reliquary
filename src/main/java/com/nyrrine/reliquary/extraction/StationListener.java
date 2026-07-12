@@ -66,6 +66,16 @@ public final class StationListener implements Listener {
         }
     }
 
+    /** A forged catalyst is a Nether Star — but it must NOT be usable to craft a vanilla beacon. */
+    @EventHandler
+    public void onCraft(org.bukkit.event.inventory.PrepareItemCraftEvent event) {
+        var recipe = event.getRecipe();
+        if (recipe == null || recipe.getResult().getType() != org.bukkit.Material.BEACON) return;
+        for (org.bukkit.inventory.ItemStack it : event.getInventory().getMatrix()) {
+            if (Catalyst.matches(it)) { event.getInventory().setResult(null); return; }
+        }
+    }
+
     @EventHandler
     public void onInteract(PlayerInteractEvent event) {
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;

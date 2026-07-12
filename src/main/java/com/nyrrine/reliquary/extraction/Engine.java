@@ -347,6 +347,8 @@ public final class Engine {
             inflictRandomAbsentTaint(out, rng);
             if (n >= 5 && rng.nextDouble() < pBlendAil) inflictRandomAbsentTaint(out, rng); // up to a 2nd
         }
+        // The inserted catalyst is inherited — the first target among the blended vials carries forward.
+        for (PotState p : pots) if (p.catalystTarget() != null) { out.catalystTarget(p.catalystTarget()); break; }
         return out;
     }
 

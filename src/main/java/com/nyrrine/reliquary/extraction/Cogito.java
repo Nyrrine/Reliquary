@@ -42,6 +42,8 @@ public final class Cogito {
     private static final NamespacedKey PASSES    = key("cogito_distill_passes");
     private static final NamespacedKey FLUX      = key("cogito_flux");
     private static final NamespacedKey TAINTS    = key("cogito_taints");
+    private static final NamespacedKey CATALYST  = key("cogito_catalyst");
+    private static final NamespacedKey CATALYST_N = key("cogito_catalyst_n");
     private static final NamespacedKey[] CHARGE  = new NamespacedKey[Sin.COUNT];
 
     static {
@@ -98,6 +100,10 @@ public final class Cogito {
         pdc.set(PASSES,    PersistentDataType.INTEGER, state.distillPasses());
         pdc.set(FLUX,      PersistentDataType.INTEGER, state.fluxCharges());
         pdc.set(TAINTS,    PersistentDataType.STRING, encodeTaints(state));
+        if (state.catalystTarget() != null) {
+            pdc.set(CATALYST, PersistentDataType.STRING, state.catalystTarget());
+            pdc.set(CATALYST_N, PersistentDataType.INTEGER, state.catalystCount());
+        } else { pdc.remove(CATALYST); pdc.remove(CATALYST_N); }
 
         style(meta, state);
         item.setItemMeta(meta);
@@ -121,6 +127,8 @@ public final class Cogito {
         state.setDistillPasses(pdc.getOrDefault(PASSES, PersistentDataType.INTEGER, 0));
         state.setFluxCharges(pdc.getOrDefault(FLUX, PersistentDataType.INTEGER, 0));
         decodeTaints(state, pdc.getOrDefault(TAINTS, PersistentDataType.STRING, ""));
+        state.catalystTarget(pdc.get(CATALYST, PersistentDataType.STRING));
+        state.catalystCount(pdc.getOrDefault(CATALYST_N, PersistentDataType.INTEGER, 0));
         return state;
     }
 
@@ -151,8 +159,11 @@ public final class Cogito {
         meta.setCustomModelDataComponent(cmd);
 
         TextColor nameColor = TextColor.color(tint.getRed(), tint.getGreen(), tint.getBlue());
-        meta.displayName(Component.text(blank ? "Empty Cogito Vial" : "Cogito")
-                .color(blank ? FAINT : nameColor)
+        // A vial carrying an apex (WAW/ALEPH) catalyst is a "Radiant Cogito" — the mandatory form for that tier.
+        boolean radiant = !blank && state.catalystTarget() != null && isApexCatalyst(state);
+        String name = blank ? "Empty Cogito Vial" : (radiant ? "Radiant Cogito" : "Cogito");
+        meta.displayName(Component.text(name)
+                .color(blank ? FAINT : (radiant ? TextColor.color(0xFFE9A3) : nameColor))
                 .decoration(TextDecoration.ITALIC, false));
 
         meta.lore(blank ? blankLore() : lore(state, grade, purity));
@@ -214,7 +225,26 @@ public final class Cogito {
                 out.add(line(t.symptom(), FAINT, true));
             }
         }
+
+        // An inserted catalyst — shown with its stack count, aim, and whether it's a lock (apex) or a buff.
+        if (state.catalystTarget() != null) {
+            WeaponSpec cw = WeaponSignatures.byId(state.catalystTarget());
+            boolean apex = isApexCatalyst(state);
+            out.add(Component.empty());
+            out.add(line("◆ Catalyst: " + (cw != null ? cw.display() : state.catalystTarget())
+                    + "  (" + Math.max(1, state.catalystCount()) + "/3)", TextColor.color(0xFFC94A)));
+            out.add(line(apex
+                    ? "REQUIRED to manifest this apex weapon"
+                    : "adds 1–15% per stack to its odds, once it's your top pull past 70%", FAINT, true));
+        }
         return out;
+    }
+
+    /** Whether this vial's inserted catalyst targets an apex (WAW/ALEPH) weapon — the Radiant lock. */
+    private static boolean isApexCatalyst(PotState state) {
+        if (state.catalystTarget() == null) return false;
+        WeaponSpec w = WeaponSignatures.byId(state.catalystTarget());
+        return w != null && w.grade().isApex();
     }
 
     /** Green/yellow/red by how far the breach gauge is from failing. */

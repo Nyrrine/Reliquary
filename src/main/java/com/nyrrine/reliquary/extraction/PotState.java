@@ -30,6 +30,8 @@ public final class PotState {
     private int distillPasses = 0;    // Centrifuge passes — drives diminishing distill returns
     private int fluxCharges = 0;      // active Flux (Honeycomb) — dampens opposition drain, spent per add
     private final Map<Taint, Double> taints = new EnumMap<>(Taint.class); // active afflictions → seconds left
+    private String catalystTarget = null; // inserted catalyst's weapon id — inherited through blend/distill
+    private int catalystCount = 0;        // how many of that catalyst are stacked (0–3)
 
     /** A fresh blank pot: no composition, pristine gauges. */
     public PotState() {}
@@ -145,8 +147,18 @@ public final class PotState {
         c.distillPasses = distillPasses;
         c.fluxCharges = fluxCharges;
         c.taints.putAll(taints);
+        c.catalystTarget = catalystTarget;
+        c.catalystCount = catalystCount;
         return c;
     }
+
+    /** The inserted catalyst's target weapon id (or {@code null}). Inherited through blend + distill. */
+    public String catalystTarget() { return catalystTarget; }
+    public void catalystTarget(String weaponId) { this.catalystTarget = weaponId; }
+
+    /** How many catalysts are stacked on this vial (0–3). */
+    public int catalystCount() { return catalystCount; }
+    public void catalystCount(int n) { this.catalystCount = n; }
 
     private static double clamp(double v, double lo, double hi) {
         return v < lo ? lo : (v > hi ? hi : v);

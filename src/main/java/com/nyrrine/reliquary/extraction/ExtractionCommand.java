@@ -57,7 +57,7 @@ public final class ExtractionCommand {
     /** The subcommands, in help/tab order. */
     private static final List<String> SUBS = List.of(
             "vial", "fuel", "giveall", "stations", "reagents", "add", "assay", "distill", "blend",
-            "recipes", "forge", "pour", "track", "untrack");
+            "recipes", "forge", "insert", "pour", "track", "untrack");
 
     /**
      * Dispatch an extraction subcommand. {@code a} is the sub-args where {@code a[0]} is the subcommand name
@@ -83,6 +83,7 @@ public final class ExtractionCommand {
             case "blend"    -> blend(player);
             case "recipes"  -> recipes(player, a);
             case "forge"    -> forge(player, a);
+            case "insert"   -> insertCatalyst(player);
             case "pour"     -> pour(player, a);
             case "track"    -> trackWeapon(player, a);
             case "untrack"  -> { weaponTracker.clear(player.getUniqueId());
@@ -91,7 +92,7 @@ public final class ExtractionCommand {
         }
     }
 
-    /** Track a weapon so the Assay lists what to fetch (and nearby needed items glow). */
+    /** Track a weapon so the Assay hints what to fetch next. */
     private void trackWeapon(Player player, String[] a) {
         if (a.length < 2) { player.sendMessage(msg("Usage: /cogito track <weapon_id>", GREY)); return; }
         WeaponSpec w = WeaponSignatures.byId(a[1].toLowerCase());
@@ -99,13 +100,12 @@ public final class ExtractionCommand {
         trackAndGuide(player, w.id());
     }
 
-    /** Start (or refresh) a forge quest for a weapon and print its quest steps to chat. */
+    /** Start (or refresh) a forge hint for a weapon and print its next-step guidance to chat. */
     private void trackAndGuide(Player player, String weaponId) {
         if (WeaponSignatures.byId(weaponId) == null) return;
         weaponTracker.track(player.getUniqueId(), weaponId);
         for (Component line : weaponTracker.shoppingList(player, weaponId)) player.sendMessage(line);
-        player.sendMessage(msg("Needed items nearby will glow. Re-check anytime at the Assay; "
-                + "/cogito untrack to stop.", FAINT));
+        player.sendMessage(msg("Re-check anytime at the Assay (empty hand); /cogito untrack to stop.", FAINT));
     }
 
     /**
@@ -257,7 +257,15 @@ public final class ExtractionCommand {
         }
 
         PotState st = Cogito.read(item);
-        if (st != null) { assayPot(player, st); return; }
+        if (st != null) {
+            assayPot(player, st);
+            // If you're on a forge hint, also read this cogito against the target (arrows + what to fix).
+            String tracked = weaponTracker.tracked(player.getUniqueId());
+            if (tracked != null && !st.isBlank()) {
+                for (Component line : weaponTracker.shoppingList(player, tracked)) player.sendMessage(line);
+            }
+            return;
+        }
         if (Enkephalin.matches(item)) {
             player.sendMessage(msg("Enkephalin — distilled mental energy. Fuels the Centrifuge (distilling) "
                     + "and the Well (pours + forging).", GREEN));
@@ -268,7 +276,8 @@ public final class ExtractionCommand {
             WeaponSpec w = WeaponSignatures.byId(cw);
             player.sendMessage(msg("Catalyst — guarantees " + (w != null ? w.display() : cw)
                     + (w != null ? " (" + w.grade().display() + ")" : "")
-                    + ". Pour it with a matching cogito to lock the extraction (+ Certified at 99%+).", GOLD));
+                    + ". Insert it into a cogito (sneak the Crucible, or /cogito insert) — it doubles that "
+                    + "weapon's odds once it's your top pull (+ Certified at 99%+).", GOLD));
             trackAndGuide(player, cw);
             return;
         }
@@ -657,8 +666,7 @@ public final class ExtractionCommand {
     /** The Crucible (Smithing Table): right-click forges the best catalyst you can afford; sneak = sublimate. */
     public void stationCrucible(Player player, boolean sneaking) {
         if (sneaking) {
-            player.sendMessage(msg("Sublimation — refining cogito for WAW/ALEPH — isn't wired yet. Coming soon.",
-                    FAINT));
+            insertCatalyst(player); // sneak = bond a forged catalyst into your cogito vial
             return;
         }
         Catalysts.Recipe best = null;
@@ -982,31 +990,73 @@ public final class ExtractionCommand {
     /** Show what a weapon's catalyst costs (legibility for the grind), or list all defined recipes. */
     private void recipes(Player player, String[] a) {
         if (a.length >= 2) {
-            WeaponSpec w = WeaponSignatures.byId(a[1].toLowerCase());
+            String id = a[1].toLowerCase();
+
+            // 1) A weapon catalyst.
+            WeaponSpec w = WeaponSignatures.byId(id);
             Catalysts.Recipe rec = w == null ? null : Catalysts.forWeapon(w.id());
-            if (rec == null) {
-                player.sendMessage(msg("No catalyst recipe defined for '" + a[1] + "'.", NamedTextColor.RED));
+            if (rec != null) {
+                player.sendMessage(msg(w.display() + " Catalyst (" + w.grade().display() + ") — forge needs:",
+                        NamedTextColor.WHITE));
+                for (var e : CatalystCost.components(rec, w.grade()).entrySet()) {
+                    player.sendMessage(msg("  " + e.getValue() + "x " + pretty(e.getKey()), FAINT));
+                }
+                for (var e : CatalystCost.refinedTax(w).entrySet()) {
+                    Reagent rr = Reagents.byId(e.getKey());
+                    player.sendMessage(msg("  " + e.getValue() + "x " + (rr != null ? rr.display() : e.getKey())
+                            + " (refined)", TextColor.color(0xB8F0E4)));
+                }
+                player.sendMessage(msg("  + " + CatalystCost.enkephalin(rec, w.grade()) + " Enkephalin", FAINT));
                 return;
             }
-            player.sendMessage(msg(w.display() + " Catalyst (" + w.grade().display() + ") — forge needs:",
-                    NamedTextColor.WHITE));
-            for (var e : CatalystCost.components(rec, w.grade()).entrySet()) {
-                player.sendMessage(msg("  " + e.getValue() + "x " + pretty(e.getKey()), FAINT));
+
+            // 2) A refined reagent (Pure/Standard) — its crafting-table chain.
+            if (RefinedReagent.has(id)) {
+                Reagent r = Reagents.byId(id);
+                player.sendMessage(msg((r != null ? r.display() : id) + " — craft at a table:", NamedTextColor.WHITE));
+                for (String line : RefinedReagent.recipeLines(id)) player.sendMessage(msg("  " + line, FAINT));
+                return;
             }
-            for (var e : CatalystCost.refinedTax(w).entrySet()) {
-                Reagent rr = Reagents.byId(e.getKey());
-                player.sendMessage(msg("  " + e.getValue() + "x " + (rr != null ? rr.display() : e.getKey())
-                        + " (refined)", TextColor.color(0xB8F0E4)));
+
+            // 3) A sin concentrate (by sin name, e.g. "gloom").
+            Sin sin = sinByName(id);
+            if (sin != null) {
+                player.sendMessage(msg(sin.display() + " Concentrate — craft at a table:", NamedTextColor.WHITE));
+                player.sendMessage(msg("  " + SinConcentrate.RAW_PER_CONCENTRATE + "x "
+                        + pretty(SinConcentrate.rawFor(sin)), FAINT));
+                return;
             }
-            player.sendMessage(msg("  + " + CatalystCost.enkephalin(rec, w.grade()) + " Enkephalin", FAINT));
+
+            player.sendMessage(msg("No recipe for '" + a[1] + "'. Try a weapon, a refined reagent id, or a sin.",
+                    NamedTextColor.RED));
             return;
         }
-        player.sendMessage(msg("Catalyst recipes (" + Catalysts.count() + " defined) — /cogito recipes <id>:",
-                NamedTextColor.WHITE));
-        for (Catalysts.Recipe rec : Catalysts.all()) {
-            WeaponSpec w = WeaponSignatures.byId(rec.weaponId());
-            player.sendMessage(msg("  " + rec.weaponId() + (w != null ? "  (" + w.grade().display() + ")" : ""), FAINT));
-        }
+
+        // No arg — the index of everything you can look up.
+        player.sendMessage(msg("Recipes — /cogito recipes <id>:", NamedTextColor.WHITE));
+        player.sendMessage(msg("Catalysts (" + Catalysts.count() + "): "
+                + String.join(", ", weaponIds()), FAINT));
+        player.sendMessage(msg("Refined reagents: "
+                + String.join(", ", refinedIds()), TextColor.color(0xB8F0E4)));
+        player.sendMessage(msg("Concentrates (by sin): " + sinNames(), FAINT));
+    }
+
+    /** A sin by its name (e.g. "gloom"), tolerant of a trailing "_concentrate"; null if unknown. */
+    private Sin sinByName(String name) {
+        String n = name.replace("_concentrate", "").replace(" concentrate", "").trim().toUpperCase(java.util.Locale.ROOT);
+        try { return Sin.valueOf(n); } catch (IllegalArgumentException e) { return null; }
+    }
+
+    private List<String> refinedIds() {
+        List<String> out = new ArrayList<>();
+        for (String id : RefinedReagent.ids()) out.add(id);
+        return out;
+    }
+
+    private String sinNames() {
+        java.util.StringJoiner j = new java.util.StringJoiner(", ");
+        for (Sin s : Sin.values()) j.add(s.name().toLowerCase(java.util.Locale.ROOT));
+        return j.toString();
     }
 
     /** The Well's forge mode: consume the grind components + Enkephalin, produce the weapon's catalyst. */
@@ -1119,23 +1169,68 @@ public final class ExtractionCommand {
 
     // ---- the Well: pour ------------------------------------------------------------
 
+    /**
+     * Bond a forged catalyst ITEM (from the inventory) into the located Cogito vial — the catalyst then lives
+     * inside the vial (shown in its lore), inherited through blend + distill, and spent when you pour. Called
+     * by {@code /cogito insert} and by sneak-clicking the Crucible.
+     */
+    public void insertCatalyst(Player player) {
+        Vial v = locateVial(player);
+        if (v == null) { noVial(player); return; }
+        PotState st = v.state();
+
+        ItemStack[] contents = player.getInventory().getContents();
+        int slot = -1; String wid = null;
+        for (int i = 0; i < contents.length; i++) {
+            String w = Catalyst.weaponId(contents[i]);
+            if (w != null) { slot = i; wid = w; break; }
+        }
+        if (wid == null) {
+            player.sendMessage(msg("You have no forged catalyst to insert — forge one at the Crucible first.",
+                    NamedTextColor.RED));
+            return;
+        }
+        if (st.catalystTarget() != null && !st.catalystTarget().equals(wid)) {
+            WeaponSpec cur = WeaponSignatures.byId(st.catalystTarget());
+            player.sendMessage(msg("This vial is already aimed at " + (cur != null ? cur.display()
+                    : st.catalystTarget()) + " — you can't mix catalysts.", NamedTextColor.RED));
+            return;
+        }
+        WeaponSpec w = WeaponSignatures.byId(wid);
+        boolean apex = w != null && w.grade().isApex();
+        if (apex && st.catalystCount() >= 1) {
+            player.sendMessage(msg("An apex catalyst is a lock, not a stack — one is enough.", NamedTextColor.RED));
+            return;
+        }
+        if (st.catalystCount() >= 3) {
+            player.sendMessage(msg("This vial is already at max catalysts (3/3).", NamedTextColor.RED));
+            return;
+        }
+        st.catalystTarget(wid);
+        st.catalystCount(st.catalystCount() + 1);
+        writeVial(player, v);
+        consumeSlotOne(player, slot);
+        String name = w != null ? w.display() : wid;
+        if (apex) {
+            player.sendMessage(msg("Bonded the " + name + " catalyst — this is now a Radiant Cogito, the "
+                    + "REQUIRED form to manifest it. Get it to your top pull past 70% and pour.", GREEN));
+        } else {
+            player.sendMessage(msg("Bonded the " + name + " catalyst (" + st.catalystCount() + "/3) — each "
+                    + "stack adds 1–15% to its odds, once it's your top pull past 70%.", GREEN));
+        }
+        player.playSound(player.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.8f, 1.2f);
+        player.playSound(player.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, 0.4f, 1.6f);
+    }
+
     private void pour(Player player, String[] a) {
         Vial v = locateVial(player);
         if (v == null) { noVial(player); return; }
         PotState st = v.state();
         if (st.isBlank()) { player.sendMessage(msg("The vial is empty.", NamedTextColor.RED)); return; }
 
-        // Catalyst: an explicit id is the testbed shortcut (simulated); otherwise auto-detect a forged
-        // catalyst ITEM in the inventory and use its locked weapon.
-        String catalyst = a.length >= 2 ? a[1].toLowerCase() : null;
-        int catalystSlot = -1;
-        if (catalyst == null) {
-            ItemStack[] contents = player.getInventory().getContents();
-            for (int i = 0; i < contents.length; i++) {
-                String w = Catalyst.weaponId(contents[i]);
-                if (w != null) { catalyst = w; catalystSlot = i; break; }
-            }
-        }
+        // Catalyst = the one inserted into this vial (inherited through blend/distill). An explicit id arg is
+        // a testbed override.
+        String catalyst = a.length >= 2 ? a[1].toLowerCase() : st.catalystTarget();
 
         WellRoll.Result r = WellRoll.resolve(st, catalyst, 0.0, ThreadLocalRandom.current());
 
@@ -1153,11 +1248,7 @@ public final class ExtractionCommand {
         if (v.slot() < 0) player.getInventory().setItemInMainHand(remainder);
         else player.getInventory().setItem(v.slot(), remainder);
 
-        // A forged catalyst ITEM is spent only if it actually locked its weapon (did its job).
-        if (catalystSlot >= 0 && r.outcome() == WellRoll.Outcome.MANIFEST
-                && r.weapon() != null && r.weapon().id().equals(catalyst)) {
-            consumeSlotOne(player, catalystSlot);
-        }
+        // The inserted catalyst is spent with the vial (already consumed above).
 
         switch (r.outcome()) {
             case MANIFEST -> onManifest(player, r);

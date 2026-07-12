@@ -76,11 +76,15 @@ public final class CogitoTicker extends BukkitRunnable {
             Taint worst = focus.worstTaint();
             if (worst != null) {
                 double left = focus.taints().get(worst);
-                p.sendActionBar(Component.text(String.format("⚠ %s  %.0fs left — cure with %s",
-                        worst.display(), left, worst.cureId()), worst.color()));
-                if (left <= 3.0) { // urgent tick
-                    p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.3f, 0.7f);
-                }
+                Reagent cure = worst.cureId() == null ? null : Reagents.byId(worst.cureId());
+                String cureName = cure != null ? cure.display() : "the right remedy";
+                // Bold red alarm naming the exact item to grab, with the live countdown — treatment is urgent.
+                p.sendActionBar(Component.text(String.format("⚠ GRAB %s — %s %.0fs!", cureName, worst.display(), left),
+                        NamedTextColor.RED).decoration(net.kyori.adventure.text.format.TextDecoration.BOLD, true));
+                // A "something's wrong" notification every second while afflicted; sharper as the timer runs out.
+                float pitch = left <= 5.0 ? 0.5f : 0.9f;
+                p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, pitch);
+                if (left <= 5.0) p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.5f, 0.6f);
             }
         }
     }

@@ -31,4 +31,7 @@ public enum EgoGrade {
 
     /** Lowest cogito volume (titer) that can manifest this tier — the volume gate. */
     public double minVolume() { return minVolume; }
+
+    /** Apex tiers (WAW, and ALEPH once it exists) — these MANDATE an inserted catalyst (a Radiant Cogito). */
+    public boolean isApex() { return this == WAW; }
 }

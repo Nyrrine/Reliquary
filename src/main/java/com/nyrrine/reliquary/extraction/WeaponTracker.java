@@ -3,24 +3,20 @@ package com.nyrrine.reliquary.extraction;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Material;
-import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
-import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * The Assay's "track a weapon" guide (§35). A player tells the Assay which weapon they're chasing; the tracker
- * then tells them <i>what to fetch</i> — the catalyst grind still outstanding, and which refined reagents to
- * climb for the sins that weapon leans on — and makes matching dropped items in the world glow with a tag so
- * the ingredients they need jump out. It never solves the brew for them (stability, taints, when to distill
- * are still the player's problem) — it only points at the shopping list.
+ * The Assay's "track a weapon" hint system (§35). A player tells the Assay which weapon they're chasing; the
+ * tracker then tells them <i>what to fetch next</i> — the catalyst grind still outstanding, and which refined
+ * reagents to climb for the sins that weapon leans on. It never solves the brew for them (stability, taints,
+ * when to distill are still the player's problem) — it only points at the next step.
  */
 public final class WeaponTracker {
 
@@ -29,18 +25,11 @@ public final class WeaponTracker {
 
     public WeaponTracker(Plugin plugin) {
         this.plugin = plugin;
-        startGlowTask();
     }
 
     public void track(UUID player, String weaponId) { tracked.put(player, weaponId); }
     public void clear(UUID player) { tracked.remove(player); }
     public String tracked(UUID player) { return tracked.get(player); }
-
-    /** The catalyst grind components for a tracked weapon (what a full catalyst forge needs). */
-    public Map<Material, Integer> neededComponents(String weaponId) {
-        Catalysts.Recipe rec = Catalysts.forWeapon(weaponId);
-        return rec == null ? Map.of() : rec.components();
-    }
 
     /**
      * The fetch list for the tracked weapon: the catalyst components with how many the player still needs,
@@ -56,13 +45,20 @@ public final class WeaponTracker {
         Map<Material, Integer> grind = rec != null ? CatalystCost.components(rec, spec.grade()) : Map.of();
         int enkNeed = rec != null ? CatalystCost.enkephalin(rec, spec.grade()) : 0;
 
-        out.add(Component.text("◆ QUEST — Extract " + spec.display() + " (" + spec.grade().display() + ")",
+        out.add(Component.text("◆ Chasing " + spec.display() + " (" + spec.grade().display() + ")",
                 NamedTextColor.GOLD));
-        // The single most useful next action — the quest arrow.
-        out.add(Component.text("→ NEXT: ", NamedTextColor.YELLOW)
-                .append(nextStep(player, spec, refined, grind, enkNeed)));
 
-        // What to aim the brew at.
+        // If you're holding a brewed cogito, read IT against the target — arrows + colours for what to fix.
+        PotState held = Cogito.read(player.getInventory().getItemInMainHand());
+        if (held != null && !held.isBlank()) {
+            out.add(Component.text("HINT: ", NamedTextColor.YELLOW).append(cogitoHint(held, spec)));
+            out.addAll(analyzeCogito(held, spec));
+            return out;
+        }
+
+        // Otherwise you're still gathering — the fetch checklist.
+        out.add(Component.text("HINT: ", NamedTextColor.YELLOW)
+                .append(nextStep(player, spec, refined, grind, enkNeed)));
         StringBuilder aim = new StringBuilder();
         for (Sin s : dominantSins(spec, 3)) aim.append(s.display()).append("  ");
         out.add(Component.text("Aim your cogito at: " + aim.toString().trim(), NamedTextColor.GRAY));
@@ -93,6 +89,67 @@ public final class WeaponTracker {
         }
         return out;
     }
+
+    /** The one biggest thing wrong with the held cogito, phrased as an instruction. */
+    private Component cogitoHint(PotState st, WeaponSpec spec) {
+        SinProfile cog = st.profile(), tgt = spec.signature();
+        if (st.titer() + 1e-9 < spec.grade().minVolume())
+            return Component.text("Blend more vials — you need volume " + (int) spec.grade().minVolume()
+                    + " (have " + (int) st.titer() + ").", NamedTextColor.WHITE);
+        if (st.grade().ordinal() < spec.grade().minCogito().ordinal())
+            return Component.text("Distill to raise purity toward " + spec.grade().minCogito().display()
+                    + " (you're " + fmt(st.purity()) + "%).", NamedTextColor.WHITE);
+        Sin worstLow = null, worstHigh = null; double lowGap = 0, highGap = 0;
+        for (Sin s : Sin.values()) {
+            double d = cog.get(s) - tgt.get(s);
+            if (tgt.get(s) >= 3 && d < lowGap) { lowGap = d; worstLow = s; }
+            if (d > highGap) { highGap = d; worstHigh = s; }
+        }
+        if (worstLow != null && -lowGap >= 4)
+            return Component.text("Add more " + worstLow.display() + " (have " + (int) cog.get(worstLow)
+                    + "%, aim " + (int) tgt.get(worstLow) + "%).", NamedTextColor.WHITE);
+        if (worstHigh != null && highGap >= 6)
+            return Component.text("Too much " + worstHigh.display() + " — dilute it (have "
+                    + (int) cog.get(worstHigh) + "%, aim " + (int) tgt.get(worstHigh) + "%).", NamedTextColor.WHITE);
+        return Component.text("Balanced! Insert the catalyst (sneak the Crucible) and pour at the Well.",
+                NamedTextColor.GREEN);
+    }
+
+    /** The full read of the held cogito vs the target — arrows (↑ more / ↓ less / ✔ ok) + colours per axis. */
+    private List<Component> analyzeCogito(PotState st, WeaponSpec spec) {
+        List<Component> out = new ArrayList<>();
+        SinProfile cog = st.profile(), tgt = spec.signature();
+        double match = spec.matchOf(cog);
+        out.add(Component.text("Match " + Math.round(match * 100) + "%   Volume " + (int) st.titer()
+                + "   " + st.grade().display() + " " + fmt(st.purity()) + "%", matchColor(match)));
+
+        if (st.titer() + 1e-9 < spec.grade().minVolume())
+            out.add(Component.text("  ↑ Volume " + (int) st.titer() + "/" + (int) spec.grade().minVolume()
+                    + " — blend more vials", NamedTextColor.YELLOW));
+        if (st.grade().ordinal() < spec.grade().minCogito().ordinal())
+            out.add(Component.text("  ↑ Purity — distill toward " + spec.grade().minCogito().display(),
+                    NamedTextColor.YELLOW));
+
+        for (Sin s : Sin.values()) {
+            double have = cog.get(s), want = tgt.get(s);
+            if (have < 3 && want < 3) continue;
+            double d = have - want;
+            String stat = String.format(java.util.Locale.ROOT, "%s %d%% (aim %d%%)",
+                    s.display(), Math.round(have), Math.round(want));
+            if (want >= 3 && d < -3) out.add(Component.text("  ↑ " + stat + " — more", s.color()));
+            else if (d > 3) out.add(Component.text("  ↓ " + stat + " — less", s.color()));
+            else out.add(Component.text("  ✔ " + stat, s.color()));
+        }
+        return out;
+    }
+
+    private NamedTextColor matchColor(double match) {
+        if (match >= 0.85) return NamedTextColor.GREEN;
+        if (match >= 0.60) return NamedTextColor.YELLOW;
+        return NamedTextColor.RED;
+    }
+
+    private static String fmt(double d) { return String.format(java.util.Locale.ROOT, "%.0f", d); }
 
     /** The quest arrow — the first unmet milestone, phrased as a beginner-friendly instruction. */
     private Component nextStep(Player player, WeaponSpec spec, Map<String, Integer> refined,
@@ -177,27 +234,5 @@ public final class WeaponTracker {
         StringBuilder sb = new StringBuilder();
         for (String p : parts) sb.append(Character.toUpperCase(p.charAt(0))).append(p.substring(1)).append(' ');
         return sb.toString().trim();
-    }
-
-    /** Every second, glow-tag nearby dropped items that the tracking player still needs. */
-    private void startGlowTask() {
-        new BukkitRunnable() {
-            @Override public void run() {
-                for (Player p : plugin.getServer().getOnlinePlayers()) {
-                    String weaponId = tracked.get(p.getUniqueId());
-                    if (weaponId == null) continue;
-                    Map<Material, Integer> need = neededComponents(weaponId);
-                    if (need.isEmpty()) continue;
-                    for (var e : p.getNearbyEntities(14, 8, 14)) {
-                        if (!(e instanceof Item drop)) continue;
-                        Material m = drop.getItemStack().getType();
-                        if (!need.containsKey(m)) continue;
-                        drop.setGlowing(true);
-                        drop.customName(Component.text("↑ " + prettyMat(m) + " (needed)", NamedTextColor.AQUA));
-                        drop.setCustomNameVisible(true);
-                    }
-                }
-            }
-        }.runTaskTimer(plugin, 40L, 20L);
     }
 }
