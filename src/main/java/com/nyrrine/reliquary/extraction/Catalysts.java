@@ -42,7 +42,7 @@ public final class Catalysts {
         // ---- TETH — a couple of parts, one grind-gate (3 types, counts 2–6, enkephalin 4) ----
         recipe("beak", 4, Material.PURPLE_CANDLE, 2, Material.PUFFERFISH, 3, Material.ENDER_PEARL, 2);
         recipe("fourth_match_flame", 4, Material.OXIDIZED_COPPER, 4, Material.TUFF, 5, Material.CALCITE, 6);
-        recipe("red_eyes", 4, Material.DRIPSTONE_BLOCK, 3, Material.MOSS_BLOCK, 4, Material.PACKED_MUD, 5);
+        recipe("red_eyes", 4, Material.DRIPSTONE_BLOCK, 3, Material.SCULK, 4, Material.PACKED_MUD, 5);
         recipe("regret", 4, Material.MANGROVE_ROOTS, 4, Material.SPORE_BLOSSOM, 2, Material.BIG_DRIPLEAF, 3);
         recipe("logging", 4, Material.AZALEA, 4, Material.GLOW_LICHEN, 5, Material.SHROOMLIGHT, 2);
         recipe("wrist_cutter", 4, Material.WEEPING_VINES, 3, Material.TWISTING_VINES, 4,
@@ -55,27 +55,27 @@ public final class Catalysts {
         recipe("grinder_mk4", 8, Material.SMOOTH_QUARTZ, 6, Material.PRISMARINE_BRICKS, 5,
                 Material.DARK_PRISMARINE, 4);
         recipe("crimson_scar", 8, Material.SEA_LANTERN, 4, Material.SPONGE, 6, Material.DRIED_KELP, 8);
-        recipe("cobalt_scar", 8, Material.NAUTILUS_SHELL, 4, Material.HEART_OF_THE_SEA, 4,
+        recipe("cobalt_scar", 8, Material.HEAVY_CORE, 4, Material.TRIAL_KEY, 4,
                 Material.TUBE_CORAL, 6);
         recipe("harvest", 8, Material.BRAIN_CORAL, 5, Material.BUBBLE_CORAL, 6, Material.FIRE_CORAL, 7);
-        recipe("life_for_a_daredevil", 8, Material.HORN_CORAL, 5, Material.BEE_NEST, 4,
+        recipe("life_for_a_daredevil", 8, Material.HORN_CORAL, 5, Material.WAXED_CHISELED_COPPER, 4,
                 Material.SWEET_BERRIES, 8);
-        recipe("laetitia", 8, Material.CHORUS_FLOWER, 4, Material.POPPED_CHORUS_FRUIT, 6, Material.END_ROD, 5);
+        recipe("laetitia", 8, Material.ANGLER_POTTERY_SHERD, 4, Material.ARCHER_POTTERY_SHERD, 6, Material.LIGHTNING_ROD, 5);
 
         // ---- WAW — the multi-component grind (4 types, counts 6–16, enkephalin 16) ----
-        recipe("solemn_lament", 16, Material.PURPUR_BLOCK, 8, Material.PURPUR_PILLAR, 6,
-                Material.SHULKER_SHELL, 6, Material.DRAGON_BREATH, 8);
-        recipe("sword_of_tears", 16, Material.PHANTOM_MEMBRANE, 10, Material.GHAST_TEAR, 6,
+        recipe("solemn_lament", 16, Material.MUD_BRICKS, 8, Material.DECORATED_POT, 6,
+                Material.SHULKER_SHELL, 6, Material.OXIDIZED_COPPER_GRATE, 8);
+        recipe("sword_of_tears", 16, Material.BREEZE_ROD, 10, Material.GHAST_TEAR, 6,
                 Material.MAGMA_BLOCK, 12, Material.CRYING_OBSIDIAN, 8);
         recipe("lamp", 16, Material.LODESTONE, 6, Material.HONEY_BLOCK, 10, Material.SLIME_BLOCK, 12,
-                Material.PEARLESCENT_FROGLIGHT, 6);
-        recipe("magic_bullet", 16, Material.OCHRE_FROGLIGHT, 8, Material.VERDANT_FROGLIGHT, 8,
-                Material.AMETHYST_CLUSTER, 6, Material.BUDDING_AMETHYST, 6);
+                Material.WEATHERED_COPPER_BULB, 6);
+        recipe("magic_bullet", 16, Material.OMINOUS_TRIAL_KEY, 8, Material.WIND_CHARGE, 8,
+                Material.AMETHYST_CLUSTER, 6, Material.TINTED_GLASS, 6);
         recipe("love_and_hate", 16, Material.POINTED_DRIPSTONE, 8, Material.ROOTED_DIRT, 12,
                 Material.TURTLE_EGG, 6, Material.TROPICAL_FISH, 10);
         recipe("green_stem", 16, Material.PUMPKIN_PIE, 8, Material.GLOW_BERRIES, 12,
                 Material.FERMENTED_SPIDER_EYE, 6, Material.RABBIT_FOOT, 6);
-        recipe("screaming_wedge", 16, Material.RABBIT_HIDE, 10, Material.NETHER_WART_BLOCK, 8,
+        recipe("screaming_wedge", 16, Material.RABBIT_HIDE, 10, Material.SNIFFER_EGG, 8,
                 Material.WARPED_WART_BLOCK, 8, Material.CRIMSON_NYLIUM, 12);
         recipe("heaven", 16, Material.WARPED_NYLIUM, 12, Material.SOUL_LANTERN, 8, Material.COPPER_BULB, 10,
                 Material.LANTERN, 8);
