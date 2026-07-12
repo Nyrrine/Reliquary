@@ -296,44 +296,37 @@ public final class ExtractionCommand {
      * fill faster). It also fills a <b>glass bottle</b> into a blank Cogito vial — the accessible entry point.
      */
     public void stationFont(Player player, org.bukkit.Location loc, ItemStack held) {
-        if (held == null || held.getType().isAir()) {
-            player.sendActionBar(msg("Feed the Font a resonating item (a reagent / memory) — or a glass bottle.",
-                    FAINT));
-            return;
-        }
-        // Glass bottle → a blank Cogito vial.
-        if (held.getType() == Material.GLASS_BOTTLE) {
-            consumeOneMainHand(player, held);
-            giveOrDrop(player, Cogito.create(new PotState()));
-            player.sendMessage(msg("The Font wells up and fills the bottle with raw Cogito.", GREEN));
-            player.playSound(player.getLocation(), Sound.ITEM_BOTTLE_FILL, 0.8f, 1.1f);
-            return;
-        }
-        // Compost a resonating item → Enkephalin.
         int resonance = resonanceOf(held);
         if (resonance <= 0) {
-            player.sendMessage(msg("The Font doesn't stir for that — it takes emotion-resonating items "
-                    + "(reagents, memories) or a glass bottle.", NamedTextColor.RED));
+            player.sendActionBar(msg("Feed the Font an emotion-resonating item (any reagent / memory).", FAINT));
             return;
         }
         consumeOneMainHand(player, held);
         String k = locKey(loc);
         int prog = fontProgress.getOrDefault(k, 0) + resonance;
-        int yield = prog / FONT_THRESHOLD;
-        fontProgress.put(k, prog % FONT_THRESHOLD);
-        player.playSound(player.getLocation(), Sound.BLOCK_COMPOSTER_FILL, 0.7f, 1.2f);
-        if (yield > 0) {
-            giveOrDrop(player, Enkephalin.create(yield));
-            player.sendMessage(msg("The Font condenses the resonance into " + yield + " Enkephalin.", GREEN));
-            player.playSound(player.getLocation(), Sound.BLOCK_COMPOSTER_READY, 0.8f, 1.0f);
+        // The lava rises; each full pool yields exactly ONE Enkephalin + ONE Raw Cogito, and carries the rest.
+        if (prog >= FONT_THRESHOLD) {
+            fontProgress.put(k, prog - FONT_THRESHOLD);
+            giveOrDrop(player, Enkephalin.create(1));
+            giveOrDrop(player, RawCogito.create(1));
+            player.sendMessage(msg("The Font overflows — it yields 1 Enkephalin and 1 Raw Cogito.", GREEN));
+            player.playSound(player.getLocation(), Sound.BLOCK_COMPOSTER_READY, 0.8f, 0.9f);
+            player.playSound(player.getLocation(), Sound.BLOCK_LAVA_EXTINGUISH, 0.5f, 1.2f);
+            loc.getWorld().spawnParticle(org.bukkit.Particle.LAVA, loc.clone().add(0.5, 0.9, 0.5), 12, 0.2, 0.1, 0.2, 0);
         } else {
-            player.sendActionBar(msg("Resonance building… " + (fontProgress.get(k) * 100 / FONT_THRESHOLD) + "%",
-                    FAINT));
+            fontProgress.put(k, prog);
+            player.playSound(player.getLocation(), Sound.BLOCK_COMPOSTER_FILL, 0.7f, 1.2f);
+            int pct = prog * 100 / FONT_THRESHOLD;
+            player.sendActionBar(msg("The lava rises… " + pct + "%", FAINT));
+            loc.getWorld().spawnParticle(org.bukkit.Particle.FLAME, loc.clone().add(0.5, 0.5, 0.5),
+                    Math.max(1, pct / 20), 0.15, 0.05, 0.15, 0.005);
         }
     }
 
-    /** How much Enkephalin-fuel an item's emotional charge is worth (its positive sin magnitude). */
+    /** How much an item's emotional charge is worth to the Font (its positive sin magnitude). Fuel items
+     *  (Enkephalin / Raw Cogito) don't resonate — you don't compost your own output. */
     private int resonanceOf(ItemStack item) {
+        if (item == null || Enkephalin.matches(item) || RawCogito.matches(item)) return 0;
         Reagent r = Reagents.byItem(item.getType());
         if (r == null) return 0;
         double sum = 0;
@@ -351,20 +344,22 @@ public final class ExtractionCommand {
         return loc.getWorld().getName() + "," + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ();
     }
 
-    /** The Alembic (Blast Furnace): spend 1 Enkephalin → a blank Cogito vial. */
+    /** The Alembic (Blast Furnace): process 1 Raw Cogito + 1 Enkephalin → a blank, workable Cogito vial. */
     public void stationAlembic(Player player) {
-        if (!consumeEnkephalin(player, 1)) {
-            player.sendMessage(msg("The Alembic needs 1 Enkephalin to draw a vial. /cogito fuel or use the Font.",
+        if (countItem(player, RawCogito::matches) < 1) {
+            player.sendMessage(msg("The Alembic refines Raw Cogito — draw some at the Font first.",
                     NamedTextColor.RED));
             return;
         }
-        ItemStack vial = Cogito.create(new PotState());
-        if (player.getInventory().getItemInMainHand().getType().isAir()) {
-            player.getInventory().setItemInMainHand(vial);
-        } else {
-            giveOrDrop(player, vial);
+        if (countEnkephalin(player) < 1) {
+            player.sendMessage(msg("The Alembic needs 1 Enkephalin to process the Raw Cogito.", NamedTextColor.RED));
+            return;
         }
-        player.sendMessage(msg("The Alembic condenses a blank Cogito vial (−1 Enkephalin).", GREEN));
+        consumeItem(player, RawCogito::matches, 1);
+        consumeEnkephalin(player, 1);
+        giveOrDrop(player, Cogito.create(new PotState()));
+        player.sendMessage(msg("The Alembic refines Raw Cogito with Enkephalin into a workable vial "
+                + "(−1 Raw Cogito, −1 Enkephalin).", GREEN));
         player.playSound(player.getLocation(), Sound.BLOCK_BREWING_STAND_BREW, 0.7f, 1.2f);
     }
 
@@ -753,6 +748,26 @@ public final class ExtractionCommand {
         int n = 0;
         for (ItemStack it : player.getInventory().getContents()) if (Enkephalin.matches(it)) n += it.getAmount();
         return n;
+    }
+
+    /** Count inventory items matching a predicate. */
+    private int countItem(Player player, java.util.function.Predicate<ItemStack> pred) {
+        int n = 0;
+        for (ItemStack it : player.getInventory().getContents()) if (it != null && pred.test(it)) n += it.getAmount();
+        return n;
+    }
+
+    /** Remove {@code amount} inventory items matching a predicate. */
+    private void consumeItem(Player player, java.util.function.Predicate<ItemStack> pred, int amount) {
+        ItemStack[] contents = player.getInventory().getContents();
+        int remaining = amount;
+        for (int i = 0; i < contents.length && remaining > 0; i++) {
+            if (contents[i] == null || !pred.test(contents[i])) continue;
+            int take = Math.min(remaining, contents[i].getAmount());
+            contents[i].setAmount(contents[i].getAmount() - take);
+            if (contents[i].getAmount() <= 0) player.getInventory().setItem(i, null);
+            remaining -= take;
+        }
     }
 
     private void consumeSlotOne(Player player, int slot) {

@@ -43,6 +43,14 @@ public final class StationListener implements Listener {
         }
     }
 
+    /** Enkephalin is an unthrowable bottle of essence — cancel the vanilla throw on any right-click with it. */
+    @EventHandler
+    public void onThrow(PlayerInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND) return;
+        if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+        if (Enkephalin.matches(event.getPlayer().getInventory().getItemInMainHand())) event.setCancelled(true);
+    }
+
     @EventHandler
     public void onInteract(PlayerInteractEvent event) {
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;

@@ -27,8 +27,8 @@ public final class Enkephalin {
     private static final NamespacedKey MARK = new NamespacedKey("reliquary", "enkephalin");
     private static final String CMD = "extraction/enkephalin";
 
-    private static final Material MATERIAL = Material.GLOWSTONE_DUST;
-    private static final TextColor NAME = TextColor.color(0x9BE8FF); // pale energetic cyan
+    private static final Material MATERIAL = Material.EXPERIENCE_BOTTLE; // an (unthrowable) bottle of essence
+    private static final TextColor NAME = TextColor.color(0x88DD66); // Lobotomy green
     private static final TextColor BODY = TextColor.color(0xB8B8C0);
     private static final TextColor FAINT = TextColor.color(0x7A7A84);
 
