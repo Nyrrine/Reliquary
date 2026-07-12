@@ -98,14 +98,14 @@ public final class ExtractionCommand {
         if (player.getInventory().getItemInMainHand().getType().isAir()) {
             player.getInventory().setItemInMainHand(vial);
         } else {
-            player.getInventory().addItem(vial);
+            giveOrDrop(player, vial);
         }
         player.sendMessage(msg("A blank Cogito vial forms.", GREEN));
     }
 
     private void giveFuel(Player player, String[] a) {
         int n = parseInt(a, 1, 16);
-        player.getInventory().addItem(Enkephalin.create(n));
+        giveOrDrop(player, Enkephalin.create(n));
         player.sendMessage(msg("Drew " + n + " Enkephalin.", GREEN));
     }
 
@@ -174,6 +174,13 @@ public final class ExtractionCommand {
     private void destroyVial(Player player, Vial v) {
         if (v.slot() < 0) player.getInventory().setItemInMainHand(null);
         else player.getInventory().setItem(v.slot(), null);
+    }
+
+    /** Give an item, dropping any overflow at the player's feet so a full inventory never eats it. */
+    private void giveOrDrop(Player player, ItemStack item) {
+        for (ItemStack leftover : player.getInventory().addItem(item).values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), leftover);
+        }
     }
 
     // ---- assay + lectern -----------------------------------------------------------
@@ -380,7 +387,7 @@ public final class ExtractionCommand {
         }
         PotState blended = Engine.blend(pots);
         for (int s : slots) player.getInventory().setItem(s, null);
-        player.getInventory().addItem(Cogito.create(blended));
+        giveOrDrop(player, Cogito.create(blended));
         player.sendMessage(msg("Blended " + pots.size() + " vials at the Manifold.", GREEN));
         player.sendMessage(assayLine(blended.profile()));
         showGauges(player, blended);
@@ -440,7 +447,7 @@ public final class ExtractionCommand {
         // Consume and forge.
         for (var e : rec.components().entrySet()) consumeMaterial(player, e.getKey(), e.getValue());
         consumeEnkephalin(player, rec.enkephalin());
-        player.getInventory().addItem(Catalyst.create(w));
+        giveOrDrop(player, Catalyst.create(w));
         player.sendMessage(msg("The Well forges the " + w.display() + " Catalyst — pour it with a matching "
                 + w.grade().display() + " cogito to guarantee the extraction.", GREEN));
         player.playSound(player.getLocation(), Sound.BLOCK_ANVIL_USE, 0.8f, 0.7f);
@@ -558,7 +565,7 @@ public final class ExtractionCommand {
         ItemStack item = weapon.createItem();
         stampAttribution(item, player.getName(), r.cogitoGrade(), r.certified() ? 100.0 : r.purity());
         item = plugin.tracker().register(item, weapon.id(), player.getName() + " (extracted)");
-        player.getInventory().addItem(item);
+        giveOrDrop(player, item);
         plugin.weapons().engage(weapon, player.getUniqueId());
     }
 

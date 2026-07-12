@@ -184,7 +184,8 @@ public final class Cogito {
         StringBuilder sb = new StringBuilder();
         for (var e : state.taints().entrySet()) {
             if (sb.length() > 0) sb.append(';');
-            sb.append(e.getKey().name()).append(':').append(String.format("%.2f", e.getValue()));
+            // Locale.ROOT so the decimal separator is always '.' — a comma-locale server would else corrupt this.
+            sb.append(e.getKey().name()).append(':').append(String.format(java.util.Locale.ROOT, "%.2f", e.getValue()));
         }
         return sb.toString();
     }
@@ -196,7 +197,10 @@ public final class Cogito {
             if (kv.length != 2) continue;
             Taint t = Taint.byId(kv[0]);
             if (t == null) continue;
-            try { state.setTaintTime(t, Double.parseDouble(kv[1])); } catch (NumberFormatException ignored) {}
+            try {
+                double v = Double.parseDouble(kv[1]);
+                if (Double.isFinite(v) && v > 0.0) state.setTaintTime(t, v);
+            } catch (NumberFormatException ignored) {}
         }
     }
 
