@@ -25,6 +25,7 @@ public record Reagent(
         int flux,            // Flux charges granted (Honeycomb) — dampens opposition on following adds
         Inflict inflicts,    // nullable — a taint this reagent may cause on add
         java.util.Set<Taint> cures, // taints this reagent clears cleanly (a remedy)
+        org.bukkit.Material item,   // nullable — the vanilla item this reagent IS (for stations + the lectern)
         String source) {     // lectern grind text
 
     /** Reagent purity tiers: the ceiling each permits and how failure-prone it is to handle. */
@@ -86,6 +87,7 @@ public record Reagent(
         private int flux = 0;
         private Inflict inflicts = null;
         private final java.util.EnumSet<Taint> cures = java.util.EnumSet.noneOf(Taint.class);
+        private org.bukkit.Material item = null;
         private String source = "";
 
         private Builder(String id, String display) {
@@ -103,11 +105,12 @@ public record Reagent(
         public Builder flux(int charges) { this.flux = charges; return this; }
         public Builder inflicts(Taint t, double chance) { this.inflicts = new Inflict(t, chance); return this; }
         public Builder cures(Taint... ts) { for (Taint t : ts) cures.add(t); return this; }
+        public Builder item(org.bukkit.Material m) { this.item = m; return this; }
         public Builder source(String src) { this.source = src; return this; }
 
         public Reagent build() {
             return new Reagent(id, display, delta, contam, stab, tier, roll, chargeScale, noiseScale, flux,
-                    inflicts, cures.isEmpty() ? null : java.util.EnumSet.copyOf(cures), source);
+                    inflicts, cures.isEmpty() ? null : java.util.EnumSet.copyOf(cures), item, source);
         }
     }
 }

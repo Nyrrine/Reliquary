@@ -14,7 +14,10 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -29,6 +32,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public final class ExtractionCommand {
 
     private final Reliquary plugin;
+    private final Map<UUID, Long> fontCooldown = new HashMap<>(); // the Font's fuel-draw cooldown
 
     public ExtractionCommand(Reliquary plugin) {
         this.plugin = plugin;
@@ -37,10 +41,12 @@ public final class ExtractionCommand {
     private static final TextColor GREEN = TextColor.color(0x74F066);
     private static final TextColor GREY  = NamedTextColor.GRAY;
     private static final TextColor FAINT = TextColor.color(0x7A7A84);
+    private static final TextColor GOLD  = TextColor.color(0xFFD54A);
 
     /** The subcommands, in help/tab order. */
     private static final List<String> SUBS = List.of(
-            "vial", "fuel", "reagents", "add", "assay", "lectern", "distill", "blend", "recipes", "forge", "pour");
+            "vial", "fuel", "giveall", "reagents", "add", "assay", "lectern", "distill", "blend",
+            "recipes", "forge", "pour");
 
     /**
      * Dispatch an extraction subcommand. {@code a} is the sub-args where {@code a[0]} is the subcommand name
@@ -57,6 +63,7 @@ public final class ExtractionCommand {
         switch (a[0].toLowerCase()) {
             case "vial"     -> giveVial(player);
             case "fuel"     -> giveFuel(player, a);
+            case "giveall"  -> giveAll(player);
             case "reagents" -> listReagents(player);
             case "add"      -> add(player, a);
             case "assay"    -> assay(player);
@@ -109,6 +116,103 @@ public final class ExtractionCommand {
         player.sendMessage(msg("Drew " + n + " Enkephalin.", GREEN));
     }
 
+    /** Dispense one of everything the system uses — a vial, fuel, every reagent's item form, and every
+     *  catalyst grind component. Overflow drops at your feet. For creative/testing. */
+    private void giveAll(Player player) {
+        giveOrDrop(player, Cogito.create(new PotState()));
+        giveOrDrop(player, Enkephalin.create(64));
+        java.util.Set<Material> mats = new java.util.LinkedHashSet<>();
+        for (Reagent r : Reagents.all()) if (r.item() != null) mats.add(r.item());
+        for (Catalysts.Recipe rec : Catalysts.all()) mats.addAll(rec.components().keySet());
+        for (Material m : mats) giveOrDrop(player, new ItemStack(m, 16));
+        player.sendMessage(msg("Dispensed a vial, 64 Enkephalin, and " + mats.size()
+                + " item types (reagents + catalyst components). Overflow is at your feet.", GREEN));
+    }
+
+    /**
+     * The Lectern readout — tell the player what the lectern knows about the item they're holding: a Cogito's
+     * full assay, a catalyst's lock, a reagent's fingerprint, or which catalysts a grind component feeds.
+     */
+    public void describeItem(Player player, ItemStack item) {
+        if (item == null || item.getType().isAir()) {
+            player.sendMessage(msg("Hold an item and right-click the lectern to identify it.", GREY));
+            return;
+        }
+
+        PotState st = Cogito.read(item);
+        if (st != null) {
+            player.sendMessage(msg("— Cogito vial —", NamedTextColor.WHITE));
+            player.sendMessage(assayLine(st.profile()));
+            showGauges(player, st);
+            showTaints(player, st);
+            showPool(player, st);
+            return;
+        }
+        if (Enkephalin.matches(item)) {
+            player.sendMessage(msg("Enkephalin — distilled mental energy. Fuels the Centrifuge (distilling) "
+                    + "and the Well (pours + forging).", GREEN));
+            return;
+        }
+        String cw = Catalyst.weaponId(item);
+        if (cw != null) {
+            WeaponSpec w = WeaponSignatures.byId(cw);
+            player.sendMessage(msg("Catalyst — guarantees " + (w != null ? w.display() : cw)
+                    + (w != null ? " (" + w.grade().display() + ")" : "")
+                    + ". Pour it with a matching cogito to lock the extraction (+ Certified at 99%+).", GOLD));
+            return;
+        }
+
+        Material m = item.getType();
+        boolean found = false;
+        Reagent r = Reagents.byItem(m);
+        if (r != null) { describeReagent(player, r); found = true; }
+
+        List<String> usedBy = new ArrayList<>();
+        for (Catalysts.Recipe rec : Catalysts.all()) {
+            Integer need = rec.components().get(m);
+            if (need == null) continue;
+            WeaponSpec w = WeaponSignatures.byId(rec.weaponId());
+            usedBy.add((w != null ? w.display() : rec.weaponId()) + " x" + need);
+        }
+        if (!usedBy.isEmpty()) {
+            player.sendMessage(msg("Grind component — used to forge: " + String.join(", ", usedBy), FAINT));
+            found = true;
+        }
+        if (!found) player.sendMessage(msg("The lectern has nothing on this.", GREY));
+    }
+
+    private void describeReagent(Player player, Reagent r) {
+        player.sendMessage(msg("Reagent: " + r.display() + "  [" + r.tier() + ", ceiling "
+                + (int) r.tierCeiling() + "]", NamedTextColor.WHITE));
+        Component d = Component.text("  ", GREY);
+        boolean first = true;
+        for (Sin s : Sin.values()) {
+            double v = r.delta()[s.index()];
+            if (v == 0) continue;
+            if (!first) d = d.append(Component.text("  ", FAINT));
+            d = d.append(Component.text((v > 0 ? "+" : "") + (int) v + " " + s.display(), s.color()));
+            first = false;
+        }
+        if (r.isVolatile()) {
+            d = d.append(Component.text((first ? "" : "  ") + "+[" + (int) r.roll().min() + "-"
+                    + (int) r.roll().max() + "] " + r.roll().sin().display(), r.roll().sin().color()));
+            first = false;
+        }
+        if (!first) player.sendMessage(d);
+        player.sendMessage(msg(String.format("  contam %.1f  stability %+.0f%s", r.contam(), r.stab(),
+                r.flux() > 0 ? "  flux +" + r.flux() : ""), FAINT));
+        if (r.inflicts() != null) {
+            player.sendMessage(Component.text("  risks " + r.inflicts().taint().display() + " ("
+                    + Math.round(r.inflicts().chance() * 100) + "%)", r.inflicts().taint().color()));
+        }
+        if (r.cures() != null && !r.cures().isEmpty()) {
+            List<String> c = new ArrayList<>();
+            for (Taint t : r.cures()) c.add(t.display());
+            player.sendMessage(msg("  cures: " + String.join(", ", c), GREEN));
+        }
+        player.sendMessage(msg("  " + r.source(), FAINT));
+    }
+
     private void listReagents(Player player) {
         player.sendMessage(msg("Reagents (" + Reagents.count() + "):", NamedTextColor.WHITE));
         for (Reagent r : Reagents.all()) {
@@ -124,7 +228,11 @@ public final class ExtractionCommand {
         if (a.length < 2) { player.sendMessage(msg("Usage: /cogito add <reagentId>", GREY)); return; }
         Reagent r = Reagents.byId(a[1].toLowerCase());
         if (r == null) { player.sendMessage(msg("No such reagent: " + a[1], NamedTextColor.RED)); return; }
+        applyReagent(player, r);
+    }
 
+    /** Titrate one reagent into the player's vial, with all the feedback. Shared by /cogito add + the Censer. */
+    public void applyReagent(Player player, Reagent r) {
         Vial v = locateVial(player);
         if (v == null) { noVial(player); return; }
         PotState st = v.state();
@@ -174,6 +282,88 @@ public final class ExtractionCommand {
     private void destroyVial(Player player, Vial v) {
         if (v.slot() < 0) player.getInventory().setItemInMainHand(null);
         else player.getInventory().setItem(v.slot(), null);
+    }
+
+    // ---- stations: block front-ends (§35) — each calls the same logic as its /cogito command ----
+
+    /** The Font (Cauldron): draw Enkephalin, cooldown-gated so it isn't an infinite tap. */
+    public void stationFont(Player player) {
+        long now = System.currentTimeMillis();
+        long ready = fontCooldown.getOrDefault(player.getUniqueId(), 0L);
+        if (now < ready) {
+            player.sendActionBar(msg("The Font is replenishing… " + ((ready - now) / 1000 + 1) + "s", FAINT));
+            return;
+        }
+        fontCooldown.put(player.getUniqueId(), now + 5000L);
+        giveOrDrop(player, Enkephalin.create(4));
+        player.sendMessage(msg("The Font yields 4 Enkephalin.", GREEN));
+        player.playSound(player.getLocation(), Sound.ITEM_BUCKET_FILL, 0.7f, 1.3f);
+    }
+
+    /** The Alembic (Blast Furnace): spend 1 Enkephalin → a blank Cogito vial. */
+    public void stationAlembic(Player player) {
+        if (!consumeEnkephalin(player, 1)) {
+            player.sendMessage(msg("The Alembic needs 1 Enkephalin to draw a vial. /cogito fuel or use the Font.",
+                    NamedTextColor.RED));
+            return;
+        }
+        ItemStack vial = Cogito.create(new PotState());
+        if (player.getInventory().getItemInMainHand().getType().isAir()) {
+            player.getInventory().setItemInMainHand(vial);
+        } else {
+            giveOrDrop(player, vial);
+        }
+        player.sendMessage(msg("The Alembic condenses a blank Cogito vial (−1 Enkephalin).", GREEN));
+        player.playSound(player.getLocation(), Sound.BLOCK_BREWING_STAND_BREW, 0.7f, 1.2f);
+    }
+
+    /** The Censer (Brewing Stand): the held reagent item is titrated into your vial (spends one). */
+    public void stationCenser(Player player, ItemStack held) {
+        Reagent r = Reagents.byItem(held.getType());
+        if (r == null) {
+            player.sendMessage(msg("The Censer doesn't take that — hold a reagent item.", NamedTextColor.RED));
+            return;
+        }
+        if (locateVial(player) == null) { noVial(player); return; }
+        held.setAmount(held.getAmount() - 1);
+        player.getInventory().setItemInMainHand(held.getAmount() <= 0 ? null : held);
+        applyReagent(player, r);
+    }
+
+    /** The Centrifuge (Grindstone): distill the held vial. */
+    public void stationCentrifuge(Player player) { distill(player); }
+
+    /** The Manifold (Chiseled Bookshelf): blend all charged vials you carry. */
+    public void stationManifold(Player player) { blend(player); }
+
+    /** The Pocket Well (Vault): pour to manifest, or (sneaking) forge the best catalyst you can afford. */
+    public void stationWell(Player player, boolean sneaking) {
+        if (sneaking) {
+            // Forge the highest-grade catalyst whose recipe the player can fully afford right now.
+            Catalysts.Recipe best = null;
+            EgoGrade bestGrade = null;
+            for (Catalysts.Recipe rec : Catalysts.all()) {
+                if (!canAfford(player, rec)) continue;
+                WeaponSpec w = WeaponSignatures.byId(rec.weaponId());
+                EgoGrade g = w != null ? w.grade() : EgoGrade.ZAYIN;
+                if (best == null || g.ordinal() > bestGrade.ordinal()) { best = rec; bestGrade = g; }
+            }
+            if (best == null) {
+                player.sendMessage(msg("The Well can't forge anything — you're short on grind components. "
+                        + "Check /cogito recipes <id>.", NamedTextColor.RED));
+                return;
+            }
+            forge(player, new String[]{"forge", best.weaponId()});
+            return;
+        }
+        pour(player, new String[]{"pour"});
+    }
+
+    private boolean canAfford(Player player, Catalysts.Recipe rec) {
+        for (var e : rec.components().entrySet()) {
+            if (countMaterial(player, e.getKey()) < e.getValue()) return false;
+        }
+        return countEnkephalin(player) >= rec.enkephalin();
     }
 
     /** Give an item, dropping any overflow at the player's feet so a full inventory never eats it. */
@@ -678,6 +868,7 @@ public final class ExtractionCommand {
         player.sendMessage(msg("Cogito extraction (testbed) — /cogito ...  (tab-completes)", NamedTextColor.WHITE));
         line(player, "vial", "brew a blank Cogito vial (into your hand)");
         line(player, "fuel [n]", "draw Enkephalin");
+        line(player, "giveall", "dispense every reagent + catalyst component (creative)");
         line(player, "reagents", "list reagent ids");
         line(player, "add <id>", "add a reagent to the held vial (the Censer)");
         line(player, "assay", "reveal the held vial's composition");
