@@ -193,7 +193,7 @@ public final class ExtractionCommand {
                         .append(Component.text("   " + pct(c.match()) + " match", FAINT)));
                 shown++;
             }
-            double success = Math.min(1.0, pool.get(0).match() * st.purity() / 100.0);
+            double success = WellRoll.successChance(st);
             player.sendMessage(Component.text(
                     String.format("  Overall: ~%d%% you pull one, else near-miss / breach. "
                             + "Load a catalyst (pour <id>) to guarantee it.", Math.round(success * 100)), FAINT));

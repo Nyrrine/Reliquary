@@ -33,6 +33,9 @@ public final class WellRoll {
     /** How sharply the gacha favours your best-matched weapon (weight = match^this). Higher = more targeted,
      *  lower = more of a lottery across the whole reachable pool. */
     public static final double GACHA_SHARPNESS = 8.0;
+    /** Steepness of the yield curve: whether a pour produces a weapon at all is {@code (match × purity)^this}.
+     *  Above 1 it punishes mediocre pours and rewards well-crafted ones — so crafting clearly beats RNG. */
+    public static final double SUCCESS_STEEPNESS = 2.0;
     /** Purity at/above which a locked catalyst certifies the pour to a guaranteed manifest. */
     public static final double CERTIFIED_PURITY = Grade.PRIMARY_STANDARD.minPurity();
 
@@ -96,8 +99,9 @@ public final class WellRoll {
 
         double bestMatch = pool.get(0).match();
 
-        // Does the pour manifest anything at all? Quality (best match × purity) decides success vs failure.
-        double pSuccess = clamp01(bestMatch * (purity / 100.0));
+        // Does the pour manifest anything at all? Quality (best match × purity) on a STEEP curve — a mediocre
+        // gamble usually fails, a well-crafted pour reliably yields. This is where crafting beats RNG.
+        double pSuccess = Math.pow(clamp01(bestMatch * (purity / 100.0)), SUCCESS_STEEPNESS);
         if (rng.nextDouble() < pSuccess) {
             // The gacha: pull a weapon from the pool weighted by how well the mix matches each. Your cogito
             // tilts the odds toward what you shaped it for; the roll still decides which one you actually get.
@@ -148,6 +152,15 @@ public final class WellRoll {
         }
         out.sort((a, b) -> Double.compare(b.odds(), a.odds()));
         return out;
+    }
+
+    /** The chance this pour yields a weapon at all (before which one) — the steep quality curve. 0 if nothing
+     *  is reachable. A catalyst-locked pour ignores this (guaranteed). */
+    public static double successChance(PotState pour) {
+        List<Chance> pool = pool(pour);
+        if (pool.isEmpty()) return 0.0;
+        double quality = Math.max(0.0, Math.min(1.0, pool.get(0).match() * pour.purity() / 100.0));
+        return Math.pow(quality, SUCCESS_STEEPNESS);
     }
 
     private static WeaponSpec weightedPick(List<Chance> pool, RandomGenerator rng) {
