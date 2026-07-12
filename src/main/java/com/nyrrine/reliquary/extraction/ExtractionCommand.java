@@ -274,10 +274,13 @@ public final class ExtractionCommand {
         String cw = Catalyst.weaponId(item);
         if (cw != null) {
             WeaponSpec w = WeaponSignatures.byId(cw);
-            player.sendMessage(msg("Catalyst — guarantees " + (w != null ? w.display() : cw)
+            boolean apex = w != null && w.grade().isApex();
+            player.sendMessage(msg("Catalyst — " + (w != null ? w.display() : cw)
                     + (w != null ? " (" + w.grade().display() + ")" : "")
-                    + ". Insert it into a cogito (sneak the Crucible, or /cogito insert) — it doubles that "
-                    + "weapon's odds once it's your top pull (+ Certified at 99%+).", GOLD));
+                    + ". Insert it into a cogito (sneak the Crucible, or /cogito insert): "
+                    + (apex ? "REQUIRED to manifest this apex weapon — it makes a Radiant Cogito."
+                            : "adds 1–15% to its odds per stack (up to 3), once it's your top pull past 70%."),
+                    GOLD));
             trackAndGuide(player, cw);
             return;
         }
@@ -977,6 +980,17 @@ public final class ExtractionCommand {
                     NamedTextColor.RED));
             return;
         }
+        // Don't silently lose a catalyst: refuse to blend vials aimed at different weapons.
+        String aim = null;
+        for (PotState p : pots) {
+            if (p.catalystTarget() == null) continue;
+            if (aim == null) aim = p.catalystTarget();
+            else if (!aim.equals(p.catalystTarget())) {
+                player.sendMessage(msg("These vials hold catalysts for different weapons — blending would "
+                        + "lose one. Pour or separate them first.", NamedTextColor.RED));
+                return;
+            }
+        }
         PotState blended = Engine.blend(pots);
         for (int s : slots) player.getInventory().setItem(s, null);
         giveOrDrop(player, Cogito.create(blended));
@@ -1114,10 +1128,16 @@ public final class ExtractionCommand {
         int n = 0;
         for (ItemStack it : player.getInventory().getContents()) {
             if (it == null || it.getType() != m) continue;
-            if (Enkephalin.matches(it) || Catalyst.matches(it) || Cogito.matches(it)) continue;
+            if (isSpecialItem(it)) continue;
             n += it.getAmount();
         }
         return n;
+    }
+
+    /** A plugin item that must NOT be counted/consumed as a plain vanilla grind material (shares a Material). */
+    private boolean isSpecialItem(ItemStack it) {
+        return Enkephalin.matches(it) || Catalyst.matches(it) || Cogito.matches(it)
+                || RefinedReagent.idOf(it) != null || SinConcentrate.sinOf(it) != null;
     }
 
     private void consumeMaterial(Player player, Material m, int amount) {
@@ -1126,7 +1146,7 @@ public final class ExtractionCommand {
         for (int i = 0; i < contents.length && remaining > 0; i++) {
             ItemStack it = contents[i];
             if (it == null || it.getType() != m) continue;
-            if (Enkephalin.matches(it) || Catalyst.matches(it) || Cogito.matches(it)) continue;
+            if (isSpecialItem(it)) continue;
             int take = Math.min(remaining, it.getAmount());
             it.setAmount(it.getAmount() - take);
             if (it.getAmount() <= 0) player.getInventory().setItem(i, null);
