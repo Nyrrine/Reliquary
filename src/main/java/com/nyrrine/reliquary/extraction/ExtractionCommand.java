@@ -6,6 +6,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -39,7 +40,7 @@ public final class ExtractionCommand {
 
     /** The subcommands, in help/tab order. */
     private static final List<String> SUBS = List.of(
-            "vial", "fuel", "reagents", "add", "assay", "lectern", "distill", "blend", "pour");
+            "vial", "fuel", "reagents", "add", "assay", "lectern", "distill", "blend", "recipes", "forge", "pour");
 
     /**
      * Dispatch an extraction subcommand. {@code a} is the sub-args where {@code a[0]} is the subcommand name
@@ -62,6 +63,8 @@ public final class ExtractionCommand {
             case "lectern"  -> lectern(player, a);
             case "distill"  -> distill(player);
             case "blend"    -> blend(player);
+            case "recipes"  -> recipes(player, a);
+            case "forge"    -> forge(player, a);
             case "pour"     -> pour(player, a);
             default          -> help(player);
         }
@@ -73,7 +76,8 @@ public final class ExtractionCommand {
         if (a.length == 2 && (a[0].equalsIgnoreCase("add") || a[0].equalsIgnoreCase("lectern"))) {
             return filter(reagentIds(), a[1]);
         }
-        if (a.length == 2 && a[0].equalsIgnoreCase("pour")) {
+        if (a.length == 2 && (a[0].equalsIgnoreCase("pour") || a[0].equalsIgnoreCase("recipes")
+                || a[0].equalsIgnoreCase("forge"))) {
             return filter(weaponIds(), a[1]);
         }
         return List.of();
@@ -382,6 +386,110 @@ public final class ExtractionCommand {
         showGauges(player, blended);
     }
 
+    // ---- the Well: forge mode (catalysts) ------------------------------------------
+
+    /** Show what a weapon's catalyst costs (legibility for the grind), or list all defined recipes. */
+    private void recipes(Player player, String[] a) {
+        if (a.length >= 2) {
+            WeaponSpec w = WeaponSignatures.byId(a[1].toLowerCase());
+            Catalysts.Recipe rec = w == null ? null : Catalysts.forWeapon(w.id());
+            if (rec == null) {
+                player.sendMessage(msg("No catalyst recipe defined for '" + a[1] + "'.", NamedTextColor.RED));
+                return;
+            }
+            player.sendMessage(msg(w.display() + " Catalyst (" + w.grade().display() + ") — forge needs:",
+                    NamedTextColor.WHITE));
+            for (var e : rec.components().entrySet()) {
+                player.sendMessage(msg("  " + e.getValue() + "x " + pretty(e.getKey()), FAINT));
+            }
+            player.sendMessage(msg("  + " + rec.enkephalin() + " Enkephalin", FAINT));
+            return;
+        }
+        player.sendMessage(msg("Catalyst recipes (" + Catalysts.count() + " defined) — /cogito recipes <id>:",
+                NamedTextColor.WHITE));
+        for (Catalysts.Recipe rec : Catalysts.all()) {
+            WeaponSpec w = WeaponSignatures.byId(rec.weaponId());
+            player.sendMessage(msg("  " + rec.weaponId() + (w != null ? "  (" + w.grade().display() + ")" : ""), FAINT));
+        }
+    }
+
+    /** The Well's forge mode: consume the grind components + Enkephalin, produce the weapon's catalyst. */
+    private void forge(Player player, String[] a) {
+        if (a.length < 2) { player.sendMessage(msg("Usage: /cogito forge <weaponId>", GREY)); return; }
+        WeaponSpec w = WeaponSignatures.byId(a[1].toLowerCase());
+        if (w == null) { player.sendMessage(msg("No such weapon: " + a[1], NamedTextColor.RED)); return; }
+        Catalysts.Recipe rec = Catalysts.forWeapon(w.id());
+        if (rec == null) {
+            player.sendMessage(msg("No catalyst recipe defined for " + w.display() + " yet.", NamedTextColor.RED));
+            return;
+        }
+
+        // Check everything up front, list all shortfalls at once.
+        List<String> missing = new ArrayList<>();
+        for (var e : rec.components().entrySet()) {
+            int have = countMaterial(player, e.getKey());
+            if (have < e.getValue()) missing.add((e.getValue() - have) + " more " + pretty(e.getKey()));
+        }
+        int enk = countEnkephalin(player);
+        if (enk < rec.enkephalin()) missing.add((rec.enkephalin() - enk) + " more Enkephalin");
+        if (!missing.isEmpty()) {
+            player.sendMessage(msg("The forge is short: " + String.join(", ", missing) + ".", NamedTextColor.RED));
+            return;
+        }
+
+        // Consume and forge.
+        for (var e : rec.components().entrySet()) consumeMaterial(player, e.getKey(), e.getValue());
+        consumeEnkephalin(player, rec.enkephalin());
+        player.getInventory().addItem(Catalyst.create(w));
+        player.sendMessage(msg("The Well forges the " + w.display() + " Catalyst — pour it with a matching "
+                + w.grade().display() + " cogito to guarantee the extraction.", GREEN));
+        player.playSound(player.getLocation(), Sound.BLOCK_ANVIL_USE, 0.8f, 0.7f);
+        player.playSound(player.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, 0.5f, 1.4f);
+    }
+
+    private static String pretty(Material m) {
+        String s = m.name().toLowerCase().replace('_', ' ');
+        return Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    }
+
+    /** Count plain vanilla items of a material (never the special extraction items). */
+    private int countMaterial(Player player, Material m) {
+        int n = 0;
+        for (ItemStack it : player.getInventory().getContents()) {
+            if (it == null || it.getType() != m) continue;
+            if (Enkephalin.matches(it) || Catalyst.matches(it) || Cogito.matches(it)) continue;
+            n += it.getAmount();
+        }
+        return n;
+    }
+
+    private void consumeMaterial(Player player, Material m, int amount) {
+        ItemStack[] contents = player.getInventory().getContents();
+        int remaining = amount;
+        for (int i = 0; i < contents.length && remaining > 0; i++) {
+            ItemStack it = contents[i];
+            if (it == null || it.getType() != m) continue;
+            if (Enkephalin.matches(it) || Catalyst.matches(it) || Cogito.matches(it)) continue;
+            int take = Math.min(remaining, it.getAmount());
+            it.setAmount(it.getAmount() - take);
+            if (it.getAmount() <= 0) player.getInventory().setItem(i, null);
+            remaining -= take;
+        }
+    }
+
+    private int countEnkephalin(Player player) {
+        int n = 0;
+        for (ItemStack it : player.getInventory().getContents()) if (Enkephalin.matches(it)) n += it.getAmount();
+        return n;
+    }
+
+    private void consumeSlotOne(Player player, int slot) {
+        ItemStack it = player.getInventory().getItem(slot);
+        if (it == null) return;
+        it.setAmount(it.getAmount() - 1);
+        player.getInventory().setItem(slot, it.getAmount() <= 0 ? null : it);
+    }
+
     // ---- the Well: pour ------------------------------------------------------------
 
     private void pour(Player player, String[] a) {
@@ -390,11 +498,22 @@ public final class ExtractionCommand {
         PotState st = v.state();
         if (st.isBlank()) { player.sendMessage(msg("The vial is empty.", NamedTextColor.RED)); return; }
 
+        // Catalyst: an explicit id is the testbed shortcut (simulated); otherwise auto-detect a forged
+        // catalyst ITEM in the inventory and use its locked weapon.
         String catalyst = a.length >= 2 ? a[1].toLowerCase() : null;
+        int catalystSlot = -1;
+        if (catalyst == null) {
+            ItemStack[] contents = player.getInventory().getContents();
+            for (int i = 0; i < contents.length; i++) {
+                String w = Catalyst.weaponId(contents[i]);
+                if (w != null) { catalyst = w; catalystSlot = i; break; }
+            }
+        }
+
         WellRoll.Result r = WellRoll.resolve(st, catalyst, 0.0, ThreadLocalRandom.current());
 
         // Too thin/crude to reach ANY weapon (nothing cleared the grade floor + volume gate). Rather than
-        // a cryptic breach, explain the shortfall and keep the vial — this is the testbed being helpful.
+        // a cryptic breach, explain the shortfall and keep the vial + catalyst — this is the testbed helping.
         if (r.outcome() == WellRoll.Outcome.BREACH && r.weapon() == null) {
             player.sendMessage(msg(thinPourReason(st, catalyst), NamedTextColor.RED));
             return;
@@ -406,6 +525,12 @@ public final class ExtractionCommand {
         ItemStack remainder = item.getAmount() <= 0 ? null : item;
         if (v.slot() < 0) player.getInventory().setItemInMainHand(remainder);
         else player.getInventory().setItem(v.slot(), remainder);
+
+        // A forged catalyst ITEM is spent only if it actually locked its weapon (did its job).
+        if (catalystSlot >= 0 && r.outcome() == WellRoll.Outcome.MANIFEST
+                && r.weapon() != null && r.weapon().id().equals(catalyst)) {
+            consumeSlotOne(player, catalystSlot);
+        }
 
         switch (r.outcome()) {
             case MANIFEST -> onManifest(player, r);
@@ -552,7 +677,9 @@ public final class ExtractionCommand {
         line(player, "lectern <id>", "what-if: project a reagent without committing");
         line(player, "distill", "run the held vial through the Centrifuge");
         line(player, "blend", "blend all charged vials you carry (the Manifold)");
-        line(player, "pour [catalystId]", "pour into the Well — manifest / near-miss / breach");
+        line(player, "recipes [id]", "what a weapon's catalyst costs to forge");
+        line(player, "forge <id>", "forge a signature-lock catalyst from grind components");
+        line(player, "pour [catalystId]", "pour into the Well — a forged catalyst guarantees the weapon");
     }
 
     private void line(Player player, String cmd, String desc) {
