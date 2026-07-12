@@ -61,7 +61,8 @@ public final class StationListener implements Listener {
             case CENSER     -> extraction.stationCenser(player, player.getInventory().getItemInMainHand());
             case CENTRIFUGE -> extraction.stationCentrifuge(player);
             case MANIFOLD   -> extraction.stationManifold(player);
-            case WELL       -> extraction.stationWell(player, player.isSneaking());
+            case WELL       -> extraction.stationWell(player,
+                    event.getClickedBlock().getLocation(), player.isSneaking());
         }
     }
 }

@@ -339,34 +339,52 @@ public final class ExtractionCommand {
     /** The Manifold (Chiseled Bookshelf): blend all charged vials you carry. */
     public void stationManifold(Player player) { blend(player); }
 
-    /** The Pocket Well (Vault): pour to manifest, or (sneaking) forge the best catalyst you can afford. */
-    public void stationWell(Player player, boolean sneaking) {
-        if (sneaking) {
-            // Forge the highest-grade catalyst whose recipe the player can fully afford right now.
-            Catalysts.Recipe best = null;
-            EgoGrade bestGrade = null;
-            for (Catalysts.Recipe rec : Catalysts.all()) {
-                if (!canAfford(player, rec)) continue;
-                WeaponSpec w = WeaponSignatures.byId(rec.weaponId());
-                EgoGrade g = w != null ? w.grade() : EgoGrade.ZAYIN;
-                if (best == null || g.ordinal() > bestGrade.ordinal()) { best = rec; bestGrade = g; }
-            }
-            if (best == null) {
-                player.sendMessage(msg("The Well can't forge anything — you're short on grind components. "
-                        + "Check /cogito recipes <id>.", NamedTextColor.RED));
-                return;
-            }
-            forge(player, new String[]{"forge", best.weaponId()});
+    /**
+     * The Pocket Well — an ominous chamber. Right-click <b>peers in</b>: it reveals (floating inside) the
+     * weapon your current cogito is most likely to manifest, without consuming anything. Sneak-right-click
+     * <b>pours</b> for real (the commit).
+     */
+    public void stationWell(Player player, org.bukkit.Location wellLoc, boolean sneaking) {
+        if (sneaking) { pour(player, new String[]{"pour"}); return; }
+
+        Vial v = locateVial(player);
+        if (v == null) { player.sendMessage(msg("Hold a Cogito vial and peer into the Well.", GREY)); return; }
+        PotState st = v.state();
+        if (st.isBlank()) { player.sendMessage(msg("The chamber is dark — the vial is empty.", GREY)); return; }
+        List<WellRoll.Chance> pool = WellRoll.pool(st);
+        if (pool.isEmpty()) {
+            player.sendMessage(msg("The chamber shows nothing — too thin or crude to reach any weapon.",
+                    NamedTextColor.RED));
             return;
         }
-        pour(player, new String[]{"pour"});
+        WellRoll.Chance top = pool.get(0);
+        Weapon w = plugin.weapons().get(top.weapon().id());
+        if (w != null) revealInChamber(wellLoc, w.createItem());
+        player.sendMessage(msg("The Pocket Well stirs — most likely: " + top.weapon().display()
+                + " (" + Math.round(top.odds() * 100) + "%).  Sneak-right-click to pour.", GREEN));
+        int shown = 0;
+        for (WellRoll.Chance c : pool) {
+            if (shown++ == 0) continue; // skip the top (already shown)
+            if (shown > 3) break;
+            player.sendMessage(msg("   …or " + c.weapon().display() + " (" + Math.round(c.odds() * 100) + "%)", FAINT));
+        }
     }
 
-    private boolean canAfford(Player player, Catalysts.Recipe rec) {
-        for (var e : rec.components().entrySet()) {
-            if (countMaterial(player, e.getKey()) < e.getValue()) return false;
-        }
-        return countEnkephalin(player) >= rec.enkephalin();
+    /** Float the most-likely weapon above the Well for a few seconds — the item inside the ominous chamber. */
+    private void revealInChamber(org.bukkit.Location wellLoc, ItemStack item) {
+        org.bukkit.Location at = wellLoc.clone().add(0.5, 1.4, 0.5);
+        org.bukkit.entity.ItemDisplay disp = wellLoc.getWorld().spawn(at, org.bukkit.entity.ItemDisplay.class, d -> {
+            d.setItemStack(item);
+            d.setBillboard(org.bukkit.entity.Display.Billboard.CENTER);
+            d.setPersistent(false);
+            d.setBrightness(new org.bukkit.entity.Display.Brightness(15, 15));
+            var tr = d.getTransformation();
+            tr.getScale().set(0.9f);
+            d.setTransformation(tr);
+        });
+        wellLoc.getWorld().spawnParticle(org.bukkit.Particle.PORTAL, at, 30, 0.3, 0.3, 0.3, 0.1);
+        wellLoc.getWorld().playSound(at, Sound.BLOCK_CONDUIT_AMBIENT, 0.7f, 0.7f);
+        org.bukkit.Bukkit.getScheduler().runTaskLater(plugin, () -> { if (disp.isValid()) disp.remove(); }, 120L);
     }
 
     /** Give an item, dropping any overflow at the player's feet so a full inventory never eats it. */

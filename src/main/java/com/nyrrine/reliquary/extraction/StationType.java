@@ -20,13 +20,13 @@ import java.util.List;
  */
 public enum StationType {
 
-    FONT      (Material.CAULDRON,          "The Font",       Material.PRISMARINE_CRYSTALS, Material.AMETHYST_SHARD),
-    ALEMBIC   (Material.BLAST_FURNACE,     "The Alembic",    Material.BLAZE_POWDER,        Material.AMETHYST_SHARD),
-    CENSER    (Material.BREWING_STAND,     "The Censer",     Material.GHAST_TEAR,          Material.AMETHYST_SHARD),
-    CENTRIFUGE(Material.GRINDSTONE,        "The Centrifuge", Material.REDSTONE_BLOCK,      Material.AMETHYST_SHARD),
-    MANIFOLD  (Material.CHISELED_BOOKSHELF,"The Manifold",   Material.ENDER_PEARL,         Material.AMETHYST_SHARD),
-    WELL      (Material.CONDUIT,           "The Pocket Well",Material.NETHER_STAR,         Material.AMETHYST_SHARD),
-    LECTERN   (Material.LECTERN,           "The Lectern",    Material.GLOW_INK_SAC,        Material.AMETHYST_SHARD);
+    FONT      (Material.CAULDRON,          "Font",        Material.PRISMARINE_CRYSTALS, Material.AMETHYST_SHARD),
+    ALEMBIC   (Material.BLAST_FURNACE,     "Alembic",     Material.BLAZE_POWDER,        Material.AMETHYST_SHARD),
+    CENSER    (Material.BREWING_STAND,     "Censer",      Material.GHAST_TEAR,          Material.AMETHYST_SHARD),
+    CENTRIFUGE(Material.GRINDSTONE,        "Centrifuge",  Material.REDSTONE_BLOCK,      Material.AMETHYST_SHARD),
+    MANIFOLD  (Material.CHISELED_BOOKSHELF,"Manifold",    Material.ENDER_PEARL,         Material.AMETHYST_SHARD),
+    WELL      (Material.CONDUIT,           "Pocket Well", Material.NETHER_STAR,         Material.AMETHYST_SHARD),
+    LECTERN   (Material.LECTERN,           "Assay",       Material.GLOW_INK_SAC,        Material.AMETHYST_SHARD);
 
     /** PDC tag on a station ITEM, holding the enum name. Blocks are tracked by location in {@link Stations}. */
     public static final NamespacedKey KEY = new NamespacedKey("reliquary", "station");
