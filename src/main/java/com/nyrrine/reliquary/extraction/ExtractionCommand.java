@@ -76,7 +76,7 @@ public final class ExtractionCommand {
         switch (a[0].toLowerCase()) {
             case "vial"     -> giveVial(player);
             case "fuel"     -> giveFuel(player, a);
-            case "giveall"  -> giveAll(player);
+            case "giveall"  -> giveAll(player, a);
             case "stations" -> giveStations(player);
             case "reagents" -> listReagents(player);
             case "add"      -> add(player, a);
@@ -114,6 +114,8 @@ public final class ExtractionCommand {
                 || a[0].equalsIgnoreCase("forge"))) {
             return filter(weaponIds(), a[1]);
         }
+        if (a.length == 2 && a[0].equalsIgnoreCase("giveall")) return filter(GIVE_CATS, a[1]);
+        if (a.length == 2 && (a[0].equalsIgnoreCase("track"))) return filter(weaponIds(), a[1]);
         return List.of();
     }
 
@@ -150,21 +152,73 @@ public final class ExtractionCommand {
                 + " station blocks — place them and right-click. (They're also craftable.)", GREEN));
     }
 
-    /** Dispense one of everything the system uses — a vial, fuel, every reagent's item form, and every
-     *  catalyst grind component. Overflow drops at your feet. For creative/testing. */
-    private void giveAll(Player player) {
-        giveOrDrop(player, Cogito.create(new PotState()));
-        giveOrDrop(player, Enkephalin.create(64));
-        java.util.Set<Material> mats = new java.util.LinkedHashSet<>();
-        for (Reagent r : Reagents.all()) if (r.item() != null) mats.add(r.item());
-        for (Catalysts.Recipe rec : Catalysts.all()) mats.addAll(rec.components().keySet());
-        for (Material m : mats) giveOrDrop(player, new ItemStack(m, 16));
-        int refined = 0;
-        for (String id : RefinedReagent.ids()) { giveOrDrop(player, RefinedReagent.create(id, 64)); refined++; }
-        for (Sin s : Sin.values()) giveOrDrop(player, SinConcentrate.create(s, 32));
-        player.sendMessage(msg("Dispensed a vial, 64 Enkephalin, " + mats.size()
-                + " item types (reagents + catalyst components), " + refined
-                + " refined chain reagents, and 7 sin concentrates. Overflow is at your feet.", GREEN));
+    /** The giveall categories, for tab completion + usage. */
+    private static final List<String> GIVE_CATS =
+            List.of("all", "rawmaterials", "materials", "cures", "catalysts");
+
+    /**
+     * Creative dispenser, split by category so you can grab just what you're testing:
+     * {@code rawmaterials} (gatherable reagent items), {@code materials} (crafted refined reagents +
+     * concentrates), {@code cures} (remedies + buffers), {@code catalysts} (grind components + fuel), or
+     * {@code all}. Everything is handed out in valid stacks — unstackable items (buckets, potions, pots)
+     * come as separate items, never a broken 16-stack.
+     */
+    private void giveAll(Player player, String[] a) {
+        String cat = a.length > 1 ? a[1].toLowerCase(java.util.Locale.ROOT) : "all";
+        if (!GIVE_CATS.contains(cat)) {
+            player.sendMessage(msg("Usage: /cogito giveall <" + String.join("|", GIVE_CATS) + ">", GREY));
+            return;
+        }
+        boolean all = cat.equals("all");
+        List<String> got = new ArrayList<>();
+
+        if (all) {
+            giveOrDrop(player, Cogito.create(new PotState()));
+            giveOrDrop(player, Enkephalin.create(64));
+            giveOrDrop(player, RawCogito.create(16));
+        }
+        if (all || cat.equals("rawmaterials")) {
+            int n = 0;
+            for (Reagent r : Reagents.all())
+                if (r.item() != null && !isSupportReagent(r)) { giveMaterial(player, r.item(), 32); n++; }
+            got.add(n + " raw materials");
+        }
+        if (all || cat.equals("cures")) {
+            int n = 0;
+            for (Reagent r : Reagents.all())
+                if (r.item() != null && isSupportReagent(r)) { giveMaterial(player, r.item(), 16); n++; }
+            got.add(n + " cures/buffers");
+        }
+        if (all || cat.equals("materials")) {
+            for (String id : RefinedReagent.ids()) giveOrDrop(player, RefinedReagent.create(id, 64));
+            for (Sin s : Sin.values()) giveOrDrop(player, SinConcentrate.create(s, 32));
+            got.add("refined reagents + 7 concentrates");
+        }
+        if (all || cat.equals("catalysts")) {
+            java.util.Set<Material> mats = new java.util.LinkedHashSet<>();
+            for (Catalysts.Recipe rec : Catalysts.all()) mats.addAll(rec.components().keySet());
+            for (Material m : mats) giveMaterial(player, m, 64);
+            giveOrDrop(player, Enkephalin.create(64));
+            got.add(mats.size() + " catalyst components + fuel");
+        }
+        player.sendMessage(msg("Dispensed (" + cat + "): " + String.join(", ", got)
+                + ". Overflow is at your feet.", GREEN));
+    }
+
+    /** A support reagent — a remedy (cures a taint) or a buffer/solvent (UTILITY tier), vs. an affinity item. */
+    private boolean isSupportReagent(Reagent r) {
+        return r.tier() == Reagent.Tier.UTILITY || (r.cures() != null && !r.cures().isEmpty());
+    }
+
+    /** Give {@code desired} of a material in valid stacks — unstackables come as separate items (max 4). */
+    private void giveMaterial(Player player, Material m, int desired) {
+        int max = Math.max(1, m.getMaxStackSize());
+        int remaining = max <= 1 ? Math.min(desired, 4) : desired; // don't spew 16 single buckets
+        while (remaining > 0) {
+            int n = Math.min(remaining, max);
+            giveOrDrop(player, new ItemStack(m, n));
+            remaining -= n;
+        }
     }
 
     /**
