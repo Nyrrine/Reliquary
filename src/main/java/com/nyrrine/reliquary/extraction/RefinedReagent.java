@@ -151,6 +151,12 @@ public final class RefinedReagent {
         STANDARD_GATE.put("gluttons_feast",  Material.WEATHERED_COPPER);
     }
 
+    /** The Pure refined reagent id for a sin's ladder, or {@code null}. */
+    public static String pureId(Sin s) { String[] l = LADDER.get(s); return l == null ? null : l[0]; }
+
+    /** The Standard refined reagent id for a sin's ladder, or {@code null}. */
+    public static String standardId(Sin s) { String[] l = LADDER.get(s); return l == null ? null : l[1]; }
+
     /** Register (idempotently) the Pure and Standard refining recipes for every sin's ladder. */
     public static void registerRecipes(Plugin plugin) {
         for (Map.Entry<Sin, String[]> e : LADDER.entrySet()) {

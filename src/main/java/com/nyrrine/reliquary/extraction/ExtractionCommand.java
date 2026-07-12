@@ -33,12 +33,16 @@ public final class ExtractionCommand {
 
     private final Reliquary plugin;
     private final WellDisplay wellDisplay;
+    private final WeaponTracker weaponTracker;
+    private final GuideBook guide;
     private final Map<String, Integer> fontProgress = new HashMap<>(); // Font compost fill, per block location
     private static final int FONT_THRESHOLD = 24; // resonance accumulated per 1 Enkephalin yielded
 
     public ExtractionCommand(Reliquary plugin) {
         this.plugin = plugin;
         this.wellDisplay = new WellDisplay(plugin);
+        this.weaponTracker = new WeaponTracker(plugin);
+        this.guide = new GuideBook(weaponTracker);
     }
 
     /** The weapon item a spec resolves to (via the plugin's registry), for the Well carousel. */
@@ -55,7 +59,7 @@ public final class ExtractionCommand {
     /** The subcommands, in help/tab order. */
     private static final List<String> SUBS = List.of(
             "vial", "fuel", "giveall", "stations", "reagents", "add", "assay", "distill", "blend",
-            "recipes", "forge", "pour");
+            "recipes", "forge", "pour", "guide", "track", "untrack");
 
     /**
      * Dispatch an extraction subcommand. {@code a} is the sub-args where {@code a[0]} is the subcommand name
@@ -82,8 +86,22 @@ public final class ExtractionCommand {
             case "recipes"  -> recipes(player, a);
             case "forge"    -> forge(player, a);
             case "pour"     -> pour(player, a);
+            case "guide"    -> guide.open(player, a.length > 1 ? a[1] : "index");
+            case "track"    -> trackWeapon(player, a);
+            case "untrack"  -> { weaponTracker.clear(player.getUniqueId());
+                                 player.sendActionBar(msg("No longer tracking a weapon.", FAINT)); }
             default          -> help(player);
         }
+    }
+
+    /** Track a weapon so the Assay lists what to fetch (and nearby needed items glow). */
+    private void trackWeapon(Player player, String[] a) {
+        if (a.length < 2) { player.sendMessage(msg("Usage: /cogito track <weapon_id>", GREY)); return; }
+        WeaponSpec w = WeaponSignatures.byId(a[1].toLowerCase());
+        if (w == null) { player.sendMessage(msg("No such weapon: " + a[1], NamedTextColor.RED)); return; }
+        weaponTracker.track(player.getUniqueId(), w.id());
+        for (Component line : weaponTracker.shoppingList(player, w.id())) player.sendMessage(line);
+        player.sendMessage(msg("Tracking " + w.display() + " — needed items nearby will glow.", GREEN));
     }
 
     /** Tab completion for the extraction subcommands. {@code a[0]} = subcommand, {@code a[1]} = its arg. */
@@ -456,22 +474,9 @@ public final class ExtractionCommand {
     }
 
     /** Open the in-game manual (the Assay's guide) — a written book so newcomers aren't flying blind. */
+    /** Open the interactive Assay wiki (clickable chapters + weapon tracking); see {@link GuideBook}. */
     public void openGuide(Player player) {
-        ItemStack book = new ItemStack(Material.WRITTEN_BOOK);
-        org.bukkit.inventory.meta.BookMeta bm = (org.bukkit.inventory.meta.BookMeta) book.getItemMeta();
-        bm.author(Component.text("The Pocket Well"));
-        bm.title(Component.text("Extraction Primer"));
-        bm.addPages(
-                page("§lE.G.O EXTRACTION\n\nYou don't craft a weapon — you §omanifest a mind§r.\n\nBrew §2Cogito§0 from emotion, refine it, and pour it into the §5Well§0. Get the chemistry right and the weapon you shaped it for climbs out."),
-                page("§lTHE LOOP\n\n1. §5Font§0 — feed emotions → Enkephalin + Raw Cogito\n2. §5Alembic§0 — Raw + Enkephalin → a vial\n3. §5Censer§0 — add reagents (titrate)\n4. §5Centrifuge§0 — distill (purity up)\n5. §5Manifold§0 — blend vials\n6. §5Well§0 — pour → weapon"),
-                page("§lREADING A VIAL\n\n§2Green shade§0 = purity (dark=crude, bright=pure).\n\n• §lPurity/Grade§r — Crude→Certified. Higher grade unlocks higher-tier weapons.\n• §lStability§r — don't let it hit 0 or the pot ruptures.\n• §lVolume§r — bigger pours reach rarer weapons."),
-                page("§lTHE 7 SINS\n\nWrath·Pride·Lust (§chot§0) and Gloom·Sloth·Envy (§9cold§0) resonate within their group. §5Gluttony§0 is the neutral hub.\n\nOpposed pairs bleed stability: Pride✕Gloom, Wrath✕Sloth, Lust✕Envy. Steady them with §5Honeycomb§0."),
-                page("§lAFFLICTIONS\n\nThe pot is a live mind — it gets §csick§0 (the vial changes colour).\n\nEach taint has a timer. §aCure it in time§0 (the right item) and it clears clean; §cignore it§0 and the damage §lscars§r for good. Read it at the Assay."),
-                page("§lHIGH GRADES\n\n§5WAW§0 weapons need §lAnalytical§r cogito — only §lPure/Standard§r reagents reach it.\n\n§lRefine§r them at a crafting table: the sin's base reagents + §5Amethyst§0 (+ a gated item for Standard).\nE.g. 2 Lapis + Glow Ink Sac + Amethyst → §9Distilled Sorrow§0.\n\nThey're low-noise §oscalpels§r — sharp in §lany§r brew."),
-                page("§lCATALYSTS\n\nA per-weapon key that §lguarantees§r the exact weapon (cuts the luck).\n\n1. §5/cogito recipes <id>§0 — see its cost\n2. Gather the grind, §5forge§0 it at the Crucible\n3. Carry it, pour at the Well → guaranteed."),
-                page("§lTIPS\n\n• Fewest, cleanest touches win — every add dirties the pot.\n• Buffer §5early§0, distill §5last§0.\n• Hold an item over the Assay to identify it.\n• Peer into the Well (right-click) to preview your most-likely pull before you commit."));
-        book.setItemMeta(bm);
-        player.openBook(book);
+        guide.open(player, "index");
     }
 
     private static Component page(String text) {
