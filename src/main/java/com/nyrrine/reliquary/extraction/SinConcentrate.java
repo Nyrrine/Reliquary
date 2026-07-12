@@ -38,13 +38,14 @@ public final class SinConcentrate {
     /** The Concentrate's carrier icon (a spare dye per sin; PDC-tagged + renamed, only the tagged one counts). */
     private static final Map<Sin, Material> CARRIER = new EnumMap<>(Sin.class);
     static {
-        RAW.put(Sin.WRATH, Material.REDSTONE);        CARRIER.put(Sin.WRATH, Material.PINK_DYE);
-        RAW.put(Sin.GLOOM, Material.GLOW_INK_SAC);    CARRIER.put(Sin.GLOOM, Material.LIGHT_BLUE_DYE);
-        RAW.put(Sin.PRIDE, Material.GOLD_NUGGET);     CARRIER.put(Sin.PRIDE, Material.MAGENTA_DYE);
-        RAW.put(Sin.LUST, Material.GLOW_BERRIES);     CARRIER.put(Sin.LUST, Material.BROWN_DYE);
-        RAW.put(Sin.SLOTH, Material.SOUL_SAND);       CARRIER.put(Sin.SLOTH, Material.LIGHT_GRAY_DYE);
-        RAW.put(Sin.ENVY, Material.PUFFERFISH);       CARRIER.put(Sin.ENVY, Material.BLACK_DYE);
-        RAW.put(Sin.GLUTTONY, Material.ROTTEN_FLESH); CARRIER.put(Sin.GLUTTONY, Material.WHITE_DYE);
+        // Carriers are dyed to the Limbus sin colours (a Concentrate reads as its sin at a glance).
+        RAW.put(Sin.WRATH, Material.REDSTONE);        CARRIER.put(Sin.WRATH, Material.RED_DYE);        // red
+        RAW.put(Sin.GLOOM, Material.GLOW_INK_SAC);    CARRIER.put(Sin.GLOOM, Material.LIGHT_BLUE_DYE);  // blue
+        RAW.put(Sin.PRIDE, Material.GOLD_NUGGET);     CARRIER.put(Sin.PRIDE, Material.BLUE_DYE);        // dark blue
+        RAW.put(Sin.LUST, Material.GLOW_BERRIES);     CARRIER.put(Sin.LUST, Material.ORANGE_DYE);       // orange
+        RAW.put(Sin.SLOTH, Material.SOUL_SAND);       CARRIER.put(Sin.SLOTH, Material.YELLOW_DYE);      // yellow
+        RAW.put(Sin.ENVY, Material.PUFFERFISH);       CARRIER.put(Sin.ENVY, Material.PURPLE_DYE);       // violet
+        RAW.put(Sin.GLUTTONY, Material.ROTTEN_FLESH); CARRIER.put(Sin.GLUTTONY, Material.GREEN_DYE);    // green
     }
 
     private static final TextColor FAINT = TextColor.color(0x7A7A84);

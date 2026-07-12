@@ -34,7 +34,6 @@ public final class ExtractionCommand {
     private final Reliquary plugin;
     private final WellDisplay wellDisplay;
     private final WeaponTracker weaponTracker;
-    private final GuideBook guide;
     private final Map<String, Integer> fontProgress = new HashMap<>(); // Font compost fill, per block location
     private static final int FONT_THRESHOLD = 24; // resonance accumulated per 1 Enkephalin yielded
 
@@ -42,7 +41,6 @@ public final class ExtractionCommand {
         this.plugin = plugin;
         this.wellDisplay = new WellDisplay(plugin);
         this.weaponTracker = new WeaponTracker(plugin);
-        this.guide = new GuideBook(weaponTracker);
     }
 
     /** The weapon item a spec resolves to (via the plugin's registry), for the Well carousel. */
@@ -59,7 +57,7 @@ public final class ExtractionCommand {
     /** The subcommands, in help/tab order. */
     private static final List<String> SUBS = List.of(
             "vial", "fuel", "giveall", "stations", "reagents", "add", "assay", "distill", "blend",
-            "recipes", "forge", "pour", "guide", "track", "untrack");
+            "recipes", "forge", "pour", "track", "untrack");
 
     /**
      * Dispatch an extraction subcommand. {@code a} is the sub-args where {@code a[0]} is the subcommand name
@@ -86,7 +84,6 @@ public final class ExtractionCommand {
             case "recipes"  -> recipes(player, a);
             case "forge"    -> forge(player, a);
             case "pour"     -> pour(player, a);
-            case "guide"    -> guide.open(player, a.length > 1 ? a[1] : "index");
             case "track"    -> trackWeapon(player, a);
             case "untrack"  -> { weaponTracker.clear(player.getUniqueId());
                                  player.sendActionBar(msg("No longer tracking a weapon.", FAINT)); }
@@ -112,22 +109,21 @@ public final class ExtractionCommand {
     }
 
     /**
-     * The Assay readout on an empty hand (chat, not the book). If you're on a forge quest it reprints your
-     * next step + checklist; otherwise it explains what the Assay does. The full manual is /cogito guide.
+     * The Assay readout on an empty hand (all chat). If you're on a forge quest it reprints your next step +
+     * checklist; otherwise it explains what the Assay does.
      */
     public void assayOverview(Player player) {
         String tracked = weaponTracker.tracked(player.getUniqueId());
         if (tracked != null) {
             for (Component line : weaponTracker.shoppingList(player, tracked)) player.sendMessage(line);
-            player.sendMessage(msg("Hold an item to identify it · /cogito untrack to stop · "
-                    + "/cogito guide for the manual.", FAINT));
+            player.sendMessage(msg("Hold an item to identify it · /cogito untrack to stop.", FAINT));
             return;
         }
         player.sendMessage(msg("The Assay", NamedTextColor.WHITE));
         player.sendMessage(msg("• Hold an item and right-click to identify it — a weapon or catalyst starts a "
                 + "step-by-step forge quest.", FAINT));
         player.sendMessage(msg("• /cogito track <weapon> — begin a forge quest (tab-completes).", FAINT));
-        player.sendMessage(msg("• /cogito guide — open the full manual.", FAINT));
+        player.sendMessage(msg("• /cogito recipes <weapon> — see a catalyst's full cost.", FAINT));
     }
 
     /** Tab completion for the extraction subcommands. {@code a[0]} = subcommand, {@code a[1]} = its arg. */
@@ -434,9 +430,20 @@ public final class ExtractionCommand {
     }
 
     public void stationFont(Player player, org.bukkit.Location loc, ItemStack held) {
+        // Raw Cogito fed back into the Font renders into Enkephalin (the mental-energy fuel).
+        if (RawCogito.matches(held)) {
+            consumeOneMainHand(player, held);
+            giveOrDrop(player, Enkephalin.create(ENKEPHALIN_PER_RAW));
+            player.sendActionBar(msg("The Font renders Raw Cogito into " + ENKEPHALIN_PER_RAW + " Enkephalin.", GREEN));
+            player.playSound(player.getLocation(), Sound.BLOCK_LAVA_EXTINGUISH, 0.6f, 1.4f);
+            loc.getWorld().spawnParticle(org.bukkit.Particle.SOUL, loc.clone().add(0.5, 0.9, 0.5),
+                    10, 0.2, 0.1, 0.2, 0.01);
+            return;
+        }
         int resonance = resonanceOf(held);
         if (resonance <= 0) {
-            player.sendActionBar(msg("Feed the Font an emotion-resonating item (any reagent / memory).", FAINT));
+            player.sendActionBar(msg("Feed the Font an emotion item for Raw Cogito, or Raw Cogito for Enkephalin.",
+                    FAINT));
             return;
         }
         consumeOneMainHand(player, held);
@@ -446,7 +453,8 @@ public final class ExtractionCommand {
         if (prog >= FONT_THRESHOLD) {
             fontProgress.put(k, prog - FONT_THRESHOLD);
             giveOrDrop(player, RawCogito.create(1));
-            player.sendActionBar(msg("The Font overflows — 1 Raw Cogito. Render it at the Alembic.", GREEN));
+            player.sendActionBar(msg("The Font overflows — 1 Raw Cogito. Feed it back here for Enkephalin, "
+                    + "or make a vial at the Alembic.", GREEN));
             player.playSound(player.getLocation(), Sound.BLOCK_COMPOSTER_READY, 0.8f, 0.9f);
             player.playSound(player.getLocation(), Sound.BLOCK_LAVA_EXTINGUISH, 0.5f, 1.2f);
             loc.getWorld().spawnParticle(org.bukkit.Particle.LAVA, loc.clone().add(0.5, 0.9, 0.5), 12, 0.2, 0.1, 0.2, 0);
@@ -537,15 +545,29 @@ public final class ExtractionCommand {
         }
 
         Reagent r = Reagents.fromItem(held);
-        if (r != null) { // titrate into the seated vial
-            if (slot == null) { player.sendActionBar(msg("Seat a Cogito vial first — right-click holding one.",
-                    NamedTextColor.RED)); return; }
-            censerFeed(player, slot, held, r);
+        if (r != null) {
+            if (slot != null) { censerFeed(player, slot, held, r); return; } // into the seated vial
+            // No vial seated — titrate a vial from the bag directly, so the Censer just works.
+            Vial v = locateVial(player);
+            if (v == null) {
+                player.sendActionBar(msg("No Cogito vial — make one at the Alembic, then hold it (or seat it here).",
+                        NamedTextColor.RED));
+                return;
+            }
+            if (v.state().titer() >= Engine.VIAL_CAP
+                    && Engine.addReagent(v.state().copy(), r, new java.util.Random(0L)).full()) {
+                player.sendActionBar(msg(String.format("The vial is full (%.0f cap) — distill or blend it.",
+                        Engine.VIAL_CAP), NamedTextColor.RED));
+                return;
+            }
+            held.setAmount(held.getAmount() - 1);
+            player.getInventory().setItemInMainHand(held.getAmount() <= 0 ? null : held);
+            applyReagent(player, r);
             return;
         }
 
         player.sendActionBar(msg(slot == null
-                ? "Right-click holding a Cogito vial to seat it."
+                ? "Hold a Cogito vial to seat it, or a reagent to titrate into your vial."
                 : "Right-click holding a reagent to titrate it in (sneak to lift the vial out).", FAINT));
     }
 
@@ -649,7 +671,7 @@ public final class ExtractionCommand {
         }
         if (best == null) {
             player.sendMessage(msg("The Crucible has nothing to forge — gather a catalyst's grind components "
-                    + "first (right-click the Assay for the guide, or /cogito recipes <id>).", NamedTextColor.RED));
+                    + "first (right-click the Assay to identify one, or /cogito recipes <id>).", NamedTextColor.RED));
             return;
         }
         forge(player, new String[]{"forge", best.weaponId()});
@@ -688,16 +710,6 @@ public final class ExtractionCommand {
             n -= take;
             player.getInventory().setItem(i, it.getAmount() <= 0 ? null : it);
         }
-    }
-
-    /** Open the in-game manual (the Assay's guide) — a written book so newcomers aren't flying blind. */
-    /** Open the interactive Assay wiki (clickable chapters + weapon tracking); see {@link GuideBook}. */
-    public void openGuide(Player player) {
-        guide.open(player, "index");
-    }
-
-    private static Component page(String text) {
-        return net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection().deserialize(text);
     }
 
     /**

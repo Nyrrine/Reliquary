@@ -50,7 +50,7 @@ public final class Reagents {
     public static final Reagent MAGMA_CREAM = reg(Reagent.of("magma_cream", "Magma Cream")
             .delta(WRATH, 7).delta(GLUTTONY, 2).contam(1.2).stab(-3).tier(REFINED)
             .item(Material.MAGMA_CREAM).source("slimes + blaze").build());
-    public static final Reagent REFINED_CINDER = reg(Reagent.of("refined_cinder", "Refined Cinder")
+    public static final Reagent REFINED_CINDER = reg(Reagent.of("refined_cinder", "Phlegethon Regulus")
             .delta(WRATH, 22).contam(0.05).stab(-30).tier(STANDARD).inflicts(Taint.FEVER, 0.25)
             .source("processed blaze chain").build());
     public static final Reagent EMBER_DISTILLATE = reg(Reagent.of("ember_distillate", "Ember Distillate")
@@ -70,7 +70,7 @@ public final class Reagents {
     public static final Reagent DISTILLED_SORROW = reg(Reagent.of("distilled_sorrow", "Distilled Sorrow")
             .delta(GLOOM, 11).contam(0.1).stab(-15).tier(PURE)
             .source("ink + lapis chain").build());
-    public static final Reagent KNELL_EXTRACT = reg(Reagent.of("knell_extract", "Knell Extract")
+    public static final Reagent KNELL_EXTRACT = reg(Reagent.of("knell_extract", "Acheron Knell")
             .delta(GLOOM, 20).contam(0.05).stab(-30).tier(STANDARD)
             .source("gated: Bells + Oxidized Copper").build());
 
@@ -84,7 +84,7 @@ public final class Reagents {
     public static final Reagent DIAMOND = reg(Reagent.of("diamond", "Diamond")
             .delta(PRIDE, 12).contam(0.1).stab(-14).tier(PURE)
             .item(Material.DIAMOND).source("mining").build());
-    public static final Reagent MIRROR_POLISH = reg(Reagent.of("mirror_polish", "Mirror Polish")
+    public static final Reagent MIRROR_POLISH = reg(Reagent.of("mirror_polish", "Narcissus Gilt")
             .delta(PRIDE, 20).contam(0.05).stab(-28).tier(STANDARD)
             .source("gated: Chiseled Quartz").build());
     public static final Reagent BURNISHED_VANITY = reg(Reagent.of("burnished_vanity", "Burnished Vanity")
@@ -101,7 +101,7 @@ public final class Reagents {
     public static final Reagent NECTAR_DRAUGHT = reg(Reagent.of("nectar_draught", "Nectar Draught")
             .delta(LUST, 11).contam(0.1).stab(-15).tier(PURE)
             .source("honey chain").build());
-    public static final Reagent AMBER_RAPTURE = reg(Reagent.of("amber_rapture", "Amber Rapture")
+    public static final Reagent AMBER_RAPTURE = reg(Reagent.of("amber_rapture", "Cytherea's Rapture")
             .delta(LUST, 20).contam(0.05).stab(-28).tier(STANDARD)
             .source("gated: honey chain + Weathered Copper").build());
 
@@ -112,7 +112,7 @@ public final class Reagents {
     public static final Reagent FERMENTED_SPIDER_EYE = reg(Reagent.of("fermented_spider_eye", "Fermented Spider Eye")
             .delta(SLOTH, 8).delta(WRATH, -5).contam(1.2).stab(-3).tier(REFINED).inflicts(Taint.TOXIN, 0.25)
             .item(Material.FERMENTED_SPIDER_EYE).source("craft").build());
-    public static final Reagent VERDIGRIS_REST = reg(Reagent.of("verdigris_rest", "Verdigris Rest")
+    public static final Reagent VERDIGRIS_REST = reg(Reagent.of("verdigris_rest", "Cocytus Rime")
             .delta(SLOTH, 19).contam(0.05).stab(-28).tier(STANDARD)
             .source("gated: Oxidized Copper").build());
     public static final Reagent LETHE_DRAUGHT = reg(Reagent.of("lethe_draught", "Lethe Draught")
@@ -129,7 +129,7 @@ public final class Reagents {
     public static final Reagent VERDANT_SPITE = reg(Reagent.of("verdant_spite", "Verdant Spite")
             .delta(ENVY, 11).contam(0.1).stab(-15).tier(PURE)
             .source("pufferfish chain").build());
-    public static final Reagent RANCOROUS_BLOOM = reg(Reagent.of("rancorous_bloom", "Rancorous Bloom")
+    public static final Reagent RANCOROUS_BLOOM = reg(Reagent.of("rancorous_bloom", "Invidia's Bloom")
             .delta(ENVY, 20).contam(0.05).stab(-28).tier(STANDARD)
             .source("gated: pitcher chain + Chiseled Quartz").build());
 
@@ -145,7 +145,7 @@ public final class Reagents {
     public static final Reagent RAVENING_DRAUGHT = reg(Reagent.of("ravening_draught", "Ravening Draught")
             .delta(GLUTTONY, 11).contam(0.1).stab(-14).tier(PURE)
             .source("slime + honey chain").build());
-    public static final Reagent GLUTTONS_FEAST = reg(Reagent.of("gluttons_feast", "Glutton's Feast")
+    public static final Reagent GLUTTONS_FEAST = reg(Reagent.of("gluttons_feast", "Cerberus' Morsel")
             .delta(GLUTTONY, 20).contam(0.05).stab(-28).tier(STANDARD)
             .source("gated: melon chain + Weathered Copper").build());
 

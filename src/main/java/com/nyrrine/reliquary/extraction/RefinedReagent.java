@@ -37,21 +37,22 @@ public final class RefinedReagent {
     /** reagent id → the vanilla item that carries its icon (renamed + tagged; never the plain item counts). */
     private static final Map<String, Material> CARRIER = new LinkedHashMap<>();
     static {
-        CARRIER.put("distilled_sorrow", Material.INK_SAC);      // Gloom  · Pure
-        CARRIER.put("knell_extract",    Material.GRAY_DYE);     // Gloom  · Standard
-        CARRIER.put("refined_cinder",   Material.GUNPOWDER);    // Wrath  · Standard
-        CARRIER.put("mirror_polish",    Material.QUARTZ);       // Pride  · Standard
-        CARRIER.put("nectar_draught",   Material.GLASS_BOTTLE); // Lust   · Pure
-        CARRIER.put("verdigris_rest",   Material.GREEN_DYE);    // Sloth  · Standard
-        CARRIER.put("verdant_spite",    Material.LIME_DYE);     // Envy   · Pure
-        CARRIER.put("ravening_draught", Material.SUGAR);        // Gluttony · Pure
-        // Completing the 7-sin ladder: a Pure refined form for every sin, plus Standards where warranted.
-        CARRIER.put("ember_distillate", Material.RED_DYE);      // Wrath    · Pure
-        CARRIER.put("burnished_vanity", Material.BLUE_DYE);     // Pride    · Pure
-        CARRIER.put("lethe_draught",    Material.YELLOW_DYE);   // Sloth    · Pure
-        CARRIER.put("amber_rapture",    Material.ORANGE_DYE);   // Lust     · Standard
-        CARRIER.put("rancorous_bloom",  Material.PURPLE_DYE);   // Envy     · Standard
-        CARRIER.put("gluttons_feast",   Material.CYAN_DYE);     // Gluttony · Standard
+        // Pures — the sin dyes now belong to Concentrates, so Pures carry their own small items.
+        CARRIER.put("distilled_sorrow", Material.INK_SAC);               // Gloom    · Pure
+        CARRIER.put("ember_distillate", Material.FIRE_CHARGE);           // Wrath    · Pure
+        CARRIER.put("burnished_vanity", Material.NETHERITE_SCRAP);       // Pride    · Pure
+        CARRIER.put("nectar_draught",   Material.GLASS_BOTTLE);          // Lust     · Pure
+        CARRIER.put("lethe_draught",    Material.LINGERING_POTION);      // Sloth    · Pure  — Lethe's Draught
+        CARRIER.put("verdant_spite",    Material.LIME_DYE);              // Envy     · Pure
+        CARRIER.put("ravening_draught", Material.SUGAR);                 // Gluttony · Pure
+        // Standards — cool, name-matched items (Dante / Project Moon flavour).
+        CARRIER.put("refined_cinder",   Material.NETHERITE_INGOT);       // Wrath    · Standard — Phlegethon Regulus
+        CARRIER.put("knell_extract",    Material.GOAT_HORN);             // Gloom    · Standard — Acheron Knell
+        CARRIER.put("mirror_polish",    Material.ENCHANTED_GOLDEN_APPLE);// Pride    · Standard — Narcissus Gilt
+        CARRIER.put("verdigris_rest",   Material.BLUE_ICE);              // Sloth    · Standard — Cocytus Rime
+        CARRIER.put("amber_rapture",    Material.SPLASH_POTION);         // Lust     · Standard — Cytherea's Rapture
+        CARRIER.put("rancorous_bloom",  Material.CREEPER_HEAD);          // Envy     · Standard — Invidia's Bloom
+        CARRIER.put("gluttons_feast",   Material.PIGLIN_HEAD);           // Gluttony · Standard — Cerberus' Morsel
     }
 
     private static final TextColor NAME = TextColor.color(0xB8F0E4);
@@ -101,6 +102,11 @@ public final class RefinedReagent {
         var cmd = meta.getCustomModelDataComponent();
         cmd.setStrings(List.of("extraction/reagent/" + reagentId));
         meta.setCustomModelDataComponent(cmd);
+        // Potion-carrier reagents (draughts) get a neutral base + hidden effect lines so no vanilla clutter shows.
+        if (meta instanceof org.bukkit.inventory.meta.PotionMeta pm) {
+            pm.setBasePotionType(org.bukkit.potion.PotionType.WATER);
+        }
+        meta.addItemFlags(org.bukkit.inventory.ItemFlag.HIDE_ADDITIONAL_TOOLTIP);
         item.setItemMeta(meta);
         return item;
     }
