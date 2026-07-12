@@ -38,14 +38,14 @@ public final class SinConcentrate {
     /** The Concentrate's carrier icon (a spare dye per sin; PDC-tagged + renamed, only the tagged one counts). */
     private static final Map<Sin, Material> CARRIER = new EnumMap<>(Sin.class);
     static {
-        // Carriers are dyed to the Limbus sin colours (a Concentrate reads as its sin at a glance).
-        RAW.put(Sin.WRATH, Material.REDSTONE);        CARRIER.put(Sin.WRATH, Material.RED_DYE);        // red
-        RAW.put(Sin.GLOOM, Material.GLOW_INK_SAC);    CARRIER.put(Sin.GLOOM, Material.LIGHT_BLUE_DYE);  // blue
-        RAW.put(Sin.PRIDE, Material.GOLD_NUGGET);     CARRIER.put(Sin.PRIDE, Material.BLUE_DYE);        // dark blue
-        RAW.put(Sin.LUST, Material.GLOW_BERRIES);     CARRIER.put(Sin.LUST, Material.ORANGE_DYE);       // orange
-        RAW.put(Sin.SLOTH, Material.SOUL_SAND);       CARRIER.put(Sin.SLOTH, Material.YELLOW_DYE);      // yellow
-        RAW.put(Sin.ENVY, Material.PUFFERFISH);       CARRIER.put(Sin.ENVY, Material.PURPLE_DYE);       // violet
-        RAW.put(Sin.GLUTTONY, Material.ROTTEN_FLESH); CARRIER.put(Sin.GLUTTONY, Material.GREEN_DYE);    // green
+        // Raw = an accessible-but-stack-hungry MOB DROP per sin; carrier dye = the Limbus sin colour.
+        RAW.put(Sin.WRATH, Material.GUNPOWDER);       CARRIER.put(Sin.WRATH, Material.RED_DYE);        // creeper — red
+        RAW.put(Sin.GLOOM, Material.BONE);            CARRIER.put(Sin.GLOOM, Material.LIGHT_BLUE_DYE);  // skeleton — blue
+        RAW.put(Sin.PRIDE, Material.GOLD_NUGGET);     CARRIER.put(Sin.PRIDE, Material.BLUE_DYE);        // piglin — dark blue
+        RAW.put(Sin.LUST, Material.LEATHER);          CARRIER.put(Sin.LUST, Material.ORANGE_DYE);       // cow — orange
+        RAW.put(Sin.SLOTH, Material.STRING);          CARRIER.put(Sin.SLOTH, Material.YELLOW_DYE);      // spider — yellow
+        RAW.put(Sin.ENVY, Material.SPIDER_EYE);       CARRIER.put(Sin.ENVY, Material.PURPLE_DYE);       // spider — violet
+        RAW.put(Sin.GLUTTONY, Material.ROTTEN_FLESH); CARRIER.put(Sin.GLUTTONY, Material.GREEN_DYE);    // zombie — green
     }
 
     private static final TextColor FAINT = TextColor.color(0x7A7A84);

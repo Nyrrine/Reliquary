@@ -60,7 +60,7 @@ public final class Reagents {
     // ---- Gloom (blue) --------------------------------------------------------------
     public static final Reagent INK_SAC = reg(Reagent.of("ink_sac", "Glow Ink Sac")
             .delta(GLOOM, 4).delta(SLOTH, 1).contam(4.5).stab(-2).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.30)
-            .item(Material.GLOW_INK_SAC).source("glow squid — weak dirty bulk; crush 8 into a Gloom Concentrate").build());
+            .item(Material.GLOW_INK_SAC).source("glow squid — weak dirty bulk").build());
     public static final Reagent LAPIS_LAZULI = reg(Reagent.of("lapis_lazuli", "Lapis Lazuli")
             .delta(GLOOM, 3).contam(0.3).stab(-1).tier(REFINED)
             .item(Material.LAPIS_LAZULI).source("mining — the Gloom scalpel").build());
@@ -94,7 +94,7 @@ public final class Reagents {
     // ---- Lust (orange) -------------------------------------------------------------
     public static final Reagent GLOW_BERRIES = reg(Reagent.of("glow_berries", "Glow Berries")
             .delta(LUST, 4).delta(GLUTTONY, 1).contam(4.5).stab(-2).tier(CRUDE)
-            .item(Material.GLOW_BERRIES).source("farm — weak dirty bulk; crush 8 into a Lust Concentrate").build());
+            .item(Material.GLOW_BERRIES).source("farm — weak dirty bulk").build());
     public static final Reagent HONEY_BOTTLE = reg(Reagent.of("honey_bottle", "Honey Bottle")
             .delta(LUST, 9).delta(ENVY, -4).contam(1).stab(-3).tier(REFINED).cures(Taint.GRIEF_BLOOM)
             .item(Material.HONEY_BOTTLE).source("bees; cures Grief Bloom").build());
@@ -108,7 +108,7 @@ public final class Reagents {
     // ---- Sloth (yellow) ------------------------------------------------------------
     public static final Reagent SOUL_SAND = reg(Reagent.of("soul_sand", "Soul Sand")
             .delta(SLOTH, 4).delta(GLOOM, 1).contam(4.5).stab(-2).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.25)
-            .item(Material.SOUL_SAND).source("nether — weak dirty bulk; crush 8 into a Sloth Concentrate").build());
+            .item(Material.SOUL_SAND).source("nether — weak dirty bulk").build());
     public static final Reagent FERMENTED_SPIDER_EYE = reg(Reagent.of("fermented_spider_eye", "Fermented Spider Eye")
             .delta(SLOTH, 8).delta(WRATH, -5).contam(1.2).stab(-3).tier(REFINED).inflicts(Taint.TOXIN, 0.25)
             .item(Material.FERMENTED_SPIDER_EYE).source("craft").build());
@@ -122,7 +122,7 @@ public final class Reagents {
     // ---- Envy (violet) -------------------------------------------------------------
     public static final Reagent PUFFERFISH = reg(Reagent.of("pufferfish", "Pufferfish")
             .roll(ENVY, 3, 7).contam(4.5).stab(-4).tier(CRUDE).inflicts(Taint.TOXIN, 0.40)
-            .item(Material.PUFFERFISH).source("fishing — weak, volatile; crush 8 into an Envy Concentrate").build());
+            .item(Material.PUFFERFISH).source("fishing — weak, volatile").build());
     public static final Reagent CHORUS_FRUIT = reg(Reagent.of("chorus_fruit", "Pitcher Plant")
             .delta(ENVY, 8).delta(GLUTTONY, -4).contam(1).stab(-3).tier(REFINED)
             .item(Material.PITCHER_PLANT).source("sniffer archaeology — a coveted bloom").build());
