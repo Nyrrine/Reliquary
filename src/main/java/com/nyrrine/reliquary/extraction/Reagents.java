@@ -40,8 +40,8 @@ public final class Reagents {
             .delta(WRATH, 1).contam(0.1).stab(-1).tier(REFINED)
             .source("mining — the Wrath scalpel").build());
     public static final Reagent BLAZE_POWDER = reg(Reagent.of("blaze_powder", "Blaze Powder")
-            .delta(WRATH, 10).delta(GLOOM, -8).contam(1.5).stab(-4).tier(REFINED).inflicts(Taint.FEVER, 0.15)
-            .source("blaze — mover + Gloom corrector").build());
+            .delta(WRATH, 10).delta(GLOOM, -8).contam(1.5).stab(-4).tier(REFINED).inflicts(Taint.FEVER, 0.15).cures(Taint.CHILL)
+            .source("blaze — mover + Gloom corrector; cures Chill").build());
     public static final Reagent BLAZE_ROD = reg(Reagent.of("blaze_rod", "Blaze Rod")
             .roll(WRATH, 12, 40).contam(0.4).stab(-16).tier(PURE).inflicts(Taint.FEVER, 0.35)
             .source("blaze — volatile").build());
@@ -88,8 +88,8 @@ public final class Reagents {
             .delta(LUST, 7).delta(GLUTTONY, 2).contam(3).stab(-2).tier(CRUDE)
             .source("farm — dirty bulk").build());
     public static final Reagent HONEY_BOTTLE = reg(Reagent.of("honey_bottle", "Honey Bottle")
-            .delta(LUST, 9).delta(ENVY, -4).contam(1).stab(-3).tier(REFINED)
-            .source("bees").build());
+            .delta(LUST, 9).delta(ENVY, -4).contam(1).stab(-3).tier(REFINED).cures(Taint.GRIEF_BLOOM)
+            .source("bees; cures Grief Bloom").build());
     public static final Reagent NECTAR_DRAUGHT = reg(Reagent.of("nectar_draught", "Nectar Draught")
             .delta(LUST, 11).contam(0.1).stab(-15).tier(PURE)
             .source("honey chain").build());
@@ -118,8 +118,8 @@ public final class Reagents {
 
     // ---- Gluttony (green — the safe hub) -------------------------------------------
     public static final Reagent SLIME_BALL = reg(Reagent.of("slime_ball", "Slime Ball")
-            .delta(GLUTTONY, 6).contam(0.5).stab(1).tier(REFINED)
-            .source("slime — safe hub filler").build());
+            .delta(GLUTTONY, 6).contam(0.5).stab(1).tier(REFINED).cures(Taint.BLEEDING)
+            .source("slime — safe hub filler; cures Bleeding").build());
     public static final Reagent ROTTEN_FLESH = reg(Reagent.of("rotten_flesh", "Rotten Flesh")
             .delta(GLUTTONY, 7).delta(SLOTH, 2).contam(3).stab(-1).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.20)
             .source("zombies — dirty bulk").build());
@@ -131,8 +131,8 @@ public final class Reagents {
 
     // ---- Utilities: buffers, solvents, panic reset ---------------------------------
     public static final Reagent AMETHYST_SHARD = reg(Reagent.of("amethyst_shard", "Amethyst Shard")
-            .stab(18).tier(UTILITY)
-            .source("geode — the buffer").build());
+            .stab(18).tier(UTILITY).cures(Taint.FRACTURE)
+            .source("geode — the buffer; cures Fracture").build());
     public static final Reagent GLOWSTONE_DUST = reg(Reagent.of("glowstone_dust", "Glowstone Dust")
             .contam(0.5).stab(10).tier(UTILITY)
             .source("nether — cheap, dirty buffer").build());
@@ -158,6 +158,39 @@ public final class Reagents {
     public static final Reagent WATER_BOTTLE = reg(Reagent.of("water_bottle", "Water Bottle")
             .chargeScale(0.85).tier(UTILITY).stab(2)
             .source("fine dilution → finer control").build());
+
+    // ---- Experiences & Emotions (volatile memories) --------------------------------
+    // Raw memory-charge: potent sin payloads on a dirty, volatile carrier (Crude) that gambles a taint.
+    public static final Reagent BOTTLE_OF_ENCHANTING = reg(Reagent.of("bottle_of_enchanting", "Bottle o' Enchanting")
+            .delta(PRIDE, 14).contam(2).stab(-2).tier(CRUDE).inflicts(Taint.FEVER, 0.25)
+            .source("a moment of triumph").build());
+    public static final Reagent WRITTEN_BOOK = reg(Reagent.of("written_book", "Written Book")
+            .delta(GLOOM, 10).delta(ENVY, 6).contam(2).stab(-2).tier(CRUDE).inflicts(Taint.GRIEF_BLOOM, 0.30)
+            .source("a confession").build());
+    public static final Reagent MUSIC_DISC = reg(Reagent.of("music_disc", "Music Disc")
+            .delta(GLOOM, 10).delta(LUST, 8).contam(2).stab(-2).tier(CRUDE).inflicts(Taint.GRIEF_BLOOM, 0.25)
+            .source("a nostalgic ache").build());
+    public static final Reagent WITHER_ROSE = reg(Reagent.of("wither_rose", "Wither Rose")
+            .delta(GLOOM, 12).delta(WRATH, 8).contam(2).stab(-2).tier(CRUDE).inflicts(Taint.TOXIN, 0.40)
+            .source("a memory of loss").build());
+    public static final Reagent GOLDEN_APPLE = reg(Reagent.of("golden_apple", "Golden Apple")
+            .delta(PRIDE, 12).delta(WRATH, 8).contam(2).stab(-2).tier(CRUDE).inflicts(Taint.FEVER, 0.35)
+            .source("a heroic act").build());
+    public static final Reagent POPPY = reg(Reagent.of("poppy", "Poppy")
+            .delta(LUST, 9).contam(2).stab(-2).tier(CRUDE)
+            .source("a tender memory").build());
+    public static final Reagent SPIDER_EYE = reg(Reagent.of("spider_eye", "Spider Eye")
+            .delta(ENVY, 10).delta(WRATH, 6).contam(2).stab(-2).tier(CRUDE).inflicts(Taint.TOXIN, 0.35)
+            .source("a betrayal").build());
+    public static final Reagent PHANTOM_MEMBRANE = reg(Reagent.of("phantom_membrane", "Phantom Membrane")
+            .delta(SLOTH, 9).delta(GLOOM, 7).contam(2).stab(-2).tier(CRUDE).inflicts(Taint.CHILL, 0.30)
+            .source("sleepless regret").build());
+    public static final Reagent CAKE = reg(Reagent.of("cake", "Cake")
+            .delta(GLUTTONY, 12).delta(LUST, 8).contam(2).stab(-2).tier(CRUDE)
+            .source("a celebration").build());
+    public static final Reagent ROTTEN_MEMORY = reg(Reagent.of("rotten_memory", "Rotten Flesh (Decayed Memory)")
+            .delta(GLUTTONY, 11).contam(2).stab(-2).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.30)
+            .source("a decayed memory").build());
 
     /** Look a reagent up by id, or {@code null}. */
     public static Reagent byId(String id) { return REGISTRY.get(id); }

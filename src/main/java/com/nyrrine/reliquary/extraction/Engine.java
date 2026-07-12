@@ -191,6 +191,9 @@ public final class Engine {
                 t.applyScar(pot);   // untreated in time → permanent scar sets in
                 pot.clearTaint(t);
                 scarred.add(t);
+                // Compounding: an untreated scar can spontaneously develop a follow-on affliction.
+                Taint compound = t.compoundsInto();
+                if (compound != null && !pot.hasTaint(compound)) pot.inflict(compound);
             } else {
                 pot.setTaintTime(t, remaining);
             }

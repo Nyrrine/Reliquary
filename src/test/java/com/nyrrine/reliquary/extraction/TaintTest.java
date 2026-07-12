@@ -70,6 +70,17 @@ class TaintTest {
     }
 
     @Test
+    void untreatedTaintCompoundsIntoAnother() {
+        PotState p = new PotState();
+        p.setCharge(Sin.GLOOM, 60);
+        p.setStability(95);
+        p.inflict(Taint.TOXIN); // compounds into Bleeding on expiry
+        for (int i = 0; i < 13; i++) Engine.tickTaints(p, 1.0);
+        assertFalse(p.hasTaint(Taint.TOXIN), "Toxin expired");
+        assertTrue(p.hasTaint(Taint.BLEEDING), "neglected Toxin should compound into Bleeding");
+    }
+
+    @Test
     void dirtyReagentSometimesInflictsSediment() {
         boolean seen = false;
         for (long seed = 0; seed < 60 && !seen; seed++) {
