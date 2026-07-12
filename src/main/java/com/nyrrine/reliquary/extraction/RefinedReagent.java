@@ -118,51 +118,69 @@ public final class RefinedReagent {
         return Character.toUpperCase(n.charAt(0)) + n.substring(1);
     }
 
-    // ---- refining recipes: the sin's sourced bases (+ a gated item) → the tagged reagent ------------
+    // ---- refining recipes: the affinity grind ladder (Concentrate → Pure → Standard) ----------------
+    //
+    // Raw sin material is weak + dirty. You crush it into a Concentrate (SinConcentrate, 8 raw each), then:
+    //   Pure     = 4 Concentrate + 1 Amethyst   (32 raw)
+    //   Standard = 4 Pure        + 1 gated item  (128 raw ≈ two stacks)
+    // Concentrates and Pures are consumed by EXACT match (RecipeChoice.ExactChoice), so you truly have to
+    // climb the ladder — no shortcut with a vanilla lookalike. Each sin's (pure, standard) ids below.
 
-    /** Register (idempotently) the crafting-table recipes that refine the chain reagents. */
-    public static void registerRecipes(Plugin plugin) {
-        // Pure — the sin's refined/crude vanilla items, purified with amethyst.
-        recipe(plugin, "distilled_sorrow", Material.LAPIS_LAZULI, Material.LAPIS_LAZULI,
-                Material.GLOW_INK_SAC, Material.AMETHYST_SHARD);
-        recipe(plugin, "nectar_draught", Material.HONEY_BOTTLE, Material.HONEYCOMB,
-                Material.GLOW_BERRIES, Material.AMETHYST_SHARD);
-        recipe(plugin, "verdant_spite", Material.PITCHER_PLANT, Material.PUFFERFISH,
-                Material.PUFFERFISH, Material.AMETHYST_SHARD);
-        recipe(plugin, "ravening_draught", Material.GLISTERING_MELON_SLICE, Material.SLIME_BALL,
-                Material.HONEY_BOTTLE, Material.AMETHYST_SHARD);
-        // Standard — a Pure-tier base plus a gated patina / chiseled-quartz item.
-        recipe(plugin, "refined_cinder", Material.BLAZE_ROD, Material.BLAZE_POWDER,
-                Material.BLAZE_POWDER, Material.AMETHYST_SHARD);
-        recipe(plugin, "knell_extract", Material.LAPIS_LAZULI, Material.LAPIS_LAZULI,
-                Material.GLOW_INK_SAC, Material.WEATHERED_COPPER, Material.AMETHYST_SHARD);
-        recipe(plugin, "mirror_polish", Material.DIAMOND, Material.CHISELED_QUARTZ_BLOCK,
-                Material.AMETHYST_SHARD);
-        recipe(plugin, "verdigris_rest", Material.FERMENTED_SPIDER_EYE, Material.SOUL_SAND,
-                Material.WEATHERED_COPPER, Material.AMETHYST_SHARD);
-        // --- ladder completion: new Pures (sin bases + amethyst) ---
-        recipe(plugin, "ember_distillate", Material.REDSTONE, Material.BLAZE_POWDER,
-                Material.MAGMA_CREAM, Material.AMETHYST_SHARD);
-        recipe(plugin, "burnished_vanity", Material.GOLD_INGOT, Material.GOLD_NUGGET,
-                Material.GOLD_NUGGET, Material.AMETHYST_SHARD);
-        recipe(plugin, "lethe_draught", Material.SOUL_SAND, Material.SOUL_SAND,
-                Material.FERMENTED_SPIDER_EYE, Material.AMETHYST_SHARD);
-        // --- ladder completion: new Standards (sin bases + a gated patina/chiseled item) ---
-        recipe(plugin, "amber_rapture", Material.HONEY_BOTTLE, Material.GLOW_BERRIES,
-                Material.WEATHERED_COPPER, Material.AMETHYST_SHARD);
-        recipe(plugin, "rancorous_bloom", Material.PITCHER_PLANT, Material.PUFFERFISH,
-                Material.CHISELED_QUARTZ_BLOCK, Material.AMETHYST_SHARD);
-        recipe(plugin, "gluttons_feast", Material.GLISTERING_MELON_SLICE, Material.SLIME_BALL,
-                Material.WEATHERED_COPPER, Material.AMETHYST_SHARD);
+    /** Concentrates refined into one Pure/Standard. */
+    public static final int CONCENTRATE_PER_PURE = 4;
+    public static final int PURE_PER_STANDARD = 4;
+
+    /** Sin → {pureId, standardId} — the refined reagent this sin's ladder produces at each rung. */
+    private static final Map<Sin, String[]> LADDER = new java.util.EnumMap<>(Sin.class);
+    /** Standard → the gated patina/chiseled item its recipe also demands. */
+    private static final Map<String, Material> STANDARD_GATE = new LinkedHashMap<>();
+    static {
+        LADDER.put(Sin.WRATH,    new String[]{"ember_distillate", "refined_cinder"});
+        LADDER.put(Sin.GLOOM,    new String[]{"distilled_sorrow", "knell_extract"});
+        LADDER.put(Sin.PRIDE,    new String[]{"burnished_vanity", "mirror_polish"});
+        LADDER.put(Sin.LUST,     new String[]{"nectar_draught",   "amber_rapture"});
+        LADDER.put(Sin.SLOTH,    new String[]{"lethe_draught",    "verdigris_rest"});
+        LADDER.put(Sin.ENVY,     new String[]{"verdant_spite",    "rancorous_bloom"});
+        LADDER.put(Sin.GLUTTONY, new String[]{"ravening_draught", "gluttons_feast"});
+        STANDARD_GATE.put("refined_cinder",  Material.CHISELED_QUARTZ_BLOCK);
+        STANDARD_GATE.put("knell_extract",   Material.WEATHERED_COPPER);
+        STANDARD_GATE.put("mirror_polish",   Material.CHISELED_QUARTZ_BLOCK);
+        STANDARD_GATE.put("amber_rapture",   Material.WEATHERED_COPPER);
+        STANDARD_GATE.put("verdigris_rest",  Material.WEATHERED_COPPER);
+        STANDARD_GATE.put("rancorous_bloom", Material.WEATHERED_COPPER);
+        STANDARD_GATE.put("gluttons_feast",  Material.WEATHERED_COPPER);
     }
 
-    private static void recipe(Plugin plugin, String reagentId, Material... ingredients) {
-        NamespacedKey key = new NamespacedKey(plugin, "refine_" + reagentId);
-        Bukkit.removeRecipe(key); // idempotent across /reload
-        ItemStack result = create(reagentId, 1);
-        if (result == null) return;
-        ShapelessRecipe recipe = new ShapelessRecipe(key, result);
-        for (Material m : ingredients) recipe.addIngredient(m);
+    /** Register (idempotently) the Pure and Standard refining recipes for every sin's ladder. */
+    public static void registerRecipes(Plugin plugin) {
+        for (Map.Entry<Sin, String[]> e : LADDER.entrySet()) {
+            Sin sin = e.getKey();
+            String pureId = e.getValue()[0];
+            String standardId = e.getValue()[1];
+
+            // Pure = 4 Concentrate(this sin, exact) + 1 Amethyst.
+            ShapelessRecipe pure = new ShapelessRecipe(recipeKey(plugin, pureId), create(pureId, 1));
+            var concentrate = new org.bukkit.inventory.RecipeChoice.ExactChoice(SinConcentrate.create(sin, 1));
+            for (int i = 0; i < CONCENTRATE_PER_PURE; i++) pure.addIngredient(concentrate);
+            pure.addIngredient(Material.AMETHYST_SHARD);
+            addRecipe(plugin, pureId, pure);
+
+            // Standard = 4 Pure(exact) + 1 gated item.
+            ShapelessRecipe std = new ShapelessRecipe(recipeKey(plugin, standardId), create(standardId, 1));
+            var pureChoice = new org.bukkit.inventory.RecipeChoice.ExactChoice(create(pureId, 1));
+            for (int i = 0; i < PURE_PER_STANDARD; i++) std.addIngredient(pureChoice);
+            std.addIngredient(STANDARD_GATE.getOrDefault(standardId, Material.WEATHERED_COPPER));
+            addRecipe(plugin, standardId, std);
+        }
+    }
+
+    private static NamespacedKey recipeKey(Plugin plugin, String reagentId) {
+        return new NamespacedKey(plugin, "refine_" + reagentId);
+    }
+
+    private static void addRecipe(Plugin plugin, String reagentId, ShapelessRecipe recipe) {
+        Bukkit.removeRecipe(recipeKey(plugin, reagentId)); // idempotent across /reload
+        if (recipe.getResult().getType().isAir()) return;
         Bukkit.addRecipe(recipe);
     }
 }

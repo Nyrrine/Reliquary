@@ -59,8 +59,8 @@ public final class Reagents {
 
     // ---- Gloom (blue) --------------------------------------------------------------
     public static final Reagent INK_SAC = reg(Reagent.of("ink_sac", "Glow Ink Sac")
-            .delta(GLOOM, 8).delta(SLOTH, 2).contam(3).stab(-2).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.30)
-            .item(Material.GLOW_INK_SAC).source("glow squid — dirty bulk").build());
+            .delta(GLOOM, 4).delta(SLOTH, 1).contam(4.5).stab(-2).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.30)
+            .item(Material.GLOW_INK_SAC).source("glow squid — weak dirty bulk; crush 8 into a Gloom Concentrate").build());
     public static final Reagent LAPIS_LAZULI = reg(Reagent.of("lapis_lazuli", "Lapis Lazuli")
             .delta(GLOOM, 3).contam(0.3).stab(-1).tier(REFINED)
             .item(Material.LAPIS_LAZULI).source("mining — the Gloom scalpel").build());
@@ -93,8 +93,8 @@ public final class Reagents {
 
     // ---- Lust (orange) -------------------------------------------------------------
     public static final Reagent GLOW_BERRIES = reg(Reagent.of("glow_berries", "Glow Berries")
-            .delta(LUST, 7).delta(GLUTTONY, 2).contam(3).stab(-2).tier(CRUDE)
-            .item(Material.GLOW_BERRIES).source("farm — dirty bulk").build());
+            .delta(LUST, 4).delta(GLUTTONY, 1).contam(4.5).stab(-2).tier(CRUDE)
+            .item(Material.GLOW_BERRIES).source("farm — weak dirty bulk; crush 8 into a Lust Concentrate").build());
     public static final Reagent HONEY_BOTTLE = reg(Reagent.of("honey_bottle", "Honey Bottle")
             .delta(LUST, 9).delta(ENVY, -4).contam(1).stab(-3).tier(REFINED).cures(Taint.GRIEF_BLOOM)
             .item(Material.HONEY_BOTTLE).source("bees; cures Grief Bloom").build());
@@ -107,8 +107,8 @@ public final class Reagents {
 
     // ---- Sloth (yellow) ------------------------------------------------------------
     public static final Reagent SOUL_SAND = reg(Reagent.of("soul_sand", "Soul Sand")
-            .delta(SLOTH, 7).delta(GLOOM, 2).contam(3).stab(-2).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.25)
-            .item(Material.SOUL_SAND).source("nether — dirty bulk").build());
+            .delta(SLOTH, 4).delta(GLOOM, 1).contam(4.5).stab(-2).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.25)
+            .item(Material.SOUL_SAND).source("nether — weak dirty bulk; crush 8 into a Sloth Concentrate").build());
     public static final Reagent FERMENTED_SPIDER_EYE = reg(Reagent.of("fermented_spider_eye", "Fermented Spider Eye")
             .delta(SLOTH, 8).delta(WRATH, -5).contam(1.2).stab(-3).tier(REFINED).inflicts(Taint.TOXIN, 0.25)
             .item(Material.FERMENTED_SPIDER_EYE).source("craft").build());
@@ -121,8 +121,8 @@ public final class Reagents {
 
     // ---- Envy (violet) -------------------------------------------------------------
     public static final Reagent PUFFERFISH = reg(Reagent.of("pufferfish", "Pufferfish")
-            .roll(ENVY, 5, 12).contam(3).stab(-4).tier(CRUDE).inflicts(Taint.TOXIN, 0.40)
-            .item(Material.PUFFERFISH).source("fishing — volatile, grindy").build());
+            .roll(ENVY, 3, 7).contam(4.5).stab(-4).tier(CRUDE).inflicts(Taint.TOXIN, 0.40)
+            .item(Material.PUFFERFISH).source("fishing — weak, volatile; crush 8 into an Envy Concentrate").build());
     public static final Reagent CHORUS_FRUIT = reg(Reagent.of("chorus_fruit", "Pitcher Plant")
             .delta(ENVY, 8).delta(GLUTTONY, -4).contam(1).stab(-3).tier(REFINED)
             .item(Material.PITCHER_PLANT).source("sniffer archaeology — a coveted bloom").build());
@@ -138,8 +138,8 @@ public final class Reagents {
             .delta(GLUTTONY, 6).contam(0.5).stab(1).tier(REFINED).cures(Taint.BLEEDING)
             .item(Material.GLISTERING_MELON_SLICE).source("brewing oddment — safe hub filler; cures Bleeding").build());
     public static final Reagent ROTTEN_FLESH = reg(Reagent.of("rotten_flesh", "Rotten Flesh")
-            .delta(GLUTTONY, 7).delta(SLOTH, 2).contam(3).stab(-1).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.20)
-            .item(Material.ROTTEN_FLESH).source("zombies — dirty bulk").build());
+            .delta(GLUTTONY, 4).delta(SLOTH, 1).contam(4.5).stab(-1).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.20)
+            .item(Material.ROTTEN_FLESH).source("zombies — weak dirty bulk; crush 8 into a Gluttony Concentrate").build());
     // Pure Gluttony — added to complete the hub's tier ladder so Gluttony-dominant WAW weapons (Green Stem)
     // can reach Analytical. NAME/SOURCE PROVISIONAL — retune to taste.
     public static final Reagent RAVENING_DRAUGHT = reg(Reagent.of("ravening_draught", "Ravening Draught")

@@ -124,6 +124,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         this.stations = new com.nyrrine.reliquary.extraction.Stations(this);
         stations.load();
         stations.registerRecipes();
+        com.nyrrine.reliquary.extraction.SinConcentrate.registerRecipes(this);
         com.nyrrine.reliquary.extraction.RefinedReagent.registerRecipes(this);
         getServer().getPluginManager().registerEvents(
                 new com.nyrrine.reliquary.extraction.StationListener(extraction, stations), this);

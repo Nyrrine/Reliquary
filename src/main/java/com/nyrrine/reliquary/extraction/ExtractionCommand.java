@@ -135,9 +135,10 @@ public final class ExtractionCommand {
         for (Material m : mats) giveOrDrop(player, new ItemStack(m, 16));
         int refined = 0;
         for (String id : RefinedReagent.ids()) { giveOrDrop(player, RefinedReagent.create(id, 8)); refined++; }
+        for (Sin s : Sin.values()) giveOrDrop(player, SinConcentrate.create(s, 16));
         player.sendMessage(msg("Dispensed a vial, 64 Enkephalin, " + mats.size()
-                + " item types (reagents + catalyst components), and " + refined
-                + " refined chain reagents. Overflow is at your feet.", GREEN));
+                + " item types (reagents + catalyst components), " + refined
+                + " refined chain reagents, and 7 sin concentrates. Overflow is at your feet.", GREEN));
     }
 
     /**
