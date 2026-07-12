@@ -204,6 +204,17 @@ public final class Reagents {
         return null;
     }
 
+    /**
+     * The reagent an item represents — a crafted {@link RefinedReagent} (by tag) first, else a plain vanilla
+     * reagent item (by material). This is what the Censer and the lectern resolve a held item through.
+     */
+    public static Reagent fromItem(org.bukkit.inventory.ItemStack item) {
+        if (item == null) return null;
+        String refined = RefinedReagent.idOf(item);
+        if (refined != null) return byId(refined);
+        return byItem(item.getType());
+    }
+
     /** All reagents in registration order (unmodifiable-ish view over insertion order). */
     public static Iterable<Reagent> all() { return REGISTRY.values(); }
 

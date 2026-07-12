@@ -133,8 +133,11 @@ public final class ExtractionCommand {
         for (Reagent r : Reagents.all()) if (r.item() != null) mats.add(r.item());
         for (Catalysts.Recipe rec : Catalysts.all()) mats.addAll(rec.components().keySet());
         for (Material m : mats) giveOrDrop(player, new ItemStack(m, 16));
-        player.sendMessage(msg("Dispensed a vial, 64 Enkephalin, and " + mats.size()
-                + " item types (reagents + catalyst components). Overflow is at your feet.", GREEN));
+        int refined = 0;
+        for (String id : RefinedReagent.ids()) { giveOrDrop(player, RefinedReagent.create(id, 8)); refined++; }
+        player.sendMessage(msg("Dispensed a vial, 64 Enkephalin, " + mats.size()
+                + " item types (reagents + catalyst components), and " + refined
+                + " refined chain reagents. Overflow is at your feet.", GREEN));
     }
 
     /**
@@ -168,7 +171,7 @@ public final class ExtractionCommand {
 
         Material m = item.getType();
         boolean found = false;
-        Reagent r = Reagents.byItem(m);
+        Reagent r = Reagents.fromItem(item);
         if (r != null) { describeReagent(player, r); found = true; }
 
         List<String> usedBy = new ArrayList<>();
@@ -378,7 +381,7 @@ public final class ExtractionCommand {
 
     /** The Censer (Brewing Stand): the held reagent item is titrated into your vial (spends one). */
     public void stationCenser(Player player, ItemStack held) {
-        Reagent r = Reagents.byItem(held.getType());
+        Reagent r = Reagents.fromItem(held);
         if (r == null) {
             player.sendMessage(msg("The Censer doesn't take that — hold a reagent item.", NamedTextColor.RED));
             return;
@@ -447,6 +450,7 @@ public final class ExtractionCommand {
                 page("§lREADING A VIAL\n\n§2Green shade§0 = purity (dark=crude, bright=pure).\n\n• §lPurity/Grade§r — Crude→Certified. Higher grade unlocks higher-tier weapons.\n• §lStability§r — don't let it hit 0 or the pot ruptures.\n• §lVolume§r — bigger pours reach rarer weapons."),
                 page("§lTHE 7 SINS\n\nWrath·Pride·Lust (§chot§0) and Gloom·Sloth·Envy (§9cold§0) resonate within their group. §5Gluttony§0 is the neutral hub.\n\nOpposed pairs bleed stability: Pride✕Gloom, Wrath✕Sloth, Lust✕Envy. Steady them with §5Honeycomb§0."),
                 page("§lAFFLICTIONS\n\nThe pot is a live mind — it gets §csick§0 (the vial changes colour).\n\nEach taint has a timer. §aCure it in time§0 (the right item) and it clears clean; §cignore it§0 and the damage §lscars§r for good. Read it at the Assay."),
+                page("§lHIGH GRADES\n\n§5WAW§0 weapons need §lAnalytical§r cogito — only §lPure/Standard§r reagents reach it.\n\n§lRefine§r them at a crafting table: the sin's base reagents + §5Amethyst§0 (+ a gated item for Standard).\nE.g. 2 Lapis + Glow Ink Sac + Amethyst → §9Distilled Sorrow§0.\n\nThey're low-noise §oscalpels§r — sharp in §lany§r brew."),
                 page("§lCATALYSTS\n\nA per-weapon key that §lguarantees§r the exact weapon (cuts the luck).\n\n1. §5/cogito recipes <id>§0 — see its cost\n2. Gather the grind, §5forge§0 it at the Crucible\n3. Carry it, pour at the Well → guaranteed."),
                 page("§lTIPS\n\n• Fewest, cleanest touches win — every add dirties the pot.\n• Buffer §5early§0, distill §5last§0.\n• Hold an item over the Assay to identify it.\n• Peer into the Well (right-click) to preview your most-likely pull before you commit."));
         book.setItemMeta(bm);
