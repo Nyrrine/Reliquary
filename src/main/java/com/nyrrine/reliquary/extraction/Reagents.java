@@ -135,7 +135,12 @@ public final class Reagents {
             .source("geode — the buffer").build());
     public static final Reagent GLOWSTONE_DUST = reg(Reagent.of("glowstone_dust", "Glowstone Dust")
             .contam(0.5).stab(10).tier(UTILITY)
-            .source("nether — lesser buffer").build());
+            .source("nether — cheap, dirty buffer").build());
+    // Flux: mediates the warring sins of a cross-axis pot (dampens opposition drain for a few adds). The
+    // right steadier for a Dissonant/opposed batch — useless on plain handling shakes.
+    public static final Reagent HONEYCOMB = reg(Reagent.of("honeycomb", "Honeycomb")
+            .stab(3).flux(4).tier(UTILITY)
+            .source("bees — opposition flux").build());
     public static final Reagent MILK_BUCKET = reg(Reagent.of("milk_bucket", "Milk Bucket")
             .chargeScale(0.6).noiseScale(0.7).stab(5).tier(UTILITY)
             .source("cow — panic reset").build());

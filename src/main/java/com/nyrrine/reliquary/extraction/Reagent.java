@@ -22,6 +22,7 @@ public record Reagent(
         Roll roll,           // nullable volatile magnitude roll
         double chargeScale,  // 1.0 = none; < 1 dilutes all charge (solvents)
         double noiseScale,   // 1.0 = none; < 1 washes accumulated noise (milk)
+        int flux,            // Flux charges granted (Honeycomb) — dampens opposition on following adds
         String source) {     // lectern grind text
 
     /** Reagent purity tiers: the ceiling each permits and how failure-prone it is to handle. */
@@ -75,6 +76,7 @@ public record Reagent(
         private Roll roll = null;
         private double chargeScale = 1.0;
         private double noiseScale = 1.0;
+        private int flux = 0;
         private String source = "";
 
         private Builder(String id, String display) {
@@ -89,10 +91,11 @@ public record Reagent(
         public Builder roll(Sin s, double min, double max) { this.roll = new Roll(s, min, max); return this; }
         public Builder chargeScale(double f) { this.chargeScale = f; return this; }
         public Builder noiseScale(double f) { this.noiseScale = f; return this; }
+        public Builder flux(int charges) { this.flux = charges; return this; }
         public Builder source(String src) { this.source = src; return this; }
 
         public Reagent build() {
-            return new Reagent(id, display, delta, contam, stab, tier, roll, chargeScale, noiseScale, source);
+            return new Reagent(id, display, delta, contam, stab, tier, roll, chargeScale, noiseScale, flux, source);
         }
     }
 }

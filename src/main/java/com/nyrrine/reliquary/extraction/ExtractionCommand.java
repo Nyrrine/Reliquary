@@ -296,13 +296,37 @@ public final class ExtractionCommand {
     private void distill(Player player) {
         Vial v = locateVial(player);
         if (v == null) { noVial(player); return; }
+        if (!consumeEnkephalin(player, 1)) {
+            player.sendMessage(msg("Out of Enkephalin — the Centrifuge burns 1 per pass. Draw more: /cogito fuel",
+                    NamedTextColor.RED));
+            return;
+        }
         PotState st = v.state();
-        double before = st.noise();
+        double beforeN = st.noise();
+        double beforeV = st.titer();
         Engine.distill(st);
         writeVial(player, v);
-        player.sendMessage(msg(String.format("Distilled — noise %.1f -> %.1f (pass %d).",
-                before, st.noise(), st.distillPasses()), GREEN));
+        player.sendMessage(msg(String.format(
+                "Distilled — purity up (noise %.1f->%.1f), but it concentrates: volume %.0f->%.0f (pass %d, -1 Enkephalin).",
+                beforeN, st.noise(), beforeV, st.titer(), st.distillPasses()), GREEN));
         showGauges(player, st);
+    }
+
+    /** Remove {@code amount} Enkephalin from the player's inventory; false (and no change) if short. */
+    private boolean consumeEnkephalin(Player player, int amount) {
+        ItemStack[] contents = player.getInventory().getContents();
+        int have = 0;
+        for (ItemStack it : contents) if (Enkephalin.matches(it)) have += it.getAmount();
+        if (have < amount) return false;
+        int remaining = amount;
+        for (int i = 0; i < contents.length && remaining > 0; i++) {
+            if (!Enkephalin.matches(contents[i])) continue;
+            int take = Math.min(remaining, contents[i].getAmount());
+            contents[i].setAmount(contents[i].getAmount() - take);
+            if (contents[i].getAmount() <= 0) player.getInventory().setItem(i, null);
+            remaining -= take;
+        }
+        return true;
     }
 
     // ---- the Manifold: blend -------------------------------------------------------

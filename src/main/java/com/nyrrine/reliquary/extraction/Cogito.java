@@ -40,6 +40,7 @@ public final class Cogito {
     private static final NamespacedKey STABILITY = key("cogito_stability");
     private static final NamespacedKey ADDS      = key("cogito_adds");
     private static final NamespacedKey PASSES    = key("cogito_distill_passes");
+    private static final NamespacedKey FLUX      = key("cogito_flux");
     private static final NamespacedKey[] CHARGE  = new NamespacedKey[Sin.COUNT];
 
     static {
@@ -89,6 +90,7 @@ public final class Cogito {
         pdc.set(STABILITY, PersistentDataType.DOUBLE, state.stability());
         pdc.set(ADDS,      PersistentDataType.INTEGER, state.adds());
         pdc.set(PASSES,    PersistentDataType.INTEGER, state.distillPasses());
+        pdc.set(FLUX,      PersistentDataType.INTEGER, state.fluxCharges());
 
         style(meta, state);
         item.setItemMeta(meta);
@@ -110,6 +112,7 @@ public final class Cogito {
         state.setStability(pdc.getOrDefault(STABILITY, PersistentDataType.DOUBLE, 100.0));
         state.setAdds(pdc.getOrDefault(ADDS, PersistentDataType.INTEGER, 0));
         state.setDistillPasses(pdc.getOrDefault(PASSES, PersistentDataType.INTEGER, 0));
+        state.setFluxCharges(pdc.getOrDefault(FLUX, PersistentDataType.INTEGER, 0));
         return state;
     }
 

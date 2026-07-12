@@ -25,6 +25,7 @@ public final class PotState {
     private double stability = 100.0; // breach gauge, 0–100
     private int adds = 0;             // reagent additions so far
     private int distillPasses = 0;    // Centrifuge passes — drives diminishing distill returns
+    private int fluxCharges = 0;      // active Flux (Honeycomb) — dampens opposition drain, spent per add
 
     /** A fresh blank pot: no composition, pristine gauges. */
     public PotState() {}
@@ -71,6 +72,10 @@ public final class PotState {
     public void setDistillPasses(int v) { distillPasses = Math.max(0, v); }
     public void incrementDistillPasses() { distillPasses++; }
 
+    public int fluxCharges() { return fluxCharges; }
+    public void setFluxCharges(int v) { fluxCharges = Math.max(0, v); }
+    public void addFluxCharges(int v) { setFluxCharges(fluxCharges + v); }
+
     // ---- derived ------------------------------------------------------------------
 
     /** Total charge across all sins — the pot's concentration / volume. */
@@ -101,6 +106,7 @@ public final class PotState {
         c.stability = stability;
         c.adds = adds;
         c.distillPasses = distillPasses;
+        c.fluxCharges = fluxCharges;
         return c;
     }
 

@@ -40,8 +40,11 @@ public final class Engine {
     public static final double DISTILL_FRACTION = 0.45;
     /** Per-pass efficiency decay — diminishing returns (~4 useful passes). */
     public static final double DISTILL_DECAY = 0.6;
-    /** Stability a distillation pass restores (locking the batch). */
-    public static final double DISTILL_STAB = 4.0;
+    /** Volume a distillation pass boils off — concentration costs material. Over-distilling shrinks the batch
+     *  below the volume gate, so distilling is a measured decision, not a spam button. */
+    public static final double DISTILL_VOLUME_LOSS = 0.08;
+    /** How much a flux charge (Honeycomb) dampens opposition drain on the adds it covers. */
+    public static final double FLUX_DRAIN_FACTOR = 0.3;
     /** Extra contamination a blend introduces. Kept small so clean stocks blend clean (§11) — a blend of
      *  Primary-Standard stocks must stay Primary Standard, or the catalyst path is dead. */
     public static final double BLEND_PENALTY = 0.25;
@@ -89,6 +92,7 @@ public final class Engine {
             pot.addNoise(r.contam());
             pot.capCeiling(r.tierCeiling());
             pot.addStability(r.stab());
+            if (r.flux() > 0) pot.addFluxCharges(r.flux()); // Honeycomb: mediates opposition on coming adds
             if (r.chargeScale() != 1.0) pot.scaleCharge(r.chargeScale()); // solvent dilution
             applyDelta(pot, r, rng);
         }
@@ -120,25 +124,32 @@ public final class Engine {
         }
     }
 
-    /** Bleed stability for each opposed pair present, scaled by the smaller of the two shares. */
+    /** Bleed stability for each opposed pair present, scaled by the smaller of the two shares. A flux charge
+     *  (Honeycomb) mediates the warring sins on the adds it covers, dampening the drain and spending itself. */
     private static void applyOppositionDrain(PotState pot, double k) {
         SinProfile profile = pot.profile();
         double drain = 0.0;
         for (Sin.Bridge b : Sin.bridges()) {
             drain += k * Math.min(profile.get(b.a()), profile.get(b.b()));
         }
-        if (drain > 0.0) pot.addStability(-drain);
+        if (drain <= 0.0) return;
+        if (pot.fluxCharges() > 0) {
+            drain *= FLUX_DRAIN_FACTOR;
+            pot.setFluxCharges(pot.fluxCharges() - 1);
+        }
+        pot.addStability(-drain);
     }
 
     /**
-     * Distill (the Centrifuge): scrub a fraction of the noise with diminishing returns per pass, restore a
-     * little stability. Never touches the ceiling — you can't wash dirt into a standard. Costs Enkephalin
-     * (charged by the caller). Mutates {@code pot}.
+     * Distill (the Centrifuge): scrub a fraction of the noise with diminishing returns per pass — but it
+     * concentrates, boiling off {@link #DISTILL_VOLUME_LOSS} of the volume each pass, so over-distilling
+     * shrinks the batch below the volume gate. Never touches the ceiling (can't wash dirt into a standard)
+     * and never removes a named taint. Costs Enkephalin (charged by the caller). Mutates {@code pot}.
      */
     public static void distill(PotState pot) {
         double eff = Math.pow(DISTILL_DECAY, pot.distillPasses());
-        pot.setNoise(pot.noise() * (1.0 - DISTILL_FRACTION * eff));
-        pot.addStability(DISTILL_STAB);
+        pot.setNoise(pot.noise() * (1.0 - DISTILL_FRACTION * eff)); // purity up (diminishing per pass)
+        pot.scaleCharge(1.0 - DISTILL_VOLUME_LOSS);                 // ...but it boils off volume (concentration)
         pot.incrementDistillPasses();
     }
 
