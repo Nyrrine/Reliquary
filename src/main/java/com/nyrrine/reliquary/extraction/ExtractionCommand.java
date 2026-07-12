@@ -32,11 +32,19 @@ import java.util.concurrent.ThreadLocalRandom;
 public final class ExtractionCommand {
 
     private final Reliquary plugin;
+    private final WellDisplay wellDisplay;
     private final Map<String, Integer> fontProgress = new HashMap<>(); // Font compost fill, per block location
     private static final int FONT_THRESHOLD = 24; // resonance accumulated per 1 Enkephalin yielded
 
     public ExtractionCommand(Reliquary plugin) {
         this.plugin = plugin;
+        this.wellDisplay = new WellDisplay(plugin);
+    }
+
+    /** The weapon item a spec resolves to (via the plugin's registry), for the Well carousel. */
+    private ItemStack weaponItem(WeaponSpec spec) {
+        Weapon w = plugin.weapons().get(spec.id());
+        return w != null ? w.createItem() : null;
     }
 
     private static final TextColor GREEN = TextColor.color(0x74F066);
@@ -324,9 +332,8 @@ public final class ExtractionCommand {
         // The lava rises; each full pool yields exactly ONE Enkephalin + ONE Raw Cogito, and carries the rest.
         if (prog >= FONT_THRESHOLD) {
             fontProgress.put(k, prog - FONT_THRESHOLD);
-            giveOrDrop(player, Enkephalin.create(1));
             giveOrDrop(player, RawCogito.create(1));
-            player.sendMessage(msg("The Font overflows — it yields 1 Enkephalin and 1 Raw Cogito.", GREEN));
+            player.sendActionBar(msg("The Font overflows — 1 Raw Cogito. Render it at the Alembic.", GREEN));
             player.playSound(player.getLocation(), Sound.BLOCK_COMPOSTER_READY, 0.8f, 0.9f);
             player.playSound(player.getLocation(), Sound.BLOCK_LAVA_EXTINGUISH, 0.5f, 1.2f);
             loc.getWorld().spawnParticle(org.bukkit.Particle.LAVA, loc.clone().add(0.5, 0.9, 0.5), 12, 0.2, 0.1, 0.2, 0);
@@ -362,22 +369,31 @@ public final class ExtractionCommand {
     }
 
     /** The Alembic (Blast Furnace): process 1 Raw Cogito + 1 Enkephalin → a blank, workable Cogito vial. */
-    public void stationAlembic(Player player) {
+    /** Enkephalin drawn from one Raw Cogito on a sneak-refine. */
+    private static final int ENKEPHALIN_PER_RAW = 2;
+
+    /**
+     * The Alembic renders Raw Cogito (the Font's only output) two ways, so there's a single source resource and
+     * no overflow: right-click distills 1 Raw Cogito into a blank <b>vial</b>; sneak-right-click renders 1 Raw
+     * Cogito into {@link #ENKEPHALIN_PER_RAW} <b>Enkephalin</b> (the fuel for distilling + pouring).
+     */
+    public void stationAlembic(Player player, boolean sneaking) {
         if (countItem(player, RawCogito::matches) < 1) {
-            player.sendMessage(msg("The Alembic refines Raw Cogito — draw some at the Font first.",
+            player.sendActionBar(msg("The Alembic needs Raw Cogito — draw some at the Font first.",
                     NamedTextColor.RED));
             return;
         }
-        if (countEnkephalin(player) < 1) {
-            player.sendMessage(msg("The Alembic needs 1 Enkephalin to process the Raw Cogito.", NamedTextColor.RED));
-            return;
-        }
         consumeItem(player, RawCogito::matches, 1);
-        consumeEnkephalin(player, 1);
-        giveOrDrop(player, Cogito.create(new PotState()));
-        player.sendMessage(msg("The Alembic refines Raw Cogito with Enkephalin into a workable vial "
-                + "(−1 Raw Cogito, −1 Enkephalin).", GREEN));
-        player.playSound(player.getLocation(), Sound.BLOCK_BREWING_STAND_BREW, 0.7f, 1.2f);
+        if (sneaking) {
+            giveOrDrop(player, Enkephalin.create(ENKEPHALIN_PER_RAW));
+            player.sendActionBar(msg("The Alembic renders Raw Cogito into " + ENKEPHALIN_PER_RAW
+                    + " Enkephalin.", GREEN));
+            player.playSound(player.getLocation(), Sound.BLOCK_BREWING_STAND_BREW, 0.7f, 1.5f);
+        } else {
+            giveOrDrop(player, Cogito.create(new PotState()));
+            player.sendActionBar(msg("The Alembic distills Raw Cogito into a workable vial.", GREEN));
+            player.playSound(player.getLocation(), Sound.BLOCK_BREWING_STAND_BREW, 0.7f, 1.1f);
+        }
     }
 
     /** The Censer (Brewing Stand): the held reagent item is titrated into your vial (spends one). */
@@ -481,16 +497,10 @@ public final class ExtractionCommand {
             return;
         }
         WellRoll.Chance top = pool.get(0);
-        Weapon w = plugin.weapons().get(top.weapon().id());
-        if (w != null) revealInChamber(wellLoc, w.createItem());
-        player.sendMessage(msg("The Pocket Well stirs — most likely: " + top.weapon().display()
-                + " (" + Math.round(top.odds() * 100) + "%).  Sneak-right-click to pour.", GREEN));
-        int shown = 0;
-        for (WellRoll.Chance c : pool) {
-            if (shown++ == 0) continue; // skip the top (already shown)
-            if (shown > 3) break;
-            player.sendMessage(msg("   …or " + c.weapon().display() + " (" + Math.round(c.odds() * 100) + "%)", FAINT));
-        }
+        // The living carousel: top pick spinning at centre, candidates orbiting with live odds tags.
+        wellDisplay.reveal(wellLoc, pool, this::weaponItem);
+        player.sendActionBar(msg("The Well shows " + top.weapon().display() + " ("
+                + Math.round(top.odds() * 100) + "%) — sneak-click to pour.", GREEN));
     }
 
     /** Float the most-likely weapon above the Well for a few seconds — the item inside the ominous chamber. */

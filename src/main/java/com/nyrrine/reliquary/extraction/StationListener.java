@@ -54,6 +54,17 @@ public final class StationListener implements Listener {
         if (Enkephalin.matches(event.getItem())) event.setCancelled(true);
     }
 
+    /** A Cogito is a volatile emotional distillate, not a drink — cancel the swallow so the vial isn't lost. */
+    @EventHandler
+    public void onConsume(org.bukkit.event.player.PlayerItemConsumeEvent event) {
+        if (Cogito.matches(event.getItem())) {
+            event.setCancelled(true);
+            event.getPlayer().sendActionBar(net.kyori.adventure.text.Component
+                    .text("Raw Cogito isn't for drinking — pour it at the Well.")
+                    .color(net.kyori.adventure.text.format.NamedTextColor.RED));
+        }
+    }
+
     @EventHandler
     public void onInteract(PlayerInteractEvent event) {
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
@@ -72,7 +83,7 @@ public final class StationListener implements Listener {
                 else extraction.describeItem(player, held);                               // holding → identify it
             }
             case FONT       -> extraction.stationFont(player, event.getClickedBlock().getLocation(), held);
-            case ALEMBIC    -> extraction.stationAlembic(player);
+            case ALEMBIC    -> extraction.stationAlembic(player, player.isSneaking());
             case CENSER     -> extraction.stationCenser(player, held);
             case CENTRIFUGE -> extraction.stationCentrifuge(player);
             case MANIFOLD   -> extraction.stationManifold(player);
