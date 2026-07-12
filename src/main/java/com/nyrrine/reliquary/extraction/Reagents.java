@@ -40,21 +40,21 @@ public final class Reagents {
             .delta(WRATH, 1).contam(0.1).stab(-1).tier(REFINED)
             .source("mining — the Wrath scalpel").build());
     public static final Reagent BLAZE_POWDER = reg(Reagent.of("blaze_powder", "Blaze Powder")
-            .delta(WRATH, 10).delta(GLOOM, -8).contam(1.5).stab(-4).tier(REFINED)
+            .delta(WRATH, 10).delta(GLOOM, -8).contam(1.5).stab(-4).tier(REFINED).inflicts(Taint.FEVER, 0.15)
             .source("blaze — mover + Gloom corrector").build());
     public static final Reagent BLAZE_ROD = reg(Reagent.of("blaze_rod", "Blaze Rod")
-            .roll(WRATH, 12, 40).contam(0.4).stab(-16).tier(PURE)
+            .roll(WRATH, 12, 40).contam(0.4).stab(-16).tier(PURE).inflicts(Taint.FEVER, 0.35)
             .source("blaze — volatile").build());
     public static final Reagent MAGMA_CREAM = reg(Reagent.of("magma_cream", "Magma Cream")
             .delta(WRATH, 7).delta(GLUTTONY, 2).contam(1.2).stab(-3).tier(REFINED)
             .source("slimes + blaze").build());
     public static final Reagent REFINED_CINDER = reg(Reagent.of("refined_cinder", "Refined Cinder")
-            .delta(WRATH, 22).contam(0.05).stab(-30).tier(STANDARD)
+            .delta(WRATH, 22).contam(0.05).stab(-30).tier(STANDARD).inflicts(Taint.FEVER, 0.25)
             .source("processed blaze chain").build());
 
     // ---- Gloom (blue) --------------------------------------------------------------
     public static final Reagent INK_SAC = reg(Reagent.of("ink_sac", "Ink Sac")
-            .delta(GLOOM, 8).delta(SLOTH, 2).contam(3).stab(-2).tier(CRUDE)
+            .delta(GLOOM, 8).delta(SLOTH, 2).contam(3).stab(-2).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.30)
             .source("squid — dirty bulk").build());
     public static final Reagent LAPIS_LAZULI = reg(Reagent.of("lapis_lazuli", "Lapis Lazuli")
             .delta(GLOOM, 3).contam(0.3).stab(-1).tier(REFINED)
@@ -96,10 +96,10 @@ public final class Reagents {
 
     // ---- Sloth (yellow) ------------------------------------------------------------
     public static final Reagent SOUL_SAND = reg(Reagent.of("soul_sand", "Soul Sand")
-            .delta(SLOTH, 7).delta(GLOOM, 2).contam(3).stab(-2).tier(CRUDE)
+            .delta(SLOTH, 7).delta(GLOOM, 2).contam(3).stab(-2).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.25)
             .source("nether — dirty bulk").build());
     public static final Reagent FERMENTED_SPIDER_EYE = reg(Reagent.of("fermented_spider_eye", "Fermented Spider Eye")
-            .delta(SLOTH, 8).delta(WRATH, -5).contam(1.2).stab(-3).tier(REFINED)
+            .delta(SLOTH, 8).delta(WRATH, -5).contam(1.2).stab(-3).tier(REFINED).inflicts(Taint.TOXIN, 0.25)
             .source("craft").build());
     public static final Reagent VERDIGRIS_REST = reg(Reagent.of("verdigris_rest", "Verdigris Rest")
             .delta(SLOTH, 19).contam(0.05).stab(-28).tier(STANDARD)
@@ -107,7 +107,7 @@ public final class Reagents {
 
     // ---- Envy (violet) -------------------------------------------------------------
     public static final Reagent PUFFERFISH = reg(Reagent.of("pufferfish", "Pufferfish")
-            .roll(ENVY, 5, 12).contam(3).stab(-4).tier(CRUDE)
+            .roll(ENVY, 5, 12).contam(3).stab(-4).tier(CRUDE).inflicts(Taint.TOXIN, 0.40)
             .source("fishing — volatile, grindy").build());
     public static final Reagent CHORUS_FRUIT = reg(Reagent.of("chorus_fruit", "Chorus Fruit")
             .delta(ENVY, 8).delta(GLUTTONY, -4).contam(1).stab(-3).tier(REFINED)
@@ -121,7 +121,7 @@ public final class Reagents {
             .delta(GLUTTONY, 6).contam(0.5).stab(1).tier(REFINED)
             .source("slime — safe hub filler").build());
     public static final Reagent ROTTEN_FLESH = reg(Reagent.of("rotten_flesh", "Rotten Flesh")
-            .delta(GLUTTONY, 7).delta(SLOTH, 2).contam(3).stab(-1).tier(CRUDE)
+            .delta(GLUTTONY, 7).delta(SLOTH, 2).contam(3).stab(-1).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.20)
             .source("zombies — dirty bulk").build());
     // Pure Gluttony — added to complete the hub's tier ladder so Gluttony-dominant WAW weapons (Green Stem)
     // can reach Analytical. NAME/SOURCE PROVISIONAL — retune to taste.
@@ -139,8 +139,19 @@ public final class Reagents {
     // Flux: mediates the warring sins of a cross-axis pot (dampens opposition drain for a few adds). The
     // right steadier for a Dissonant/opposed batch — useless on plain handling shakes.
     public static final Reagent HONEYCOMB = reg(Reagent.of("honeycomb", "Honeycomb")
-            .stab(3).flux(4).tier(UTILITY)
-            .source("bees — opposition flux").build());
+            .stab(3).flux(4).tier(UTILITY).cures(Taint.DISSONANCE)
+            .source("bees — opposition flux; cures Dissonance").build());
+
+    // ---- Remedies (the medicine cabinet — no charge, they treat afflictions) -------
+    public static final Reagent NETHER_WART = reg(Reagent.of("nether_wart", "Nether Wart")
+            .stab(2).tier(UTILITY).cures(Taint.TOXIN)
+            .source("antidote — cures Toxin").build());
+    public static final Reagent BONE_MEAL = reg(Reagent.of("bone_meal", "Bone Meal")
+            .noiseScale(0.9).tier(UTILITY).cures(Taint.SEDIMENT)
+            .source("precipitate + filter — cures Sediment, recovers a little purity").build());
+    public static final Reagent SNOWBALL = reg(Reagent.of("snowball", "Snowball")
+            .stab(1).tier(UTILITY).cures(Taint.FEVER)
+            .source("quench — cures Fever").build());
     public static final Reagent MILK_BUCKET = reg(Reagent.of("milk_bucket", "Milk Bucket")
             .chargeScale(0.6).noiseScale(0.7).stab(5).tier(UTILITY)
             .source("cow — panic reset").build());

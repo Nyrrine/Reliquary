@@ -1,5 +1,8 @@
 package com.nyrrine.reliquary.extraction;
 
+import java.util.EnumMap;
+import java.util.Map;
+
 /**
  * The full mutable state of a single Cogito pot — the chemistry engine operates on this, and
  * {@link Cogito} serializes it to/from the potion's persistent data.
@@ -26,6 +29,7 @@ public final class PotState {
     private int adds = 0;             // reagent additions so far
     private int distillPasses = 0;    // Centrifuge passes — drives diminishing distill returns
     private int fluxCharges = 0;      // active Flux (Honeycomb) — dampens opposition drain, spent per add
+    private final Map<Taint, Double> taints = new EnumMap<>(Taint.class); // active afflictions → seconds left
 
     /** A fresh blank pot: no composition, pristine gauges. */
     public PotState() {}
@@ -76,6 +80,39 @@ public final class PotState {
     public void setFluxCharges(int v) { fluxCharges = Math.max(0, v); }
     public void addFluxCharges(int v) { setFluxCharges(fluxCharges + v); }
 
+    // ---- taints -------------------------------------------------------------------
+
+    /** Active afflictions mapped to their remaining seconds. */
+    public Map<Taint, Double> taints() { return taints; }
+
+    public boolean hasTaint(Taint t) { return taints.containsKey(t); }
+
+    /** Inflict (or refresh) a taint with its full timer. */
+    public void inflict(Taint t) { taints.put(t, t.timerSec()); }
+
+    /** Set a taint's remaining seconds directly (for the ticker / serialization). */
+    public void setTaintTime(Taint t, double seconds) {
+        if (seconds > 0.0) taints.put(t, seconds); else taints.remove(t);
+    }
+
+    /** Clear a taint cleanly (a successful cure). */
+    public void clearTaint(Taint t) { taints.remove(t); }
+
+    public boolean anyTaintBlocksDistill() {
+        for (Taint t : taints.keySet()) if (t.blocksDistill()) return true;
+        return false;
+    }
+
+    /** The most-urgent active taint (least time left), or {@code null} — used for the colour tell. */
+    public Taint worstTaint() {
+        Taint worst = null;
+        double least = Double.MAX_VALUE;
+        for (Map.Entry<Taint, Double> e : taints.entrySet()) {
+            if (e.getValue() < least) { least = e.getValue(); worst = e.getKey(); }
+        }
+        return worst;
+    }
+
     // ---- derived ------------------------------------------------------------------
 
     /** Total charge across all sins — the pot's concentration / volume. */
@@ -107,6 +144,7 @@ public final class PotState {
         c.adds = adds;
         c.distillPasses = distillPasses;
         c.fluxCharges = fluxCharges;
+        c.taints.putAll(taints);
         return c;
     }
 

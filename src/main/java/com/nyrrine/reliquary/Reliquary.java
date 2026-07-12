@@ -119,6 +119,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         tracker.start();
 
         this.extraction = new ExtractionCommand(this);
+        new com.nyrrine.reliquary.extraction.CogitoTicker(this).start();
 
         PluginCommand cmd = getCommand("reliquary");
         if (cmd != null) cmd.setTabCompleter(this);

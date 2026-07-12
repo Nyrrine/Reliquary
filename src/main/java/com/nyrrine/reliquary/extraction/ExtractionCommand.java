@@ -152,6 +152,17 @@ public final class ExtractionCommand {
         } else {
             player.sendMessage(msg("Added " + r.display() + ".", GREEN));
         }
+        // Diagnosis feedback: what the touch cured, and what it may have tainted.
+        for (Taint t : result.cured()) {
+            player.sendMessage(msg("Cured " + t.display() + "!", GREEN));
+            player.playSound(player.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.8f, 1.4f);
+        }
+        if (result.inflicted() != null) {
+            Taint t = result.inflicted();
+            player.sendMessage(msg("⚠ " + t.display() + " sets in — " + t.symptom()
+                    + ". Cure with " + t.cureId() + " within " + Math.round(t.timerSec()) + "s.", t.color()));
+            player.playSound(player.getLocation(), Sound.BLOCK_BREWING_STAND_BREW, 0.6f, 0.8f);
+        }
         showGauges(player, st);
         showNearest(player, st);
     }
@@ -169,7 +180,19 @@ public final class ExtractionCommand {
         player.sendMessage(msg("Assay:", NamedTextColor.WHITE));
         player.sendMessage(assayLine(st.profile()));
         showGauges(player, st);
+        showTaints(player, st);
         showPool(player, st);
+    }
+
+    /** List active afflictions with their remaining time + cure — the triage panel. */
+    private void showTaints(Player player, PotState st) {
+        if (st.taints().isEmpty()) return;
+        player.sendMessage(msg("Afflictions (treat before the timer runs out):", NamedTextColor.RED));
+        for (var e : st.taints().entrySet()) {
+            Taint t = e.getKey();
+            player.sendMessage(Component.text(String.format("  ⚠ %s  %.0fs left", t.display(), e.getValue()), t.color())
+                    .append(Component.text("  " + t.symptom() + " — cure: " + t.cureId(), FAINT)));
+        }
     }
 
     /**
@@ -296,6 +319,11 @@ public final class ExtractionCommand {
     private void distill(Player player) {
         Vial v = locateVial(player);
         if (v == null) { noVial(player); return; }
+        if (v.state().anyTaintBlocksDistill()) {
+            player.sendMessage(msg("The pot's too hot to distill — quench the Fever first (add snowball).",
+                    NamedTextColor.RED));
+            return;
+        }
         if (!consumeEnkephalin(player, 1)) {
             player.sendMessage(msg("Out of Enkephalin — the Centrifuge burns 1 per pass. Draw more: /cogito fuel",
                     NamedTextColor.RED));

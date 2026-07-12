@@ -23,6 +23,8 @@ public record Reagent(
         double chargeScale,  // 1.0 = none; < 1 dilutes all charge (solvents)
         double noiseScale,   // 1.0 = none; < 1 washes accumulated noise (milk)
         int flux,            // Flux charges granted (Honeycomb) — dampens opposition on following adds
+        Inflict inflicts,    // nullable — a taint this reagent may cause on add
+        java.util.Set<Taint> cures, // taints this reagent clears cleanly (a remedy)
         String source) {     // lectern grind text
 
     /** Reagent purity tiers: the ceiling each permits and how failure-prone it is to handle. */
@@ -51,6 +53,11 @@ public record Reagent(
     /** A volatile magnitude roll: on each add, roll {@code [min,max]} into {@code sin}. */
     public record Roll(Sin sin, double min, double max) {}
 
+    /** A taint this reagent can inflict on add, with its probability. */
+    public record Inflict(Taint taint, double chance) {}
+
+    public boolean cures(Taint t) { return cures != null && cures.contains(t); }
+
     /** The purity this reagent caps the batch at (its tier's ceiling). */
     public double tierCeiling() { return tier.ceiling(); }
 
@@ -77,6 +84,8 @@ public record Reagent(
         private double chargeScale = 1.0;
         private double noiseScale = 1.0;
         private int flux = 0;
+        private Inflict inflicts = null;
+        private final java.util.EnumSet<Taint> cures = java.util.EnumSet.noneOf(Taint.class);
         private String source = "";
 
         private Builder(String id, String display) {
@@ -92,10 +101,13 @@ public record Reagent(
         public Builder chargeScale(double f) { this.chargeScale = f; return this; }
         public Builder noiseScale(double f) { this.noiseScale = f; return this; }
         public Builder flux(int charges) { this.flux = charges; return this; }
+        public Builder inflicts(Taint t, double chance) { this.inflicts = new Inflict(t, chance); return this; }
+        public Builder cures(Taint... ts) { for (Taint t : ts) cures.add(t); return this; }
         public Builder source(String src) { this.source = src; return this; }
 
         public Reagent build() {
-            return new Reagent(id, display, delta, contam, stab, tier, roll, chargeScale, noiseScale, flux, source);
+            return new Reagent(id, display, delta, contam, stab, tier, roll, chargeScale, noiseScale, flux,
+                    inflicts, cures.isEmpty() ? null : java.util.EnumSet.copyOf(cures), source);
         }
     }
 }

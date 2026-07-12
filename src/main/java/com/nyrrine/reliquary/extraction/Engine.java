@@ -53,8 +53,13 @@ public final class Engine {
     /** A single vial's volume ceiling — you run out of flask (anti-spam guard #4). Bigger = blend vials. */
     public static final double VIAL_CAP = 120.0;
 
+    /** Chance an opposed pair (both shares ≥ this) sparks Dissonance on an add. */
+    public static final double DISSONANCE_SHARE = 20.0;
+    public static final double DISSONANCE_CHANCE = 0.25;
+
     /** Outcome of a single reagent addition, for the station to narrate. */
-    public record AddResult(boolean full, boolean stepFailed, boolean breached, double stabilityAfter) {}
+    public record AddResult(boolean full, boolean stepFailed, boolean breached, double stabilityAfter,
+                            Taint inflicted, java.util.Set<Taint> cured) {}
 
     /**
      * Add a reagent to a pot (the Censer operation). Mutates {@code pot}. Handling contamination and the
@@ -67,10 +72,17 @@ public final class Engine {
      */
     public static AddResult addReagent(PotState pot, Reagent r, RandomGenerator rng) {
         if (pot.titer() >= VIAL_CAP && addsVolume(r)) {
-            return new AddResult(true, false, pot.stability() <= 0.0, pot.stability());
+            return new AddResult(true, false, pot.stability() <= 0.0, pot.stability(), null, java.util.Set.of());
         }
         double stabilityGoingIn = pot.stability();
         pot.incrementAdds();
+
+        // Remedies act even on a "wasted" handling: applying a cure clears its taint cleanly. Do this first so
+        // a cure always works, and note which taints it lifted.
+        java.util.Set<Taint> cured = new java.util.HashSet<>();
+        for (Taint t : Taint.values()) {
+            if (r.cures(t) && pot.hasTaint(t)) { pot.clearTaint(t); cured.add(t); }
+        }
 
         // Handling: every touch of the volatile pot dirties it a little (escalating). This lands whether or
         // not the reagent enters cleanly — you disturbed the batch either way.
@@ -81,6 +93,7 @@ public final class Engine {
         double pFail = STEP_BASE * (1.0 - stabilityGoingIn / 100.0) * r.failFactor();
         boolean failed = rng.nextDouble() < pFail;
 
+        Taint inflicted = null;
         if (failed) {
             // Slipped — the reagent never entered the pot. None of its own effects apply (no composition,
             // no contamination, no ceiling cap, no stability cost); you eat only the fumble's toll.
@@ -95,13 +108,25 @@ public final class Engine {
             if (r.flux() > 0) pot.addFluxCharges(r.flux()); // Honeycomb: mediates opposition on coming adds
             if (r.chargeScale() != 1.0) pot.scaleCharge(r.chargeScale()); // solvent dilution
             applyDelta(pot, r, rng);
+
+            // The reagent may taint the batch (only on a clean add — a slipped reagent never entered).
+            if (r.inflicts() != null && rng.nextDouble() < r.inflicts().chance()) {
+                pot.inflict(r.inflicts().taint());
+                inflicted = r.inflicts().taint();
+            }
         }
 
         // Opposition drain — the opposed pairs now coexisting bleed stability every touch.
         applyOppositionDrain(pot, OPPOSITION_DRAIN);
 
+        // A pot straddling an opposition bridge can spark Dissonance.
+        if (inflicted == null && !pot.hasTaint(Taint.DISSONANCE) && sparksDissonance(pot, rng)) {
+            pot.inflict(Taint.DISSONANCE);
+            inflicted = Taint.DISSONANCE;
+        }
+
         boolean breached = pot.stability() <= 0.0;
-        return new AddResult(false, failed, breached, pot.stability());
+        return new AddResult(false, failed, breached, pot.stability(), inflicted, cured);
     }
 
     /** Whether a reagent contributes positive charge (so it counts against the vial cap). */
@@ -140,17 +165,52 @@ public final class Engine {
         pot.addStability(-drain);
     }
 
+    /** Whether the pot straddles an opposition bridge hard enough to risk Dissonance this add. */
+    private static boolean sparksDissonance(PotState pot, RandomGenerator rng) {
+        SinProfile p = pot.profile();
+        for (Sin.Bridge b : Sin.bridges()) {
+            if (p.get(b.a()) >= DISSONANCE_SHARE && p.get(b.b()) >= DISSONANCE_SHARE) {
+                return rng.nextDouble() < DISSONANCE_CHANCE;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Advance active taints by {@code dtSeconds} (the station/testbed ticker): apply each taint's per-second
+     * harm, then expire any whose timer ran out — locking in its permanent scar. Returns the taints that just
+     * scarred, for the caller to announce. Mutates {@code pot}.
+     */
+    public static java.util.Set<Taint> tickTaints(PotState pot, double dtSeconds) {
+        java.util.Set<Taint> scarred = new java.util.HashSet<>();
+        for (Taint t : new java.util.ArrayList<>(pot.taints().keySet())) {
+            if (t.perTickStab() != 0.0) pot.addStability(t.perTickStab() * dtSeconds);
+            if (t.perTickNoise() != 0.0) pot.addNoise(t.perTickNoise() * dtSeconds);
+            double remaining = pot.taints().get(t) - dtSeconds;
+            if (remaining <= 0.0) {
+                t.applyScar(pot);   // untreated in time → permanent scar sets in
+                pot.clearTaint(t);
+                scarred.add(t);
+            } else {
+                pot.setTaintTime(t, remaining);
+            }
+        }
+        return scarred;
+    }
+
     /**
      * Distill (the Centrifuge): scrub a fraction of the noise with diminishing returns per pass — but it
      * concentrates, boiling off {@link #DISTILL_VOLUME_LOSS} of the volume each pass, so over-distilling
      * shrinks the batch below the volume gate. Never touches the ceiling (can't wash dirt into a standard)
      * and never removes a named taint. Costs Enkephalin (charged by the caller). Mutates {@code pot}.
      */
-    public static void distill(PotState pot) {
+    public static boolean distill(PotState pot) {
+        if (pot.anyTaintBlocksDistill()) return false; // Fever must be quenched first
         double eff = Math.pow(DISTILL_DECAY, pot.distillPasses());
         pot.setNoise(pot.noise() * (1.0 - DISTILL_FRACTION * eff)); // purity up (diminishing per pass)
         pot.scaleCharge(1.0 - DISTILL_VOLUME_LOSS);                 // ...but it boils off volume (concentration)
         pot.incrementDistillPasses();
+        return true;
     }
 
     /**

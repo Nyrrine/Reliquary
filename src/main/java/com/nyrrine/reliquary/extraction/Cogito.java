@@ -41,6 +41,7 @@ public final class Cogito {
     private static final NamespacedKey ADDS      = key("cogito_adds");
     private static final NamespacedKey PASSES    = key("cogito_distill_passes");
     private static final NamespacedKey FLUX      = key("cogito_flux");
+    private static final NamespacedKey TAINTS    = key("cogito_taints");
     private static final NamespacedKey[] CHARGE  = new NamespacedKey[Sin.COUNT];
 
     static {
@@ -91,6 +92,7 @@ public final class Cogito {
         pdc.set(ADDS,      PersistentDataType.INTEGER, state.adds());
         pdc.set(PASSES,    PersistentDataType.INTEGER, state.distillPasses());
         pdc.set(FLUX,      PersistentDataType.INTEGER, state.fluxCharges());
+        pdc.set(TAINTS,    PersistentDataType.STRING, encodeTaints(state));
 
         style(meta, state);
         item.setItemMeta(meta);
@@ -113,6 +115,7 @@ public final class Cogito {
         state.setAdds(pdc.getOrDefault(ADDS, PersistentDataType.INTEGER, 0));
         state.setDistillPasses(pdc.getOrDefault(PASSES, PersistentDataType.INTEGER, 0));
         state.setFluxCharges(pdc.getOrDefault(FLUX, PersistentDataType.INTEGER, 0));
+        decodeTaints(state, pdc.getOrDefault(TAINTS, PersistentDataType.STRING, ""));
         return state;
     }
 
@@ -125,6 +128,10 @@ public final class Cogito {
         Grade grade = state.grade();
         // A blank vial has no material, so its "purity" is meaningless — render it dim and empty.
         Color tint = blank ? greenFor(0.0) : greenFor(purity);
+        // A taint overrides the vitals: the worst affliction pulls the tint toward its signal hue, so you SEE
+        // something's wrong before you assay.
+        Taint worst = state.worstTaint();
+        if (!blank && worst != null) tint = blendToward(tint, worst.rgb(), 0.6);
 
         meta.setColor(tint);
         meta.addItemFlags(ItemFlag.HIDE_ADDITIONAL_TOOLTIP); // suppress the vanilla "no effects" line
@@ -156,10 +163,48 @@ public final class Cogito {
         out.add(line(String.format("Purity  %.1f%%", purity), BODY));
         out.add(line(String.format("Stability  %d / 100", Math.round(state.stability())), BODY));
         out.add(line(String.format("Volume  %d", Math.round(state.titer())), BODY));
+        if (!state.taints().isEmpty()) {
+            out.add(Component.empty());
+            for (var e : state.taints().entrySet()) {
+                Taint t = e.getKey();
+                out.add(line(String.format("⚠ %s (%.0fs) — cure: %s",
+                        t.display(), e.getValue(), t.cureId()), t.color()));
+            }
+        }
         out.add(Component.empty());
         out.add(line("Composition unassayed.", FAINT, true));
         out.add(line("Assay at a lectern to reveal.", FAINT, true));
         return out;
+    }
+
+    // ---- taint serialization -------------------------------------------------------
+
+    private static String encodeTaints(PotState state) {
+        if (state.taints().isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (var e : state.taints().entrySet()) {
+            if (sb.length() > 0) sb.append(';');
+            sb.append(e.getKey().name()).append(':').append(String.format("%.2f", e.getValue()));
+        }
+        return sb.toString();
+    }
+
+    private static void decodeTaints(PotState state, String encoded) {
+        if (encoded == null || encoded.isBlank()) return;
+        for (String part : encoded.split(";")) {
+            String[] kv = part.split(":");
+            if (kv.length != 2) continue;
+            Taint t = Taint.byId(kv[0]);
+            if (t == null) continue;
+            try { state.setTaintTime(t, Double.parseDouble(kv[1])); } catch (NumberFormatException ignored) {}
+        }
+    }
+
+    /** Pull a base RGB {@code frac} of the way toward a target hue (0 = base, 1 = fully the target). */
+    private static Color blendToward(Color base, int targetRgb, double frac) {
+        int tr = (targetRgb >> 16) & 0xFF, tg = (targetRgb >> 8) & 0xFF, tb = targetRgb & 0xFF;
+        return Color.fromRGB(lerp(base.getRed(), tr, frac), lerp(base.getGreen(), tg, frac),
+                             lerp(base.getBlue(), tb, frac));
     }
 
     private static Component line(String text, TextColor color) { return line(text, color, false); }
