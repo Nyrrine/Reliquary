@@ -7,9 +7,10 @@ import java.util.Map;
 
 /**
  * The catalyst forge recipes — what grind-gated sub-components each weapon's signature-lock costs (§15/§16).
- * Rarity scales with grade: a ZAYIN lock is a quick 1–2 part forge; a WAW is a multi-component sub-project
- * (Solemn Lament = Bell + Pufferfish + White Candles + Chiseled Quartz + a pile of Lapis). Components are
- * plain vanilla items you grind for — the difficulty is <b>acquisition</b>, not luck.
+ * Rarity scales with grade: a ZAYIN lock is a quick 2-part forge; a WAW is a 4-component sub-project. Every
+ * material is globally unique — no vanilla item appears in more than one weapon's recipe — so the pool is a
+ * wide, deliberately arbitrary spread of blocks, plants, mob drops and oddments. The difficulty is
+ * <b>acquisition</b>, not luck.
  */
 public final class Catalysts {
 
@@ -30,72 +31,54 @@ public final class Catalysts {
     }
 
     static {
-        // ---- ZAYIN — a quick forge (2 types, small counts, enkephalin 2) ----
-        recipe("penitence", 2, Material.FEATHER, 1, Material.REDSTONE, 2);
-        // Soda — Lust/Gluttony: sweet fizz and gut. Honey + slime.
-        recipe("soda", 2, Material.HONEY_BOTTLE, 2, Material.SLIME_BALL, 3);
+        // Owner's directive: drop strict sin-theming, go for "the most random blocks" — every material below is
+        // used by EXACTLY ONE recipe across the whole roster (a test enforces global uniqueness). Counts still
+        // scale by grade so a WAW forge is a real grind, but the components are a wide, arbitrary vanilla spread.
 
-        // ---- TETH — a couple of parts, one grind-gate (enkephalin 4) ----
-        recipe("beak", 4, Material.FEATHER, 2, Material.REDSTONE, 6, Material.GOLD_NUGGET, 2);
-        // Fourth Match Flame — Wrath/Lust: a struck match, a warm ache. Blaze + honeycomb.
-        recipe("fourth_match_flame", 4, Material.BLAZE_POWDER, 4, Material.FIRE_CHARGE, 3,
-                Material.HONEYCOMB, 2);
-        // Red Eyes — Wrath/Pride/Gluttony: bloodshot fury, gold glare, gorged flesh.
-        recipe("red_eyes", 4, Material.BLAZE_ROD, 3, Material.GOLD_NUGGET, 4, Material.ROTTEN_FLESH, 6);
-        // Regret — Wrath/Gloom: hot anger cooling into a blue sink. Redstone + ink.
-        recipe("regret", 4, Material.REDSTONE, 5, Material.MAGMA_CREAM, 3, Material.INK_SAC, 4);
-        // Logging — Gluttony/Sloth/Wrath: a bread-fed grind that never stops. Bread + soul sand + redstone.
-        recipe("logging", 4, Material.BREAD, 6, Material.SOUL_SAND, 3, Material.REDSTONE, 2);
-        // Wrist Cutter — Gloom/Sloth: a slow blue despair. Lapis + cobweb.
-        recipe("wrist_cutter", 4, Material.LAPIS_LAZULI, 5, Material.COBWEB, 3);
-        // Christmas — Gluttony/Lust: a gorged, sugared feast. Cake + pumpkin pie + glow berries.
-        recipe("christmas", 4, Material.CAKE, 2, Material.PUMPKIN_PIE, 3, Material.GLOW_BERRIES, 4);
+        // ---- ZAYIN — a quick forge (2 types, counts 1–3, enkephalin 2) ----
+        recipe("penitence", 2, Material.FEATHER, 2, Material.BELL, 1);
+        recipe("soda", 2, Material.WHITE_CANDLE, 3, Material.ORANGE_CANDLE, 2);
 
-        // ---- HE — a small sub-project (3–4 types, ≥1 grind-gate, enkephalin 8) ----
-        recipe("our_galaxy", 8, Material.PUFFERFISH, 4, Material.CHORUS_FRUIT, 3,
-                Material.AMETHYST_SHARD, 2, Material.LAPIS_LAZULI, 8);
-        // Grinder Mk4 — Gluttony/Wrath: an insatiable weathered engine. Gate: OXIDIZED_COPPER.
-        recipe("grinder_mk4", 8, Material.OXIDIZED_COPPER, 2, Material.SLIME_BALL, 8,
-                Material.ROTTEN_FLESH, 10, Material.BLAZE_POWDER, 6);
-        // Crimson Scar — Wrath/Pride: a burning, gilded wound. Gate: CHISELED_QUARTZ_BLOCK.
-        recipe("crimson_scar", 8, Material.CHISELED_QUARTZ_BLOCK, 2, Material.BLAZE_ROD, 6,
-                Material.GOLD_INGOT, 4, Material.REDSTONE, 8);
-        // Cobalt Scar — Envy/Wrath/Pride: an end-touched, jealous edge. Gate: ENDER_PEARL.
-        recipe("cobalt_scar", 8, Material.ENDER_PEARL, 2, Material.PRISMARINE_CRYSTALS, 6,
-                Material.BLAZE_POWDER, 6, Material.GOLD_INGOT, 3);
-        // Harvest — Sloth/Envy/Gloom: a listless, envious reaping. Gate: PUFFERFISH.
-        recipe("harvest", 8, Material.PUFFERFISH, 4, Material.SOUL_SAND, 6,
-                Material.LAPIS_LAZULI, 8, Material.COBWEB, 4);
-        // Life for a Daredevil — Lust/Pride/Wrath: a gilded, reckless thrill. Gate: CHISELED_QUARTZ_BLOCK.
-        recipe("life_for_a_daredevil", 8, Material.CHISELED_QUARTZ_BLOCK, 2, Material.GLOW_BERRIES, 8,
-                Material.GOLD_INGOT, 4, Material.BLAZE_POWDER, 6);
-        // Laetitia — Lust/Gluttony: a honeyed, gorging joy. Gate: PUFFERFISH.
-        recipe("laetitia", 8, Material.PUFFERFISH, 3, Material.HONEY_BOTTLE, 8,
-                Material.HONEYCOMB, 6, Material.PUMPKIN_PIE, 4);
+        // ---- TETH — a couple of parts, one grind-gate (3 types, counts 2–6, enkephalin 4) ----
+        recipe("beak", 4, Material.PURPLE_CANDLE, 2, Material.PUFFERFISH, 3, Material.ENDER_PEARL, 2);
+        recipe("fourth_match_flame", 4, Material.OXIDIZED_COPPER, 4, Material.TUFF, 5, Material.CALCITE, 6);
+        recipe("red_eyes", 4, Material.DRIPSTONE_BLOCK, 3, Material.MOSS_BLOCK, 4, Material.PACKED_MUD, 5);
+        recipe("regret", 4, Material.MANGROVE_ROOTS, 4, Material.SPORE_BLOSSOM, 2, Material.BIG_DRIPLEAF, 3);
+        recipe("logging", 4, Material.AZALEA, 4, Material.GLOW_LICHEN, 5, Material.SHROOMLIGHT, 2);
+        recipe("wrist_cutter", 4, Material.WEEPING_VINES, 3, Material.TWISTING_VINES, 4,
+                Material.CRIMSON_FUNGUS, 5);
+        recipe("christmas", 4, Material.WARPED_FUNGUS, 3, Material.BASALT, 6, Material.SMOOTH_BASALT, 4);
 
-        // ---- WAW — the multi-component grind (4–5 types, TWO+ grind-gates, enkephalin 16) ----
-        recipe("solemn_lament", 16, Material.BELL, 1, Material.PUFFERFISH, 6,
-                Material.WHITE_CANDLE, 4, Material.CHISELED_QUARTZ_BLOCK, 2, Material.LAPIS_LAZULI, 16);
-        recipe("sword_of_tears", 16, Material.CHISELED_QUARTZ_BLOCK, 3, Material.INK_SAC, 16,
-                Material.AMETHYST_SHARD, 4, Material.ENDER_PEARL, 2);
-        // Lamp — Pride/Gloom/Sloth: a proud light gone to verdigris and dusk. Gates: CHISELED_QUARTZ_BLOCK + OXIDIZED_COPPER.
-        recipe("lamp", 16, Material.CHISELED_QUARTZ_BLOCK, 3, Material.OXIDIZED_COPPER, 4,
-                Material.GOLD_INGOT, 8, Material.LAPIS_LAZULI, 12, Material.SOUL_SAND, 6);
-        // Magic Bullet — Pride/Wrath: a gilded round, a powder charge. Gates: CHISELED_QUARTZ_BLOCK + OXIDIZED_COPPER.
-        recipe("magic_bullet", 16, Material.CHISELED_QUARTZ_BLOCK, 3, Material.OXIDIZED_COPPER, 3,
-                Material.GOLD_INGOT, 10, Material.BLAZE_POWDER, 12, Material.FIRE_CHARGE, 8);
-        // Love and Hate — Lust/Envy: honey and end-pearl covetousness. Gates: PUFFERFISH + ENDER_PEARL.
-        recipe("love_and_hate", 16, Material.PUFFERFISH, 6, Material.ENDER_PEARL, 3,
-                Material.HONEY_BOTTLE, 12, Material.GLOW_BERRIES, 10, Material.PRISMARINE_CRYSTALS, 8);
-        // Green Stem — Gluttony/Envy/Lust: a gorging, jealous, sweet vine. Gates: PUFFERFISH + ENDER_PEARL.
-        recipe("green_stem", 16, Material.PUFFERFISH, 6, Material.ENDER_PEARL, 2,
-                Material.SLIME_BALL, 12, Material.CHORUS_FRUIT, 8, Material.HONEYCOMB, 8);
-        // Screaming Wedge — Gloom/Wrath/Sloth: a tolling, furious, weathered grief. Gates: BELL + OXIDIZED_COPPER.
-        recipe("screaming_wedge", 16, Material.BELL, 2, Material.OXIDIZED_COPPER, 4,
-                Material.REDSTONE, 12, Material.INK_SAC, 10, Material.SOUL_SAND, 8);
-        // Heaven — Pride/Wrath: an ascendant gilded blaze. Gates: CHISELED_QUARTZ_BLOCK + ENDER_PEARL.
-        recipe("heaven", 16, Material.CHISELED_QUARTZ_BLOCK, 4, Material.ENDER_PEARL, 4,
-                Material.GOLD_INGOT, 16, Material.DIAMOND, 3, Material.BLAZE_ROD, 6);
+        // ---- HE — a small sub-project (3 types, counts 4–8, enkephalin 8) ----
+        recipe("our_galaxy", 8, Material.BLACKSTONE, 6, Material.GILDED_BLACKSTONE, 4,
+                Material.QUARTZ_BRICKS, 5);
+        recipe("grinder_mk4", 8, Material.SMOOTH_QUARTZ, 6, Material.PRISMARINE_BRICKS, 5,
+                Material.DARK_PRISMARINE, 4);
+        recipe("crimson_scar", 8, Material.SEA_LANTERN, 4, Material.SPONGE, 6, Material.DRIED_KELP, 8);
+        recipe("cobalt_scar", 8, Material.NAUTILUS_SHELL, 4, Material.HEART_OF_THE_SEA, 4,
+                Material.TUBE_CORAL, 6);
+        recipe("harvest", 8, Material.BRAIN_CORAL, 5, Material.BUBBLE_CORAL, 6, Material.FIRE_CORAL, 7);
+        recipe("life_for_a_daredevil", 8, Material.HORN_CORAL, 5, Material.BEE_NEST, 4,
+                Material.SWEET_BERRIES, 8);
+        recipe("laetitia", 8, Material.CHORUS_FLOWER, 4, Material.POPPED_CHORUS_FRUIT, 6, Material.END_ROD, 5);
+
+        // ---- WAW — the multi-component grind (4 types, counts 6–16, enkephalin 16) ----
+        recipe("solemn_lament", 16, Material.PURPUR_BLOCK, 8, Material.PURPUR_PILLAR, 6,
+                Material.SHULKER_SHELL, 6, Material.DRAGON_BREATH, 8);
+        recipe("sword_of_tears", 16, Material.PHANTOM_MEMBRANE, 10, Material.GHAST_TEAR, 6,
+                Material.MAGMA_BLOCK, 12, Material.CRYING_OBSIDIAN, 8);
+        recipe("lamp", 16, Material.LODESTONE, 6, Material.HONEY_BLOCK, 10, Material.SLIME_BLOCK, 12,
+                Material.PEARLESCENT_FROGLIGHT, 6);
+        recipe("magic_bullet", 16, Material.OCHRE_FROGLIGHT, 8, Material.VERDANT_FROGLIGHT, 8,
+                Material.AMETHYST_CLUSTER, 6, Material.BUDDING_AMETHYST, 6);
+        recipe("love_and_hate", 16, Material.POINTED_DRIPSTONE, 8, Material.ROOTED_DIRT, 12,
+                Material.TURTLE_EGG, 6, Material.TROPICAL_FISH, 10);
+        recipe("green_stem", 16, Material.PUMPKIN_PIE, 8, Material.GLOW_BERRIES, 12,
+                Material.FERMENTED_SPIDER_EYE, 6, Material.RABBIT_FOOT, 6);
+        recipe("screaming_wedge", 16, Material.RABBIT_HIDE, 10, Material.NETHER_WART_BLOCK, 8,
+                Material.WARPED_WART_BLOCK, 8, Material.CRIMSON_NYLIUM, 12);
+        recipe("heaven", 16, Material.WARPED_NYLIUM, 12, Material.SOUL_LANTERN, 8, Material.COPPER_BULB, 10,
+                Material.LANTERN, 8);
     }
 
     /** The recipe for a weapon's catalyst, or {@code null} if none is defined yet. */
