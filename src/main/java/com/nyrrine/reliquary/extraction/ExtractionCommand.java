@@ -457,14 +457,6 @@ public final class ExtractionCommand {
     }
 
     private void destroyVial(Player player, Vial v) {
-        ItemStack item = v.item();
-        if (item.getAmount() > 1) {
-            // Only the one vial being worked ruptures — the rest of a blank stack survives.
-            item.setAmount(item.getAmount() - 1);
-            if (v.slot() < 0) player.getInventory().setItemInMainHand(item);
-            else player.getInventory().setItem(v.slot(), item);
-            return;
-        }
         if (v.slot() < 0) player.getInventory().setItemInMainHand(null);
         else player.getInventory().setItem(v.slot(), null);
     }
@@ -887,22 +879,6 @@ public final class ExtractionCommand {
     }
 
     /** Float the most-likely weapon above the Well for a few seconds — the item inside the ominous chamber. */
-    private void revealInChamber(org.bukkit.Location wellLoc, ItemStack item) {
-        org.bukkit.Location at = wellLoc.clone().add(0.5, 1.4, 0.5);
-        org.bukkit.entity.ItemDisplay disp = wellLoc.getWorld().spawn(at, org.bukkit.entity.ItemDisplay.class, d -> {
-            d.setItemStack(item);
-            d.setBillboard(org.bukkit.entity.Display.Billboard.CENTER);
-            d.setPersistent(false);
-            d.setBrightness(new org.bukkit.entity.Display.Brightness(15, 15));
-            var tr = d.getTransformation();
-            tr.getScale().set(0.9f);
-            d.setTransformation(tr);
-        });
-        wellLoc.getWorld().spawnParticle(org.bukkit.Particle.PORTAL, at, 30, 0.3, 0.3, 0.3, 0.1);
-        wellLoc.getWorld().playSound(at, Sound.BLOCK_CONDUIT_AMBIENT, 0.7f, 0.7f);
-        org.bukkit.Bukkit.getScheduler().runTaskLater(plugin, () -> { if (disp.isValid()) disp.remove(); }, 120L);
-    }
-
     /** Give an item, dropping any overflow at the player's feet so a full inventory never eats it. */
     private void giveOrDrop(Player player, ItemStack item) {
         for (ItemStack leftover : player.getInventory().addItem(item).values()) {
@@ -1450,9 +1426,6 @@ public final class ExtractionCommand {
 
         switch (r.outcome()) {
             case MANIFEST -> onManifest(player, r);
-            case NEAR_MISS -> player.sendMessage(msg("Near-miss — the Well settles on "
-                    + (r.weapon() != null ? r.weapon().display() : "nothing")
-                    + " (" + pct(r.match()) + " match). No weapon this time.", NamedTextColor.YELLOW));
             case BREACH -> player.sendMessage(msg(String.format(
                     "BREACH — the Well ruptures. A %s-class Abnormality would climb out. "
                     + "(your pour: %s match, %s, stability %d) (Combat: coming soon.)",
@@ -1518,20 +1491,10 @@ public final class ExtractionCommand {
 
     /** Persist a mutated vial back to wherever it lives. */
     private void writeVial(Player player, Vial v) {
-        ItemStack item = v.item();
-        if (item.getAmount() > 1) {
-            // Blank vials share identical meta and stack; writing the charged state onto the whole stack
-            // would duplicate the charge across every unit. Split off exactly one, hand back the charged
-            // single, and leave the rest of the stack as untouched blanks.
-            item.setAmount(item.getAmount() - 1);
-            if (v.slot() < 0) player.getInventory().setItemInMainHand(item);
-            else player.getInventory().setItem(v.slot(), item);
-            giveOrDrop(player, Cogito.create(v.state()));
-            return;
-        }
-        Cogito.write(item, v.state());
-        if (v.slot() < 0) player.getInventory().setItemInMainHand(item);
-        else player.getInventory().setItem(v.slot(), item);
+        // Cogito is a POTION (max stack 1) so a located vial is always a single item — write it in place.
+        Cogito.write(v.item(), v.state());
+        if (v.slot() < 0) player.getInventory().setItemInMainHand(v.item());
+        else player.getInventory().setItem(v.slot(), v.item());
     }
 
     private void noVial(Player player) {

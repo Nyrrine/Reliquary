@@ -12,8 +12,6 @@ import java.util.random.RandomGenerator;
  * <ol>
  *   <li>{@link Outcome#MANIFEST} — you get the weapon. Certified (catalyst-locked at Primary Standard) is a
  *       guaranteed manifest of the catalyst's target.</li>
- *   <li>{@link Outcome#NEAR_MISS} — no weapon; the nearest reachable neighbour, floored to your grade band
- *       (never a lucky tier-up).</li>
  *   <li>{@link Outcome#BREACH} — the Well ruptures and an Abnormality climbs out, scaled to the grade you
  *       reached for (loading a WAW catalyst onto crude cogito can breach a WAW Abnormality).</li>
  * </ol>
@@ -45,8 +43,8 @@ public final class WellRoll {
     public static final double BREACH_W_STAB = 0.9;      // weight on (1 - stability)^2
     public static final double BREACH_W_RESIDUE = 0.30;  // Well spray-and-pray taint
 
-    /** Which rung a pour resolved to. (NEAR_MISS is retained for compatibility but no longer produced.) */
-    public enum Outcome { MANIFEST, NEAR_MISS, BREACH }
+    /** Which rung a pour resolved to. */
+    public enum Outcome { MANIFEST, BREACH }
 
     /**
      * The result of a pour.
@@ -197,6 +195,4 @@ public final class WellRoll {
         }
         return pool.get(pool.size() - 1).weapon();
     }
-
-    private static double clamp01(double v) { return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v); }
 }

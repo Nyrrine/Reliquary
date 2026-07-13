@@ -102,11 +102,6 @@ public final class RefinedReagent {
         var cmd = meta.getCustomModelDataComponent();
         cmd.setStrings(List.of("extraction/reagent/" + reagentId));
         meta.setCustomModelDataComponent(cmd);
-        // Potion-carrier reagents (draughts) get a neutral base + hidden effect lines so no vanilla clutter shows.
-        if (meta instanceof org.bukkit.inventory.meta.PotionMeta pm) {
-            pm.setBasePotionType(org.bukkit.potion.PotionType.WATER);
-        }
-        meta.addItemFlags(org.bukkit.inventory.ItemFlag.HIDE_ADDITIONAL_TOOLTIP);
         item.setItemMeta(meta);
         return item;
     }
@@ -185,31 +180,6 @@ public final class RefinedReagent {
     /** The gated item a Standard reagent's recipe demands. */
     public static Material gateFor(String standardId) {
         return STANDARD_GATE.getOrDefault(standardId, Material.WEATHERED_COPPER);
-    }
-
-    /** Human-readable crafting-recipe lines for a refined reagent id (empty if it isn't one). */
-    public static List<String> recipeLines(String reagentId) {
-        for (Sin s : LADDER.keySet()) {
-            String[] l = LADDER.get(s);
-            if (l[0].equals(reagentId)) { // Pure
-                return List.of(CONCENTRATE_PER_PURE + "× " + s.display() + " Concentrate",
-                        "1× Amethyst Shard", "1× Iron Ingot");
-            }
-            if (l[1].equals(reagentId)) { // Standard
-                Reagent pure = Reagents.byId(l[0]);
-                Material gate = STANDARD_GATE.getOrDefault(reagentId, Material.WEATHERED_COPPER);
-                return List.of(PURE_PER_STANDARD + "× " + (pure != null ? pure.display() : l[0]),
-                        "1× " + prettyMat(gate));
-            }
-        }
-        return List.of();
-    }
-
-    private static String prettyMat(Material m) {
-        String[] parts = m.name().toLowerCase(Locale.ROOT).split("_");
-        StringBuilder sb = new StringBuilder();
-        for (String p : parts) sb.append(Character.toUpperCase(p.charAt(0))).append(p.substring(1)).append(' ');
-        return sb.toString().trim();
     }
 
     /** Register (idempotently) the Pure and Standard refining recipes for every sin's ladder. */

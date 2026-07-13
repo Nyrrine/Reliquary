@@ -88,12 +88,11 @@ public final class Catalysts {
         recipe("love_and_hate", 24, Material.POINTED_DRIPSTONE, 14, Material.ROOTED_DIRT, 18,
                 Material.TURTLE_EGG, 10, Material.TROPICAL_FISH, 16,
                 Material.HANGING_ROOTS, 12, Material.TURTLE_SCUTE, 8);
-        recipe("green_stem", 24, Material.PUMPKIN_PIE, 14, Material.GLOW_BERRIES, 18,
-                Material.FERMENTED_SPIDER_EYE, 10, Material.RABBIT_FOOT, 10,
-                Material.NETHER_WART, 14, Material.MELON_SLICE, 16);
-        recipe("screaming_wedge", 24, Material.RABBIT_HIDE, 16, Material.SUSPICIOUS_STEW, 12,
-                Material.WARPED_WART_BLOCK, 14, Material.CRIMSON_NYLIUM, 18,
-                Material.NETHER_WART_BLOCK, 12, Material.WARPED_ROOTS, 14);
+        // green_stem + screaming_wedge are HE (not WAW) — HE-sized recipes (5 types, counts 6–12, enkephalin 12).
+        recipe("green_stem", 12, Material.PUMPKIN_PIE, 8, Material.GLOW_BERRIES, 12,
+                Material.FERMENTED_SPIDER_EYE, 8, Material.RABBIT_FOOT, 6, Material.MELON_SLICE, 10);
+        recipe("screaming_wedge", 12, Material.RABBIT_HIDE, 10, Material.SUSPICIOUS_STEW, 8,
+                Material.WARPED_WART_BLOCK, 10, Material.CRIMSON_NYLIUM, 12, Material.WARPED_ROOTS, 8);
         recipe("heaven", 24, Material.WARPED_NYLIUM, 18, Material.SOUL_LANTERN, 12, Material.COPPER_BULB, 16,
                 Material.LANTERN, 12, Material.GLOWSTONE, 14, Material.SOUL_TORCH, 16);
     }
