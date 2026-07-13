@@ -64,22 +64,25 @@ public final class ExtractionCommand {
      * and {@code a[1]...} its parameters — so both {@code /cogito add x} and {@code /reliquary ext add x}
      * feed the same array shape here.
      */
-    /** Permission for every /cogito command — normal players extract at the crafted stations, not via commands. */
+    /** Permission for the give / brew commands — the read-only lookups below stay open to everyone. */
     public static final String ADMIN_PERM = "reliquary.admin";
+    /** Subcommands any player may use (read-only info; the rest give items or brew via command → admin-only). */
+    public static final List<String> PLAYER_SUBS = List.of("recipes", "track", "untrack", "reagents", "assay");
 
     public void handle(CommandSender sender, String[] a) {
         if (!(sender instanceof Player player)) {
             sender.sendMessage(Component.text("Extraction is a player command.").color(NamedTextColor.RED));
             return;
         }
-        if (!player.hasPermission(ADMIN_PERM)) {
-            player.sendMessage(msg("These are admin testbed commands. Normal extraction is done at the crafted "
-                    + "stations — craft & place them, then right-click.", NamedTextColor.RED));
+        if (a.length < 1) { help(player); return; }
+        String sub = a[0].toLowerCase();
+        if (!PLAYER_SUBS.contains(sub) && !player.hasPermission(ADMIN_PERM)) {
+            player.sendMessage(msg("That's an admin command — normal extraction is at the crafted stations. "
+                    + "You can still use /cogito recipes, track, untrack, reagents, assay.", NamedTextColor.RED));
             return;
         }
-        if (a.length < 1) { help(player); return; }
 
-        switch (a[0].toLowerCase()) {
+        switch (sub) {
             case "vial"     -> giveVial(player);
             case "fuel"     -> giveFuel(player, a);
             case "giveall"  -> giveAll(player, a);
@@ -136,19 +139,26 @@ public final class ExtractionCommand {
     }
 
     /** Tab completion for the extraction subcommands. {@code a[0]} = subcommand, {@code a[1]} = its arg. */
-    public List<String> tabComplete(String[] a) {
-        if (a.length == 1) return filter(SUBS, a[0]);
+    public List<String> tabComplete(String[] a, boolean admin) {
+        if (a.length == 1) return filter(admin ? SUBS : PLAYER_SUBS, a[0]);
         if (a.length == 2) {
+            // Player-open lookups (available to everyone).
             switch (a[0].toLowerCase()) {
-                case "add", "assay"          -> { return filter(reagentIds(), a[1]); }
-                case "pour", "forge", "track" -> { return filter(weaponIds(), a[1]); }
-                case "recipes"               -> { return filter(recipeIds(), a[1]); }
-                case "giveall"               -> { return filter(GIVE_CATS, a[1]); }
-                case "ticket"                -> { return filter(ticketArgs(true), a[1]); }
+                case "recipes" -> { return filter(recipeIds(), a[1]); }
+                case "track"   -> { return filter(weaponIds(), a[1]); }
+                case "assay"   -> { return filter(reagentIds(), a[1]); }
+                default -> { }
+            }
+            if (!admin) return List.of();
+            switch (a[0].toLowerCase()) {
+                case "add"           -> { return filter(reagentIds(), a[1]); }
+                case "pour", "forge" -> { return filter(weaponIds(), a[1]); }
+                case "giveall"       -> { return filter(GIVE_CATS, a[1]); }
+                case "ticket"        -> { return filter(ticketArgs(true), a[1]); }
                 default -> { }
             }
         }
-        if (a.length == 3 && a[0].equalsIgnoreCase("ticket") && a[1].equalsIgnoreCase("add")) {
+        if (admin && a.length == 3 && a[0].equalsIgnoreCase("ticket") && a[1].equalsIgnoreCase("add")) {
             return filter(ticketArgs(false), a[2]);
         }
         return List.of();

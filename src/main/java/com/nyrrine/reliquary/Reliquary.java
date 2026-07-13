@@ -59,8 +59,6 @@ import java.util.List;
  */
 public final class Reliquary extends JavaPlugin implements TabCompleter {
 
-    private static final String PERMISSION = "reliquary.admin";
-
     private WeaponManager weapons;
     private RelicTracker tracker;
     private ExtractionCommand extraction;
@@ -165,12 +163,8 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
                              @NotNull String label, @NotNull String[] args) {
-        if (!sender.hasPermission(PERMISSION)) {
-            // Light red so it stands out in chat.
-            sender.sendMessage(Component.text("Contact Nyrrine if you're supposed to have access to this.")
-                    .color(NamedTextColor.RED));
-            return true;
-        }
+        // No blanket gate — /cogito's open lookups (recipes/track/…) and /reliquary list/help are for everyone;
+        // the give/brew/admin operations are gated individually below and in ExtractionCommand.handle.
 
         // /cogito (aliases /ext /co): args ARE the extraction sub-args directly.
         if (command.getName().equalsIgnoreCase("cogito")) {
@@ -419,13 +413,11 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
     @Override
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command,
                                       @NotNull String alias, @NotNull String[] args) {
-        if (!sender.hasPermission(PERMISSION)) return Collections.emptyList();
-
         boolean admin = sender.hasPermission(com.nyrrine.reliquary.extraction.ExtractionCommand.ADMIN_PERM);
 
-        // /cogito (aliases /ext /co): admin-only command, so its completions are gated too.
+        // /cogito (aliases /ext /co): the completer itself gates admin subs vs the open lookups (recipes/track…).
         if (command.getName().equalsIgnoreCase("cogito")) {
-            return admin ? extraction.tabComplete(args) : Collections.emptyList();
+            return extraction.tabComplete(args, admin);
         }
 
         if (args.length == 1) {
@@ -436,8 +428,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         // /reliquary ext ...: hand the tail (sub-args) to the extraction completer (admin-only).
         if (args[0].equalsIgnoreCase("ext") || args[0].equalsIgnoreCase("extraction")
                 || args[0].equalsIgnoreCase("cogito")) {
-            return admin ? extraction.tabComplete(java.util.Arrays.copyOfRange(args, 1, args.length))
-                    : Collections.emptyList();
+            return extraction.tabComplete(java.util.Arrays.copyOfRange(args, 1, args.length), admin);
         }
         if (!admin && (args[0].equalsIgnoreCase("give") || args[0].equalsIgnoreCase("giveall")
                 || args[0].equalsIgnoreCase("admin") || args[0].equalsIgnoreCase("purge"))) {
