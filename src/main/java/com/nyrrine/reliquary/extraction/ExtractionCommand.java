@@ -64,9 +64,17 @@ public final class ExtractionCommand {
      * and {@code a[1]...} its parameters — so both {@code /cogito add x} and {@code /reliquary ext add x}
      * feed the same array shape here.
      */
+    /** Permission for every /cogito command — normal players extract at the crafted stations, not via commands. */
+    public static final String ADMIN_PERM = "reliquary.admin";
+
     public void handle(CommandSender sender, String[] a) {
         if (!(sender instanceof Player player)) {
             sender.sendMessage(Component.text("Extraction is a player command.").color(NamedTextColor.RED));
+            return;
+        }
+        if (!player.hasPermission(ADMIN_PERM)) {
+            player.sendMessage(msg("These are admin testbed commands. Normal extraction is done at the crafted "
+                    + "stations — craft & place them, then right-click.", NamedTextColor.RED));
             return;
         }
         if (a.length < 1) { help(player); return; }
@@ -506,12 +514,17 @@ public final class ExtractionCommand {
      *  (Enkephalin / Raw Cogito) don't resonate — you don't compost your own output. */
     private int resonanceOf(ItemStack item) {
         if (item == null || Enkephalin.matches(item) || RawCogito.matches(item)) return 0;
+        // A vanilla reagent (memory/emotion items, affinity items) — resonance from its positive sin charge.
         Reagent r = Reagents.byItem(item.getType());
-        if (r == null) return 0;
-        double sum = 0;
-        for (Sin s : Sin.values()) sum += Math.max(0.0, r.delta()[s.index()]);
-        if (r.isVolatile()) sum += r.roll().max();
-        return (int) Math.max(1, Math.round(sum));
+        if (r != null) {
+            double sum = 0;
+            for (Sin s : Sin.values()) sum += Math.max(0.0, r.delta()[s.index()]);
+            if (r.isVolatile()) sum += r.roll().max();
+            return (int) Math.max(1, Math.round(sum));
+        }
+        // A raw sin mob drop (bone, string, leather, gunpowder…) is a sin item too — it resonates a little.
+        if (SinConcentrate.sinOfRaw(item.getType()) != null) return 4;
+        return 0;
     }
 
     private void consumeOneMainHand(Player player, ItemStack held) {

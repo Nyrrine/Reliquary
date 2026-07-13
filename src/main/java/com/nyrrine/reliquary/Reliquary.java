@@ -183,7 +183,14 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
             return true;
         }
 
-        switch (args[0].toLowerCase()) {
+        String sub = args[0].toLowerCase();
+        if ((sub.equals("give") || sub.equals("giveall") || sub.equals("admin") || sub.equals("purge"))
+                && !sender.hasPermission(com.nyrrine.reliquary.extraction.ExtractionCommand.ADMIN_PERM)) {
+            sender.sendMessage(Component.text("Admin only — normal play is at the crafted stations.")
+                    .color(NamedTextColor.RED));
+            return true;
+        }
+        switch (sub) {
             case "list" -> {
                 StringBuilder sb = new StringBuilder("Relics:");
                 for (Weapon w : weapons.all()) sb.append(' ').append(w.id());
@@ -414,18 +421,27 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
                                       @NotNull String alias, @NotNull String[] args) {
         if (!sender.hasPermission(PERMISSION)) return Collections.emptyList();
 
-        // /cogito (aliases /ext /co): args ARE the extraction sub-args.
+        boolean admin = sender.hasPermission(com.nyrrine.reliquary.extraction.ExtractionCommand.ADMIN_PERM);
+
+        // /cogito (aliases /ext /co): admin-only command, so its completions are gated too.
         if (command.getName().equalsIgnoreCase("cogito")) {
-            return extraction.tabComplete(args);
+            return admin ? extraction.tabComplete(args) : Collections.emptyList();
         }
 
         if (args.length == 1) {
-            return filter(List.of("give", "giveall", "admin", "list", "track", "purge", "ext", "help"), args[0]);
+            List<String> subs = new ArrayList<>(List.of("list", "track", "help"));
+            if (admin) subs.addAll(List.of("give", "giveall", "admin", "purge", "ext"));
+            return filter(subs, args[0]);
         }
-        // /reliquary ext ...: hand the tail (sub-args) to the extraction completer.
+        // /reliquary ext ...: hand the tail (sub-args) to the extraction completer (admin-only).
         if (args[0].equalsIgnoreCase("ext") || args[0].equalsIgnoreCase("extraction")
                 || args[0].equalsIgnoreCase("cogito")) {
-            return extraction.tabComplete(java.util.Arrays.copyOfRange(args, 1, args.length));
+            return admin ? extraction.tabComplete(java.util.Arrays.copyOfRange(args, 1, args.length))
+                    : Collections.emptyList();
+        }
+        if (!admin && (args[0].equalsIgnoreCase("give") || args[0].equalsIgnoreCase("giveall")
+                || args[0].equalsIgnoreCase("admin") || args[0].equalsIgnoreCase("purge"))) {
+            return Collections.emptyList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("giveall")) {
             return filter(List.of("relics", "egoequipment", "busego"), args[1]);

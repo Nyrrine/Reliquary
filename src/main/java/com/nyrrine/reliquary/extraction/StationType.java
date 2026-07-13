@@ -20,14 +20,15 @@ import java.util.List;
  */
 public enum StationType {
 
-    FONT      (Material.CAULDRON,          "Font",        Material.PRISMARINE_CRYSTALS, Material.AMETHYST_SHARD),
-    ALEMBIC   (Material.BLAST_FURNACE,     "Alembic",     Material.BLAZE_POWDER,        Material.AMETHYST_SHARD),
-    CENSER    (Material.BREWING_STAND,     "Censer",      Material.GHAST_TEAR,          Material.AMETHYST_SHARD),
-    CENTRIFUGE(Material.GRINDSTONE,        "Centrifuge",  Material.REDSTONE_BLOCK,      Material.AMETHYST_SHARD),
-    MANIFOLD  (Material.CHISELED_BOOKSHELF,"Manifold",    Material.PAPER,               Material.AMETHYST_SHARD),
-    WELL      (Material.CONDUIT,           "Pocket Well", Material.NETHER_STAR,         Material.AMETHYST_SHARD),
-    CRUCIBLE  (Material.SMITHING_TABLE,    "Crucible",    Material.MAGMA_BLOCK,         Material.AMETHYST_SHARD),
-    LECTERN   (Material.LECTERN,           "Assay",       Material.GLOW_INK_SAC,        Material.AMETHYST_SHARD);
+    // Lab-bench builds: a vanilla base block fitted with common lab hardware (iron/redstone/glass/diamond).
+    FONT      (Material.CAULDRON,          "Font",        Material.IRON_BLOCK,  Material.COPPER_BLOCK,   Material.GLASS),
+    ALEMBIC   (Material.BLAST_FURNACE,     "Alembic",     Material.IRON_BLOCK,  Material.GLASS_BOTTLE,   Material.REDSTONE),
+    CENSER    (Material.BREWING_STAND,     "Censer",      Material.IRON_INGOT,  Material.GLASS_BOTTLE,   Material.REDSTONE_BLOCK),
+    CENTRIFUGE(Material.GRINDSTONE,        "Centrifuge",  Material.IRON_BLOCK,  Material.REDSTONE_BLOCK, Material.DIAMOND),
+    MANIFOLD  (Material.CHISELED_BOOKSHELF,"Manifold",    Material.IRON_INGOT,  Material.REDSTONE_BLOCK, Material.GLASS),
+    CRUCIBLE  (Material.SMITHING_TABLE,    "Crucible",    Material.IRON_BLOCK,  Material.DIAMOND,        Material.MAGMA_BLOCK),
+    WELL      (Material.CONDUIT,           "Pocket Well", Material.DIAMOND_BLOCK, Material.IRON_BLOCK,   Material.GLASS),
+    LECTERN   (Material.LECTERN,           "Assay",       Material.IRON_INGOT,  Material.GLASS_PANE,     Material.REDSTONE);
 
     /** PDC tag on a station ITEM, holding the enum name. Blocks are tracked by location in {@link Stations}. */
     public static final NamespacedKey KEY = new NamespacedKey("reliquary", "station");
