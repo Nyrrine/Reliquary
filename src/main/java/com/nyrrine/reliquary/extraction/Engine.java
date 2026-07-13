@@ -347,6 +347,13 @@ public final class Engine {
             inflictRandomAbsentTaint(out, rng);
             if (n >= 5 && rng.nextDouble() < pBlendAil) inflictRandomAbsentTaint(out, rng); // up to a 2nd
         }
+        // Inherit afflictions (min remaining per taint) + flux — a blend must NOT launder taints away.
+        int flux = 0;
+        for (PotState p : pots) {
+            flux = Math.max(flux, p.fluxCharges());
+            for (var e : p.taints().entrySet()) out.taints().merge(e.getKey(), e.getValue(), Math::min);
+        }
+        out.setFluxCharges(flux);
         // The inserted catalyst is inherited — the first target among the blended vials carries forward (count too).
         for (PotState p : pots) if (p.catalystTarget() != null) {
             out.catalystTarget(p.catalystTarget());

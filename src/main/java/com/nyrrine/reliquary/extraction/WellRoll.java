@@ -186,7 +186,10 @@ public final class WellRoll {
     }
 
     private static WeaponSpec weightedPick(List<Chance> pool, RandomGenerator rng) {
-        double r = rng.nextDouble();
+        // Normalize by the actual odds sum — the pool may have been filtered (apex-dropped) so it needn't sum to 1.
+        double total = 0.0;
+        for (Chance c : pool) total += c.odds();
+        double r = rng.nextDouble() * total;
         double cum = 0.0;
         for (Chance c : pool) {
             cum += c.odds();

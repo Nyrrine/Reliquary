@@ -207,7 +207,7 @@ public final class ExtractionCommand {
         player.sendMessage(msg("Drew " + n + " Enkephalin.", GREEN));
     }
 
-    /** Hand over the 7 crafted station items (for testing without gathering the recipe parts). */
+    /** Hand over the 8 crafted station items (for testing without gathering the recipe parts). */
     private void giveStations(Player player) {
         for (StationType t : StationType.values()) giveOrDrop(player, t.createItem());
         player.sendMessage(msg("Dispensed the " + StationType.values().length
@@ -530,7 +530,8 @@ public final class ExtractionCommand {
             double sum = 0;
             for (Sin s : Sin.values()) sum += Math.max(0.0, r.delta()[s.index()]);
             if (r.isVolatile()) sum += r.roll().max();
-            return (int) Math.max(1, Math.round(sum));
+            if (sum <= 0) return 0; // buffers / remedies (no positive charge) aren't emotion fuel
+            return (int) Math.round(sum);
         }
         // A raw sin mob drop (bone, string, leather, gunpowder…) is a sin item too — it resonates a little.
         if (SinConcentrate.sinOfRaw(item.getType()) != null) return 4;
@@ -660,7 +661,12 @@ public final class ExtractionCommand {
     private void censerFeed(Player player, CenserSlot slot, ItemStack held, Reagent r) {
         ItemStack vialItem = slot.vial();
         PotState st = Cogito.read(vialItem);
-        if (st == null) { censers.remove(locKey(slot.block())); if (slot.display().isValid()) slot.display().remove(); return; }
+        if (st == null) { // unreadable — don't delete it; hand the vial back and clear the slot
+            censers.remove(locKey(slot.block()));
+            if (slot.display().isValid()) slot.display().remove();
+            giveOrDrop(player, slot.vial());
+            return;
+        }
 
         if (st.titer() >= Engine.VIAL_CAP && Engine.addReagent(st.copy(), r, new java.util.Random(0L)).full()) {
             player.sendActionBar(msg(String.format("The vial is full (%.0f cap) — distill or blend it.",
@@ -817,16 +823,18 @@ public final class ExtractionCommand {
                     + String.join("/", pools) + ". Sneak-click to pull.", GREEN));
             return;
         }
-        // Pull a random weapon, hand it over, then spend one ticket.
+        // Pull a random weapon; only spend the ticket if a weapon actually manifests.
         WeaponSpec pick = pool.get(ThreadLocalRandom.current().nextInt(pool.size()));
         Weapon weapon = plugin.weapons().get(pick.id());
-        if (weapon != null) {
-            ItemStack item = weapon.createItem();
-            stampAttribution(item, player.getName(), pick.grade().minCogito(), 100.0);
-            item = plugin.tracker().register(item, weapon.id(), player.getName() + " (ticket)");
-            giveOrDrop(player, item);
-            plugin.weapons().engage(weapon, player.getUniqueId());
+        if (weapon == null) {
+            player.sendMessage(msg("No item is wired for '" + pick.id() + "' yet — ticket kept.", NamedTextColor.RED));
+            return;
         }
+        ItemStack item = weapon.createItem();
+        stampAttribution(item, player.getName(), pick.grade().minCogito(), 100.0);
+        item = plugin.tracker().register(item, weapon.id(), player.getName() + " (ticket)");
+        giveOrDrop(player, item);
+        plugin.weapons().engage(weapon, player.getUniqueId());
         ticket.setAmount(ticket.getAmount() - 1);
         player.getInventory().setItemInMainHand(ticket.getAmount() <= 0 ? null : ticket);
         player.sendMessage(msg("The Well grants " + pick.display() + " (" + pick.grade().display()
@@ -1590,16 +1598,19 @@ public final class ExtractionCommand {
         player.sendMessage(msg("Cogito extraction (testbed) — /cogito ...  (tab-completes)", NamedTextColor.WHITE));
         line(player, "vial", "brew a blank Cogito vial (into your hand)");
         line(player, "fuel [n]", "draw Enkephalin");
-        line(player, "giveall", "dispense every reagent + catalyst component (creative)");
+        line(player, "giveall <cat>", "dispense items by category (rawmaterials/materials/cures/catalysts/all)");
         line(player, "reagents", "list reagent ids");
         line(player, "add <id>", "add a reagent to the held vial (the Censer)");
         line(player, "assay [reagentId]", "identify the held item; with a reagent id = what-if projection");
-        line(player, "stations", "get the 7 craftable station blocks");
+        line(player, "stations", "get the 8 craftable station blocks");
         line(player, "distill", "run the held vial through the Centrifuge");
         line(player, "blend", "blend all charged vials you carry (the Manifold)");
-        line(player, "recipes [id]", "what a weapon's catalyst costs to forge");
-        line(player, "forge <id>", "forge a signature-lock catalyst from grind components");
-        line(player, "pour [catalystId]", "pour into the Well — a forged catalyst guarantees the weapon");
+        line(player, "recipes [id]", "recipe grid for a weapon/reagent/sin (open to all)");
+        line(player, "forge <id>", "forge a per-weapon catalyst from grind components");
+        line(player, "insert", "bond a held catalyst into your vial (Crucible sneak)");
+        line(player, "pour", "pour the held vial into the Well (its inserted catalyst applies)");
+        line(player, "track <id> / untrack", "forge HINT for a weapon (open to all)");
+        line(player, "ticket [add <grade>]", "an Extraction Ticket — pull at the Well without a cogito");
     }
 
     private void line(Player player, String cmd, String desc) {

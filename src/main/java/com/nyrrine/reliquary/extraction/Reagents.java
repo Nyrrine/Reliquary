@@ -139,7 +139,7 @@ public final class Reagents {
             .item(Material.GLISTERING_MELON_SLICE).source("brewing oddment — safe hub filler; cures Bleeding").build());
     public static final Reagent ROTTEN_FLESH = reg(Reagent.of("rotten_flesh", "Rotten Flesh")
             .delta(GLUTTONY, 4).delta(SLOTH, 1).contam(4.5).stab(-1).tier(CRUDE).inflicts(Taint.SEDIMENT, 0.20)
-            .item(Material.ROTTEN_FLESH).source("zombies — weak dirty bulk; crush 8 into a Gluttony Concentrate").build());
+            .item(Material.ROTTEN_FLESH).source("zombies — weak dirty bulk; crush 6 into a Gluttony Concentrate").build());
     // Pure Gluttony — added to complete the hub's tier ladder so Gluttony-dominant WAW weapons (Green Stem)
     // can reach Analytical. NAME/SOURCE PROVISIONAL — retune to taste.
     public static final Reagent RAVENING_DRAUGHT = reg(Reagent.of("ravening_draught", "Hollow Hunger")

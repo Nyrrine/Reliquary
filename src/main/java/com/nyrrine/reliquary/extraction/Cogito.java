@@ -152,7 +152,7 @@ public final class Cogito {
         meta.clearCustomEffects();
         meta.setBasePotionType(org.bukkit.potion.PotionType.WATER);
         meta.addItemFlags(ItemFlag.HIDE_ADDITIONAL_TOOLTIP); // suppress the vanilla effects/"no effects" line
-        meta.setEnchantmentGlintOverride(!blank && grade == Grade.CERTIFIED); // certified vials catch the light
+        meta.setEnchantmentGlintOverride(!blank && isApexCatalyst(state)); // a Radiant Cogito catches the light
 
         var cmd = meta.getCustomModelDataComponent();
         cmd.setStrings(List.of(CMD));

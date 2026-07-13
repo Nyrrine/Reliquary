@@ -158,7 +158,7 @@ public final class PotState {
 
     /** How many catalysts are stacked on this vial (0–3). */
     public int catalystCount() { return catalystCount; }
-    public void catalystCount(int n) { this.catalystCount = n; }
+    public void catalystCount(int n) { this.catalystCount = Math.max(0, Math.min(3, n)); }
 
     private static double clamp(double v, double lo, double hi) {
         return v < lo ? lo : (v > hi ? hi : v);

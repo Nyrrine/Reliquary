@@ -61,18 +61,51 @@ public final class StationListener implements Listener {
         if (Cogito.matches(event.getItem())) {
             event.setCancelled(true);
             event.getPlayer().sendActionBar(net.kyori.adventure.text.Component
-                    .text("Raw Cogito isn't for drinking — pour it at the Well.")
+                    .text("A Cogito vial isn't for drinking — pour it at the Well.")
                     .color(net.kyori.adventure.text.format.NamedTextColor.RED));
         }
     }
 
-    /** A forged catalyst is a Nether Star — but it must NOT be usable to craft a vanilla beacon. */
+    /**
+     * Plugin items (refined reagents, concentrates, catalysts, Cogito/Raw Cogito/Enkephalin, tickets) share
+     * vanilla Materials (dyes, lapis block, copper ingot, slime ball, nether star…), and vanilla crafting
+     * matches by Material ignoring PDC — so a vanilla recipe would silently destroy/convert them (e.g. a
+     * Blinding Pride = Lapis Block uncrafted into 9 lapis). Block any vanilla craft that consumes one; our own
+     * {@code reliquary:} refining recipes are allowed through.
+     */
     @EventHandler
     public void onCraft(org.bukkit.event.inventory.PrepareItemCraftEvent event) {
         var recipe = event.getRecipe();
-        if (recipe == null || recipe.getResult().getType() != org.bukkit.Material.BEACON) return;
+        if (recipe instanceof org.bukkit.Keyed keyed && keyed.getKey().getNamespace().equals("reliquary")) return;
         for (org.bukkit.inventory.ItemStack it : event.getInventory().getMatrix()) {
-            if (Catalyst.matches(it)) { event.getInventory().setResult(null); return; }
+            if (it == null) continue;
+            if (Catalyst.matches(it) || RefinedReagent.idOf(it) != null || SinConcentrate.sinOf(it) != null
+                    || Cogito.matches(it) || RawCogito.matches(it) || Enkephalin.matches(it)
+                    || ExtractionTicket.matches(it)) {
+                event.getInventory().setResult(null);
+                return;
+            }
+        }
+    }
+
+    // Stations removed by anything other than a player break (explosion, piston) still need their state cleaned
+    // up — otherwise a seated Censer vial + its floating display leak and a rebuild at the spot desyncs.
+    @EventHandler
+    public void onBlockExplode(org.bukkit.event.block.BlockExplodeEvent event) { cleanupStations(event.blockList()); }
+    @EventHandler
+    public void onEntityExplode(org.bukkit.event.entity.EntityExplodeEvent event) { cleanupStations(event.blockList()); }
+    @EventHandler
+    public void onPistonExtend(org.bukkit.event.block.BlockPistonExtendEvent event) { cleanupStations(event.getBlocks()); }
+    @EventHandler
+    public void onPistonRetract(org.bukkit.event.block.BlockPistonRetractEvent event) { cleanupStations(event.getBlocks()); }
+
+    private void cleanupStations(java.util.List<org.bukkit.block.Block> blocks) {
+        for (org.bukkit.block.Block b : blocks) {
+            StationType t = stations.typeAt(b);
+            if (t == null) continue;
+            stations.unregister(b);
+            if (t == StationType.FONT) extraction.clearFont(b.getLocation());
+            if (t == StationType.CENSER) extraction.censerReturnOnBreak(b.getLocation());
         }
     }
 
