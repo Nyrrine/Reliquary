@@ -144,7 +144,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
     public void onDisable() {
         if (weapons != null) weapons.disable();
         if (stations != null) stations.save();
-        if (extraction != null) extraction.censerDropAll(); // return any seated vials so none are lost
+        if (extraction != null) extraction.disable(); // return seated vials + reap any live Well carousel
     }
 
     public WeaponManager weapons() {

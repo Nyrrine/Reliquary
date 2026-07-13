@@ -40,12 +40,19 @@ public final class WellDisplay {
 
     private final Plugin plugin;
     private BukkitRunnable active;
+    private final List<Display> current = new ArrayList<>(); // this carousel's entities, so stop() can reap them
 
     public WellDisplay(Plugin plugin) { this.plugin = plugin; }
 
-    /** Stop any running carousel (call before starting a new one, and on plugin disable). */
+    /** Stop any running carousel (call before starting a new one, and on plugin disable): cancel + reap. */
     public void stop() {
         if (active != null) { active.cancel(); active = null; }
+        reap();
+    }
+
+    private void reap() {
+        for (Display d : current) if (d.isValid()) d.remove();
+        current.clear();
     }
 
     /**
@@ -70,7 +77,7 @@ public final class WellDisplay {
 
         // Centre: the top pick, larger, spinning on its own axis.
         WellRoll.Chance top = pool.get(0);
-        List<Display> spawned = new ArrayList<>();
+        List<Display> spawned = current; // reuse the field so stop()/reap() cleans this set on cancel or re-reveal
         ItemDisplay hub = spawnItem(center, resolve(top.weapon(), itemFor), CENTER_SCALE);
         spawned.add(hub);
         TextDisplay hubLabel = spawnLabel(center.clone().add(0, 0.55, 0),
@@ -94,7 +101,7 @@ public final class WellDisplay {
             int t = 0;
             @Override public void run() {
                 if (t >= DURATION_TICKS || !hub.isValid()) {
-                    for (Display d : spawned) if (d.isValid()) d.remove();
+                    reap();
                     cancel();
                     if (active == this) active = null;
                     return;

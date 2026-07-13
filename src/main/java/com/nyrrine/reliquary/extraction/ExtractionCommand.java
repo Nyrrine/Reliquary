@@ -703,6 +703,12 @@ public final class ExtractionCommand {
         censers.clear();
     }
 
+    /** Plugin shutdown: return every seated vial and reap any live Well carousel so no entities are stranded. */
+    public void disable() {
+        censerDropAll();
+        wellDisplay.stop();
+    }
+
     /** The Centrifuge (Grindstone): distill the held vial. */
     public void stationCentrifuge(Player player) { distill(player); }
 

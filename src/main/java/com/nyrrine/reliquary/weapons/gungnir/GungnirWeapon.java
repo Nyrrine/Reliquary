@@ -140,6 +140,8 @@ public final class GungnirWeapon implements Weapon {
     // ---- vibration mark (a buried Gungnir amplifies strikes on the body) -----------
 
     void markEmbedded(UUID target) {
+        // Drop victims that have died/despawned before the spear released, so the map can't grow unbounded.
+        embeddedTargets.keySet().removeIf(id -> org.bukkit.Bukkit.getEntity(id) == null);
         embeddedTargets.merge(target, 1, Integer::sum);
     }
 
