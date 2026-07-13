@@ -59,6 +59,12 @@ public final class SinConcentrate {
     /** The second mob drop a sin's Concentrate also needs. */
     public static Material secondaryFor(Sin s) { return SECONDARY.get(s); }
 
+    /** The sin whose primary raw drop is this material, or {@code null}. */
+    public static Sin sinOfRaw(Material m) {
+        for (Sin s : Sin.values()) if (RAW.get(s) == m) return s;
+        return null;
+    }
+
     private static String prettyMat(Material m) {
         String[] parts = m.name().toLowerCase(java.util.Locale.ROOT).split("_");
         StringBuilder sb = new StringBuilder();

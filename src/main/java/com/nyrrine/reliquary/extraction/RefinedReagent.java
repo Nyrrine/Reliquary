@@ -170,6 +170,23 @@ public final class RefinedReagent {
     /** The Standard refined reagent id for a sin's ladder, or {@code null}. */
     public static String standardId(Sin s) { String[] l = LADDER.get(s); return l == null ? null : l[1]; }
 
+    /** Which sin's ladder a refined reagent id belongs to, or {@code null}. */
+    public static Sin sinOf(String reagentId) {
+        for (var e : LADDER.entrySet()) if (e.getValue()[0].equals(reagentId) || e.getValue()[1].equals(reagentId)) return e.getKey();
+        return null;
+    }
+
+    /** Whether a refined reagent id is the Standard (top) rung of its ladder. */
+    public static boolean isStandard(String reagentId) {
+        for (String[] l : LADDER.values()) if (l[1].equals(reagentId)) return true;
+        return false;
+    }
+
+    /** The gated item a Standard reagent's recipe demands. */
+    public static Material gateFor(String standardId) {
+        return STANDARD_GATE.getOrDefault(standardId, Material.WEATHERED_COPPER);
+    }
+
     /** Human-readable crafting-recipe lines for a refined reagent id (empty if it isn't one). */
     public static List<String> recipeLines(String reagentId) {
         for (Sin s : LADDER.keySet()) {

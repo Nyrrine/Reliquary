@@ -129,16 +129,24 @@ public final class ExtractionCommand {
     /** Tab completion for the extraction subcommands. {@code a[0]} = subcommand, {@code a[1]} = its arg. */
     public List<String> tabComplete(String[] a) {
         if (a.length == 1) return filter(SUBS, a[0]);
-        if (a.length == 2 && (a[0].equalsIgnoreCase("add") || a[0].equalsIgnoreCase("assay"))) {
-            return filter(reagentIds(), a[1]);
+        if (a.length == 2) {
+            switch (a[0].toLowerCase()) {
+                case "add", "assay"          -> { return filter(reagentIds(), a[1]); }
+                case "pour", "forge", "track" -> { return filter(weaponIds(), a[1]); }
+                case "recipes"               -> { return filter(recipeIds(), a[1]); }
+                case "giveall"               -> { return filter(GIVE_CATS, a[1]); }
+                default -> { }
+            }
         }
-        if (a.length == 2 && (a[0].equalsIgnoreCase("pour") || a[0].equalsIgnoreCase("recipes")
-                || a[0].equalsIgnoreCase("forge"))) {
-            return filter(weaponIds(), a[1]);
-        }
-        if (a.length == 2 && a[0].equalsIgnoreCase("giveall")) return filter(GIVE_CATS, a[1]);
-        if (a.length == 2 && (a[0].equalsIgnoreCase("track"))) return filter(weaponIds(), a[1]);
         return List.of();
+    }
+
+    /** Everything /cogito recipes can look up: weapons, refined reagents, and sins. */
+    private List<String> recipeIds() {
+        List<String> out = new ArrayList<>(weaponIds());
+        out.addAll(refinedIds());
+        for (Sin s : Sin.values()) out.add(s.name().toLowerCase(java.util.Locale.ROOT));
+        return out;
     }
 
     private static List<String> filter(List<String> options, String prefix) {
@@ -1024,21 +1032,35 @@ public final class ExtractionCommand {
                 return;
             }
 
-            // 2) A refined reagent (Pure/Standard) — its crafting-table chain.
+            // 2) A refined reagent (Pure/Standard) — a shapeless crafting grid + legend.
             if (RefinedReagent.has(id)) {
                 Reagent r = Reagents.byId(id);
-                player.sendMessage(msg((r != null ? r.display() : id) + " — craft at a table:", NamedTextColor.WHITE));
-                for (String line : RefinedReagent.recipeLines(id)) player.sendMessage(msg("  " + line, FAINT));
+                Sin rs = RefinedReagent.sinOf(id);
+                List<GridIng> ings = new ArrayList<>();
+                if (RefinedReagent.isStandard(id)) {
+                    Reagent pureR = Reagents.byId(RefinedReagent.pureId(rs));
+                    ings.add(new GridIng(RefinedReagent.PURE_PER_STANDARD, rs.color(),
+                            pureR != null ? pureR.display() : "Pure"));
+                    ings.add(new GridIng(1, GOLD, pretty(RefinedReagent.gateFor(id))));
+                } else {
+                    ings.add(new GridIng(RefinedReagent.CONCENTRATE_PER_PURE, rs.color(),
+                            rs.display() + " Concentrate"));
+                    ings.add(new GridIng(1, TextColor.color(0x9B59D0), "Amethyst Shard"));
+                    ings.add(new GridIng(1, TextColor.color(0xBBBBBB), "Iron Ingot"));
+                }
+                sendCraftGrid(player, (r != null ? r.display() : id) + " — crafting table:", ings);
                 return;
             }
 
             // 3) A sin concentrate (by sin name, e.g. "gloom").
             Sin sin = sinByName(id);
             if (sin != null) {
-                player.sendMessage(msg(sin.display() + " Concentrate — craft at a table:", NamedTextColor.WHITE));
-                player.sendMessage(msg("  " + SinConcentrate.RAW_PER_CONCENTRATE + "x "
-                        + pretty(SinConcentrate.rawFor(sin)) + "  +  1x Iron Nugget  +  1x "
-                        + pretty(SinConcentrate.secondaryFor(sin)), FAINT));
+                Material prim = SinConcentrate.rawFor(sin), sec = SinConcentrate.secondaryFor(sin);
+                Sin secSin = SinConcentrate.sinOfRaw(sec);
+                sendCraftGrid(player, sin.display() + " Concentrate — crafting table:", List.of(
+                        new GridIng(SinConcentrate.RAW_PER_CONCENTRATE, sin.color(), pretty(prim)),
+                        new GridIng(1, TextColor.color(0xBBBBBB), "Iron Nugget"),
+                        new GridIng(1, secSin != null ? secSin.color() : NamedTextColor.WHITE, pretty(sec))));
                 return;
             }
 
@@ -1054,6 +1076,31 @@ public final class ExtractionCommand {
         player.sendMessage(msg("Refined reagents: "
                 + String.join(", ", refinedIds()), TextColor.color(0xB8F0E4)));
         player.sendMessage(msg("Concentrates (by sin): " + sinNames(), FAINT));
+    }
+
+    /** A visual ingredient for the crafting grid. */
+    private record GridIng(int count, TextColor color, String name) {}
+
+    /** Render a shapeless recipe as a 3×3 grid of coloured squares + a legend (order is illustrative). */
+    private void sendCraftGrid(Player player, String title, List<GridIng> ings) {
+        player.sendMessage(msg(title, NamedTextColor.WHITE));
+        List<TextColor> slots = new ArrayList<>();
+        for (GridIng g : ings) for (int i = 0; i < g.count() && slots.size() < 9; i++) slots.add(g.color());
+        for (int row = 0; row < 3; row++) {
+            Component line = Component.text("   ");
+            for (int col = 0; col < 3; col++) {
+                int idx = row * 3 + col;
+                line = line.append(idx < slots.size()
+                        ? Component.text("■ ", slots.get(idx))
+                        : Component.text("▫ ", FAINT));
+            }
+            player.sendMessage(line);
+        }
+        player.sendMessage(msg("Legend (shapeless — any arrangement):", FAINT));
+        for (GridIng g : ings) {
+            player.sendMessage(Component.text("   ").append(Component.text("■ ", g.color()))
+                    .append(Component.text(g.name() + " ×" + g.count(), FAINT)));
+        }
     }
 
     /** A sin by its name (e.g. "gloom"), tolerant of a trailing "_concentrate"; null if unknown. */
