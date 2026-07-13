@@ -37,22 +37,24 @@ public final class RefinedReagent {
     /** reagent id → the vanilla item that carries its icon (renamed + tagged; never the plain item counts). */
     private static final Map<String, Material> CARRIER = new LinkedHashMap<>();
     static {
-        // Pures — the sin dyes now belong to Concentrates, so Pures carry their own small items.
-        CARRIER.put("distilled_sorrow", Material.INK_SAC);               // Gloom    · Pure
-        CARRIER.put("ember_distillate", Material.FIRE_CHARGE);           // Wrath    · Pure
-        CARRIER.put("burnished_vanity", Material.NETHERITE_SCRAP);       // Pride    · Pure
-        CARRIER.put("nectar_draught",   Material.GLASS_BOTTLE);          // Lust     · Pure
-        CARRIER.put("lethe_draught",    Material.LINGERING_POTION);      // Sloth    · Pure  — Lethe's Draught
-        CARRIER.put("verdant_spite",    Material.LIME_DYE);              // Envy     · Pure
-        CARRIER.put("ravening_draught", Material.SUGAR);                 // Gluttony · Pure
-        // Standards — cool, name-matched items (Dante / Project Moon flavour).
-        CARRIER.put("refined_cinder",   Material.NETHERITE_INGOT);       // Wrath    · Standard — Phlegethon Regulus
-        CARRIER.put("knell_extract",    Material.GOAT_HORN);             // Gloom    · Standard — Acheron Knell
-        CARRIER.put("mirror_polish",    Material.ENCHANTED_GOLDEN_APPLE);// Pride    · Standard — Narcissus Gilt
-        CARRIER.put("verdigris_rest",   Material.BLUE_ICE);              // Sloth    · Standard — Cocytus Rime
-        CARRIER.put("amber_rapture",    Material.SPLASH_POTION);         // Lust     · Standard — Cytherea's Rapture
-        CARRIER.put("rancorous_bloom",  Material.CREEPER_HEAD);          // Envy     · Standard — Invidia's Bloom
-        CARRIER.put("gluttons_feast",   Material.PIGLIN_HEAD);           // Gluttony · Standard — Cerberus' Morsel
+        // Every carrier is stackable and coloured to its sin (Wrath red, Gloom/Pride blue, Lust orange,
+        // Sloth yellow, Envy violet, Gluttony green) — no random models, no chest-clogging single-stacks.
+        // Pures:
+        CARRIER.put("ember_distillate", Material.FIRE_CHARGE);          // Wrath    — red spark
+        CARRIER.put("distilled_sorrow", Material.PRISMARINE_SHARD);     // Gloom    — a tear of the deep
+        CARRIER.put("burnished_vanity", Material.BLUE_STAINED_GLASS);   // Pride    — a vain mirror
+        CARRIER.put("nectar_draught",   Material.COPPER_INGOT);         // Lust     — warm orange metal
+        CARRIER.put("lethe_draught",    Material.YELLOW_TERRACOTTA);    // Sloth    — dull, drowsy yellow
+        CARRIER.put("verdant_spite",    Material.PURPLE_STAINED_GLASS); // Envy     — a violet glare
+        CARRIER.put("ravening_draught", Material.GREEN_STAINED_GLASS);  // Gluttony — hollow green
+        // Standards (more solid):
+        CARRIER.put("refined_cinder",   Material.RED_NETHER_BRICKS);    // Wrath    — blood-red, burning
+        CARRIER.put("knell_extract",    Material.PRISMARINE);           // Gloom    — the drowning depths
+        CARRIER.put("mirror_polish",    Material.LAPIS_BLOCK);          // Pride    — precious lapis
+        CARRIER.put("amber_rapture",    Material.ORANGE_TERRACOTTA);    // Lust     — feverish orange
+        CARRIER.put("verdigris_rest",   Material.YELLOW_CONCRETE);      // Sloth    — leaden yellow
+        CARRIER.put("rancorous_bloom",  Material.PURPLE_TERRACOTTA);    // Envy     — festering purple
+        CARRIER.put("gluttons_feast",   Material.GREEN_CONCRETE);       // Gluttony — devouring green
     }
 
     private static final TextColor NAME = TextColor.color(0xB8F0E4);
@@ -94,8 +96,6 @@ public final class RefinedReagent {
             for (Taint t : r.cures()) c.add(t.display());
             lore.add(Component.text("Cures " + c, FAINT).decoration(TextDecoration.ITALIC, false));
         }
-        lore.add(Component.text("High purity: a scalpel at any grade.", FAINT)
-                .decoration(TextDecoration.ITALIC, true));
         meta.lore(lore);
         meta.setEnchantmentGlintOverride(true);
         meta.getPersistentDataContainer().set(TAG, PersistentDataType.STRING, reagentId);

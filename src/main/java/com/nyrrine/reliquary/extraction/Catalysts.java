@@ -65,7 +65,7 @@ public final class Catalysts {
         recipe("crimson_scar", 12, Material.SEA_LANTERN, 8, Material.SPONGE, 10, Material.DRIED_KELP, 14,
                 Material.WET_SPONGE, 6, Material.PRISMARINE_CRYSTALS, 8);
         recipe("cobalt_scar", 12, Material.ANVIL, 6, Material.TRIAL_KEY, 8, Material.TUBE_CORAL, 10,
-                Material.LAPIS_BLOCK, 8, Material.BLUE_TERRACOTTA, 8);
+                Material.BLUE_CONCRETE, 8, Material.BLUE_TERRACOTTA, 8);
         recipe("harvest", 12, Material.BRAIN_CORAL, 8, Material.HAY_BLOCK, 10, Material.FIRE_CORAL, 12,
                 Material.PUMPKIN, 8, Material.COMPOSTER, 8);
         recipe("life_for_a_daredevil", 12, Material.HORN_CORAL, 8, Material.WAXED_CHISELED_COPPER, 8,
