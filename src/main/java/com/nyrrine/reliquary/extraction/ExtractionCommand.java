@@ -57,7 +57,7 @@ public final class ExtractionCommand {
     /** The subcommands, in help/tab order. */
     private static final List<String> SUBS = List.of(
             "vial", "fuel", "giveall", "stations", "reagents", "add", "assay", "distill", "blend",
-            "recipes", "forge", "insert", "pour", "track", "untrack");
+            "recipes", "forge", "insert", "pour", "track", "untrack", "ticket");
 
     /**
      * Dispatch an extraction subcommand. {@code a} is the sub-args where {@code a[0]} is the subcommand name
@@ -85,6 +85,7 @@ public final class ExtractionCommand {
             case "forge"    -> forge(player, a);
             case "insert"   -> insertCatalyst(player);
             case "pour"     -> pour(player, a);
+            case "ticket"   -> ticket(player, a);
             case "track"    -> trackWeapon(player, a);
             case "untrack"  -> { weaponTracker.clear(player.getUniqueId());
                                  player.sendActionBar(msg("No longer tracking a weapon.", FAINT)); }
@@ -135,10 +136,23 @@ public final class ExtractionCommand {
                 case "pour", "forge", "track" -> { return filter(weaponIds(), a[1]); }
                 case "recipes"               -> { return filter(recipeIds(), a[1]); }
                 case "giveall"               -> { return filter(GIVE_CATS, a[1]); }
+                case "ticket"                -> { return filter(ticketArgs(true), a[1]); }
                 default -> { }
             }
         }
+        if (a.length == 3 && a[0].equalsIgnoreCase("ticket") && a[1].equalsIgnoreCase("add")) {
+            return filter(ticketArgs(false), a[2]);
+        }
         return List.of();
+    }
+
+    /** Tab options for the ticket command — grades (+ all), plus add/clear at the first arg. */
+    private List<String> ticketArgs(boolean firstArg) {
+        List<String> out = new ArrayList<>();
+        if (firstArg) { out.add("add"); out.add("clear"); }
+        out.add("all");
+        for (String p : ExtractionTicket.POOL_NAMES) out.add(p.toLowerCase(java.util.Locale.ROOT));
+        return out;
     }
 
     /** Everything /cogito recipes can look up: weapons, refined reagents, and sins. */
@@ -737,6 +751,10 @@ public final class ExtractionCommand {
      * <b>pours</b> for real (the commit).
      */
     public void stationWell(Player player, org.bukkit.Location wellLoc, boolean sneaking) {
+        // An Extraction Ticket pours straight from its pools — no cogito needed.
+        ItemStack held = player.getInventory().getItemInMainHand();
+        if (ExtractionTicket.matches(held)) { ticketWell(player, wellLoc, sneaking, held); return; }
+
         if (sneaking) { pour(player, new String[]{"pour"}); return; }
 
         Vial v = locateVial(player);
@@ -754,6 +772,87 @@ public final class ExtractionCommand {
         wellDisplay.reveal(wellLoc, pool, this::weaponItem);
         player.sendActionBar(msg("The Well shows " + top.weapon().display() + " ("
                 + Math.round(top.odds() * 100) + "%) — sneak-click to pour.", GREEN));
+    }
+
+    /** Pour an Extraction Ticket at the Well: spin the carousel over its pools, then manifest a random weapon. */
+    private void ticketWell(Player player, org.bukkit.Location wellLoc, boolean sneaking, ItemStack ticket) {
+        java.util.Set<String> pools = ExtractionTicket.pools(ticket);
+        List<WeaponSpec> pool = new ArrayList<>();
+        for (WeaponSpec w : WeaponSignatures.all()) if (pools.contains(w.grade().name())) pool.add(w);
+        if (pool.isEmpty()) {
+            player.sendMessage(msg("This ticket has no reachable pools — add one with /cogito ticket add <grade>.",
+                    NamedTextColor.RED));
+            return;
+        }
+        double odds = 1.0 / pool.size();
+        List<WellRoll.Chance> chances = new ArrayList<>();
+        for (WeaponSpec w : pool) chances.add(new WellRoll.Chance(w, 1.0, odds));
+        wellDisplay.reveal(wellLoc, chances, this::weaponItem);
+
+        if (!sneaking) {
+            player.sendActionBar(msg("Ticket — " + pool.size() + " weapons across "
+                    + String.join("/", pools) + ". Sneak-click to pull.", GREEN));
+            return;
+        }
+        // Pull a random weapon, hand it over, then spend one ticket.
+        WeaponSpec pick = pool.get(ThreadLocalRandom.current().nextInt(pool.size()));
+        Weapon weapon = plugin.weapons().get(pick.id());
+        if (weapon != null) {
+            ItemStack item = weapon.createItem();
+            stampAttribution(item, player.getName(), pick.grade().minCogito(), 100.0);
+            item = plugin.tracker().register(item, weapon.id(), player.getName() + " (ticket)");
+            giveOrDrop(player, item);
+            plugin.weapons().engage(weapon, player.getUniqueId());
+        }
+        ticket.setAmount(ticket.getAmount() - 1);
+        player.getInventory().setItemInMainHand(ticket.getAmount() <= 0 ? null : ticket);
+        player.sendMessage(msg("The Well grants " + pick.display() + " (" + pick.grade().display()
+                + ") from the ticket.", GREEN));
+        player.playSound(player.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, 0.6f, 1.4f);
+    }
+
+    /** {@code /cogito ticket [grades…] | add <grade|all> | clear} — the admin/event Extraction Ticket. */
+    private void ticket(Player player, String[] a) {
+        if (a.length >= 2 && a[1].equalsIgnoreCase("add")) {
+            ItemStack held = player.getInventory().getItemInMainHand();
+            if (!ExtractionTicket.matches(held)) {
+                player.sendMessage(msg("Hold an Extraction Ticket to add a pool (/cogito ticket to get one).",
+                        NamedTextColor.RED));
+                return;
+            }
+            if (a.length < 3) {
+                player.sendMessage(msg("Usage: /cogito ticket add <zayin|teth|he|waw|aleph|all>", GREY));
+                return;
+            }
+            if (a[2].equalsIgnoreCase("all")) ExtractionTicket.addAllPools(held);
+            else if (!ExtractionTicket.addPool(held, a[2])) {
+                player.sendMessage(msg("Invalid or already-present pool: " + a[2], NamedTextColor.RED));
+                return;
+            }
+            player.getInventory().setItemInMainHand(held);
+            player.sendMessage(msg("Ticket pools: " + String.join(", ", ExtractionTicket.pools(held)), GREEN));
+            return;
+        }
+        if (a.length >= 2 && a[1].equalsIgnoreCase("clear")) {
+            ItemStack held = player.getInventory().getItemInMainHand();
+            if (!ExtractionTicket.matches(held)) {
+                player.sendMessage(msg("Hold an Extraction Ticket to clear it.", NamedTextColor.RED));
+                return;
+            }
+            ExtractionTicket.clearPools(held);
+            player.getInventory().setItemInMainHand(held);
+            player.sendMessage(msg("Cleared the ticket's pools.", GREEN));
+            return;
+        }
+        // Default: give a blank ticket (plus any grades listed after "ticket").
+        ItemStack t = ExtractionTicket.create();
+        for (int i = 1; i < a.length; i++) {
+            if (a[i].equalsIgnoreCase("all")) ExtractionTicket.addAllPools(t);
+            else ExtractionTicket.addPool(t, a[i]);
+        }
+        giveOrDrop(player, t);
+        player.sendMessage(msg("Gave an Extraction Ticket. Chain pools with /cogito ticket add <grade>, then "
+                + "right-click the Well to preview (sneak = pull).", GREEN));
     }
 
     /** Float the most-likely weapon above the Well for a few seconds — the item inside the ominous chamber. */
