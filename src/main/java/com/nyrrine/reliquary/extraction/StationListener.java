@@ -81,7 +81,7 @@ public final class StationListener implements Listener {
             if (it == null) continue;
             if (Catalyst.matches(it) || RefinedReagent.idOf(it) != null || SinConcentrate.sinOf(it) != null
                     || Cogito.matches(it) || RawCogito.matches(it) || Enkephalin.matches(it)
-                    || ExtractionTicket.matches(it)) {
+                    || ExtractionTicket.matches(it) || CureItem.idOf(it) != null) {
                 event.getInventory().setResult(null);
                 return;
             }

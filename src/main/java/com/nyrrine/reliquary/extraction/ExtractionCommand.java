@@ -247,6 +247,8 @@ public final class ExtractionCommand {
         }
         if (all || cat.equals("cures")) {
             int n = 0;
+            for (String id : CureItem.ids()) { giveOrDrop(player, CureItem.create(id, 16)); n++; }
+            // Affinity reagents that also cure a taint (blaze/honey/glistering) stay their plain vanilla item.
             for (Reagent r : Reagents.all())
                 if (r.item() != null && isSupportReagent(r)) { giveMaterial(player, r.item(), 16); n++; }
             got.add(n + " cures/buffers");
@@ -1297,7 +1299,8 @@ public final class ExtractionCommand {
     /** A plugin item that must NOT be counted/consumed as a plain vanilla grind material (shares a Material). */
     private boolean isSpecialItem(ItemStack it) {
         return Enkephalin.matches(it) || Catalyst.matches(it) || Cogito.matches(it)
-                || RefinedReagent.idOf(it) != null || SinConcentrate.sinOf(it) != null;
+                || RefinedReagent.idOf(it) != null || SinConcentrate.sinOf(it) != null
+                || CureItem.idOf(it) != null;
     }
 
     private void consumeMaterial(Player player, Material m, int amount) {

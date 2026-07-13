@@ -149,35 +149,37 @@ public final class Reagents {
             .delta(GLUTTONY, 20).contam(0.05).stab(-28).tier(STANDARD)
             .source("gated: melon chain + Weathered Copper").build());
 
-    // ---- Utilities: buffers, solvents, panic reset ---------------------------------
-    public static final Reagent AMETHYST_SHARD = reg(Reagent.of("amethyst_shard", "Amethyst Shard")
+    // ---- Utilities & remedies (crafted CureItems — the "medicine cabinet") ---------
+    // These have no vanilla .item(): each is a crafted, PDC-tagged CureItem (see CureItem.java) so the raw
+    // material (a mined amethyst, a farmed snowball) doesn't cure on its own — you refine it into the remedy.
+    public static final Reagent AMETHYST_SHARD = reg(Reagent.of("amethyst_shard", "Amethyst Buffer")
             .stab(18).tier(UTILITY).cures(Taint.FRACTURE)
-            .item(Material.AMETHYST_SHARD).source("geode — the buffer; cures Fracture").build());
-    public static final Reagent GLOWSTONE_DUST = reg(Reagent.of("glowstone_dust", "Glowstone Dust")
+            .source("craft: 2 Amethyst Shard + Glass — the buffer; cures Fissuring").build());
+    public static final Reagent GLOWSTONE_DUST = reg(Reagent.of("glowstone_dust", "Radiant Ballast")
             .contam(0.5).stab(10).tier(UTILITY)
-            .item(Material.GLOWSTONE_DUST).source("nether — cheap, dirty buffer").build());
+            .source("craft: 3 Glowstone Dust — cheap, dirty buffer").build());
     // Flux: mediates the warring sins of a cross-axis pot (dampens opposition drain for a few adds). The
     // right steadier for a Dissonant/opposed batch — useless on plain handling shakes.
-    public static final Reagent HONEYCOMB = reg(Reagent.of("honeycomb", "Honeycomb")
+    public static final Reagent HONEYCOMB = reg(Reagent.of("honeycomb", "Emulsifier")
             .stab(3).flux(4).tier(UTILITY).cures(Taint.DISSONANCE)
-            .item(Material.HONEYCOMB).source("bees — opposition flux; cures Dissonance").build());
+            .source("craft: 3 Honeycomb — opposition flux; cures Phase Separation").build());
 
     // ---- Remedies (the medicine cabinet — no charge, they treat afflictions) -------
-    public static final Reagent NETHER_WART = reg(Reagent.of("nether_wart", "Pufferfish Bucket")
+    public static final Reagent NETHER_WART = reg(Reagent.of("nether_wart", "Antivenom")
             .stab(2).tier(UTILITY).cures(Taint.TOXIN)
-            .item(Material.PUFFERFISH_BUCKET).source("bottled antidote — cures Toxin").build());
-    public static final Reagent BONE_MEAL = reg(Reagent.of("bone_meal", "Bone Meal")
+            .source("craft: 2 Nether Wart + Fermented Spider Eye — cures Contamination").build());
+    public static final Reagent BONE_MEAL = reg(Reagent.of("bone_meal", "Flocculant")
             .noiseScale(0.9).tier(UTILITY).cures(Taint.SEDIMENT)
-            .item(Material.BONE_MEAL).source("precipitate + filter — cures Sediment, recovers a little purity").build());
-    public static final Reagent SNOWBALL = reg(Reagent.of("snowball", "Snowball")
+            .source("craft: 3 Bone Meal — cures Precipitate, recovers a little purity").build());
+    public static final Reagent SNOWBALL = reg(Reagent.of("snowball", "Quench")
             .stab(1).tier(UTILITY).cures(Taint.FEVER)
-            .item(Material.SNOWBALL).source("quench — cures Fever").build());
-    public static final Reagent MILK_BUCKET = reg(Reagent.of("milk_bucket", "Milk Bucket")
+            .source("craft: 3 Snowball + Ice — cures Exotherm").build());
+    public static final Reagent MILK_BUCKET = reg(Reagent.of("milk_bucket", "Solvent Wash")
             .chargeScale(0.6).noiseScale(0.7).stab(5).tier(UTILITY)
-            .item(Material.MILK_BUCKET).source("cow — panic reset").build());
-    public static final Reagent WATER_BOTTLE = reg(Reagent.of("water_bottle", "Water Bottle")
+            .source("craft: 3 Sugar — panic reset").build());
+    public static final Reagent WATER_BOTTLE = reg(Reagent.of("water_bottle", "Diluent")
             .chargeScale(0.85).tier(UTILITY).stab(2)
-            .source("fine dilution → finer control").build());
+            .source("craft: 2 Glass Bottle + Sugar — fine dilution → finer control").build());
 
     // ---- Experiences & Emotions (volatile memories) --------------------------------
     // Raw memory-charge: potent sin payloads on a dirty, volatile carrier (Crude) that gambles a taint.
@@ -230,6 +232,8 @@ public final class Reagents {
         if (item == null) return null;
         String refined = RefinedReagent.idOf(item);
         if (refined != null) return byId(refined);
+        String cure = CureItem.idOf(item);
+        if (cure != null) return byId(cure);
         return byItem(item.getType());
     }
 
