@@ -54,6 +54,7 @@ public final class Cogito {
 
     /** Pack-swappable model key (resource pack reskins the vial by grade later). */
     private static final String CMD = "extraction/cogito";
+    private static final String RADIANT_CMD = "extraction/radiant_cogito"; // apex-catalyst vial: own model
 
     // ---- palette -------------------------------------------------------------------
 
@@ -154,13 +155,15 @@ public final class Cogito {
         meta.addItemFlags(ItemFlag.HIDE_ADDITIONAL_TOOLTIP); // suppress the vanilla effects/"no effects" line
         meta.setEnchantmentGlintOverride(!blank && isApexCatalyst(state)); // a Radiant Cogito catches the light
 
+        // A vial carrying an apex (WAW/ALEPH) catalyst is a "Radiant Cogito" — the mandatory form for that tier,
+        // and gets its own custom model (its liquid still tints by the potion colour set above).
+        boolean radiant = !blank && state.catalystTarget() != null && isApexCatalyst(state);
+
         var cmd = meta.getCustomModelDataComponent();
-        cmd.setStrings(List.of(CMD));
+        cmd.setStrings(List.of(radiant ? RADIANT_CMD : CMD));
         meta.setCustomModelDataComponent(cmd);
 
         TextColor nameColor = TextColor.color(tint.getRed(), tint.getGreen(), tint.getBlue());
-        // A vial carrying an apex (WAW/ALEPH) catalyst is a "Radiant Cogito" — the mandatory form for that tier.
-        boolean radiant = !blank && state.catalystTarget() != null && isApexCatalyst(state);
         String name = blank ? "Empty Cogito Vial" : (radiant ? "Radiant Cogito" : "Cogito");
         meta.displayName(Component.text(name)
                 .color(blank ? FAINT : (radiant ? TextColor.color(0xFFE9A3) : nameColor))
