@@ -7,7 +7,7 @@ import java.util.Map;
 
 /**
  * The catalyst forge recipes — what grind-gated sub-components each weapon's signature-lock costs (§15/§16).
- * Rarity scales with grade: a ZAYIN lock is a quick 2-part forge; a WAW is a 4-component sub-project. Every
+ * Rarity scales with grade: a ZAYIN lock is a quick 2-part forge; an ALEPH is a 7-component endgame. Every
  * material is globally unique — no vanilla item appears in more than one weapon's recipe — so the pool is a
  * wide, deliberately arbitrary spread of blocks, plants, mob drops and oddments. The difficulty is
  * <b>acquisition</b>, not luck.
@@ -56,6 +56,12 @@ public final class Catalysts {
                 Material.CRIMSON_FUNGUS, 10, Material.COBWEB, 6);
         recipe("christmas", 6, Material.WARPED_FUNGUS, 6, Material.BASALT, 12, Material.RED_WOOL, 8,
                 Material.SPRUCE_LEAVES, 6);
+        recipe("solitude", 6, Material.DEAD_BUSH, 8, Material.GRAY_CANDLE, 4, Material.FLOWER_POT, 6,
+                Material.CLAY_BALL, 10);
+        recipe("fragments_from_somewhere", 6, Material.AMETHYST_BLOCK, 6, Material.ECHO_SHARD, 3,
+                Material.SPYGLASS, 4, Material.AMETHYST_CLUSTER, 5);
+        recipe("lantern", 6, Material.JACK_O_LANTERN, 5, Material.BROWN_MUSHROOM_BLOCK, 10, Material.CANDLE, 6,
+                Material.RED_MUSHROOM_BLOCK, 8);
 
         // ---- HE — a genuine sub-project (5 types, counts 6–14, enkephalin 12) ----
         recipe("our_galaxy", 12, Material.BLACKSTONE, 10, Material.GILDED_BLACKSTONE, 8,
@@ -72,6 +78,8 @@ public final class Catalysts {
                 Material.SWEET_BERRIES, 14, Material.HORN_CORAL_BLOCK, 8, Material.FIRE_CORAL_BLOCK, 8);
         recipe("laetitia", 12, Material.BAMBOO_MOSAIC, 6, Material.ACACIA_TRAPDOOR, 8,
                 Material.LIGHTNING_ROD, 8, Material.MOSSY_COBBLESTONE_WALL, 6, Material.BAMBOO_FENCE_GATE, 6);
+        recipe("frost_splinter", 12, Material.BLUE_ICE, 10, Material.PACKED_ICE, 12, Material.SNOW_BLOCK, 14,
+                Material.POWDER_SNOW_BUCKET, 6, Material.GRAY_STAINED_GLASS_PANE, 8);
 
         // ---- WAW — the multi-stack endgame grind (6 types, counts 8–18, enkephalin 24) ----
         recipe("solemn_lament", 24, Material.MUD_BRICKS, 14, Material.MUD_BRICK_WALL, 10,
@@ -95,6 +103,25 @@ public final class Catalysts {
                 Material.WARPED_WART_BLOCK, 10, Material.CRIMSON_NYLIUM, 12, Material.WARPED_ROOTS, 8);
         recipe("heaven", 24, Material.WARPED_NYLIUM, 18, Material.SOUL_LANTERN, 12, Material.COPPER_BULB, 16,
                 Material.LANTERN, 12, Material.GLOWSTONE, 14, Material.SOUL_TORCH, 16);
+        recipe("harmony", 24, Material.NOTE_BLOCK, 14, Material.JUKEBOX, 10, Material.MUSIC_DISC_CAT, 8,
+                Material.PAINTING, 12, Material.ITEM_FRAME, 16, Material.CHISELED_BOOKSHELF, 10);
+        recipe("gaze", 24, Material.SCULK_SENSOR, 12, Material.SCULK_CATALYST, 10, Material.SCULK_SHRIEKER, 10,
+                Material.SCULK_VEIN, 18, Material.SCULK, 16, Material.TRIPWIRE_HOOK, 8);
+        recipe("hornet", 24, Material.BEEHIVE, 12, Material.BEE_NEST, 10, Material.HONEYCOMB, 18,
+                Material.HONEY_BOTTLE, 14, Material.STICKY_PISTON, 10, Material.PISTON, 16);
+        recipe("faint_aroma", 24, Material.ROSE_BUSH, 14, Material.PEONY, 12, Material.LILAC, 12,
+                Material.PINK_PETALS, 18, Material.CORNFLOWER, 16, Material.LILY_OF_THE_VALLEY, 10);
+        recipe("discord", 24, Material.BLACK_WOOL, 14, Material.BLACK_CANDLE, 10, Material.SOUL_SOIL, 16,
+                Material.SOUL_SAND, 18, Material.BLACK_STAINED_GLASS, 12, Material.DEEPSLATE, 18);
+
+        // ---- ALEPH — the ceiling: everything the WAW grind is, and then some (7 types, counts 12–24,
+        // enkephalin 36; ×6 grade multiplier on top). STARTER tuning.
+        recipe("justitia", 36, Material.BONE_BLOCK, 20, Material.IRON_BARS, 24, Material.IRON_CHAIN, 18,
+                Material.BLAST_FURNACE, 12, Material.SMITHING_TABLE, 12, Material.CHISELED_DEEPSLATE, 16,
+                Material.WITHER_ROSE, 14);
+        recipe("mimicry", 36, Material.RESIN_CLUMP, 20, Material.RESIN_BLOCK, 16, Material.CREAKING_HEART, 12,
+                Material.PALE_MOSS_BLOCK, 18, Material.PALE_OAK_LOG, 24, Material.MYCELIUM, 20,
+                Material.MOSS_BLOCK, 14);
     }
 
     /** The recipe for a weapon's catalyst, or {@code null} if none is defined yet. */

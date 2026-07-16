@@ -16,7 +16,8 @@ import java.util.Map;
  *   <li><b>Enkephalin</b> — the recipe's Enkephalin, same multiplier.</li>
  *   <li><b>Refined-reagent tax</b> — the deep chain: you must burn {@link #refinedTax Pure reagents of the
  *       weapon's own dominant sins} into the forge, so a catalyst can't be reached without first climbing the
- *       raw→Concentrate→Pure ladder. A WAW catalyst wants 16 Pure reagents (~512 raw) on top of its grind.</li>
+ *       raw→Concentrate→Pure ladder. A WAW catalyst wants 16 Pure reagents (~512 raw) on top of its grind;
+ *       an ALEPH wants its top 5 sins at 5 Pures each (25) — the ceiling of the grind.</li>
  * </ul>
  *
  * All values are STARTER tuning — cheap to move once playtested.
@@ -32,10 +33,11 @@ public final class CatalystCost {
             case TETH  -> 3;
             case HE    -> 4;
             case WAW   -> 5;
+            case ALEPH -> 6;
         };
     }
 
-    /** Grade tier 1..4 (ZAYIN..WAW) — drives how many sins / how many Pures the refined tax demands. */
+    /** Grade tier 1..5 (ZAYIN..ALEPH) — drives how many sins / how many Pures the refined tax demands. */
     public static int gradeTier(EgoGrade g) { return g.ordinal() + 1; }
 
     /** The scaled vanilla component grind (base × {@link #gradeMult}). */

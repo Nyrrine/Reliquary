@@ -31,7 +31,7 @@ public final class ExtractionTicket {
     private static final NamespacedKey POOLS = new NamespacedKey("reliquary", "ticket_pools");
     private static final Material MATERIAL = Material.PAPER;
 
-    /** Valid pool names (grades). ALEPH is accepted for the future even though no ALEPH weapons exist yet. */
+    /** Valid pool names (grades) — the full ZAYIN…ALEPH ladder. */
     public static final List<String> POOL_NAMES = List.of("ZAYIN", "TETH", "HE", "WAW", "ALEPH");
 
     private static final TextColor NAME = TextColor.color(0xFFD966);

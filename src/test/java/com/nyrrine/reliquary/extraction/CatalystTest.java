@@ -21,7 +21,7 @@ class CatalystTest {
 
     @Test
     void everyWeaponInTheRosterHasARecipe() {
-        assertEquals(24, Catalysts.count(), "one catalyst recipe per Well-obtainable weapon");
+        assertEquals(35, Catalysts.count(), "one catalyst recipe per Well-obtainable weapon");
         for (WeaponSpec w : WeaponSignatures.all()) {
             assertNotNull(Catalysts.forWeapon(w.id()),
                     "weapon '" + w.id() + "' has no catalyst recipe");
@@ -40,7 +40,7 @@ class CatalystTest {
 
     /**
      * Global uniqueness: no {@link Material} may appear in more than one weapon's recipe. The owner wants "the
-     * most random blocks" — every component is unique across all 24 recipes, so a material maps to exactly one
+     * most random blocks" — every component is unique across all 35 recipes, so a material maps to exactly one
      * weapon. Fails loudly with the offending material and the two weapons that share it.
      */
     @Test
