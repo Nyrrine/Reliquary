@@ -103,8 +103,8 @@ class IndexStoreTest {
     private final UUID player = UUID.randomUUID();
     private final UUID weaver = UUID.randomUUID();
 
-    private Prescript drawn(String text, long issued) {
-        return new Prescript(UUID.randomUUID(), text, "kelp_vicinity", weaver, issued, false);
+    private Prescript written(String text, long issued) {
+        return new Prescript(UUID.randomUUID(), text, weaver, issued, false);
     }
 
     // ---- the tally ----------------------------------------------------------------------------------
@@ -119,7 +119,7 @@ class IndexStoreTest {
 
     @Test
     void aRulingMovesTheTallyAndClosesThePrescript() {
-        Prescript p = drawn("Eat 16 dried kelp in the vicinity of a player", 100);
+        Prescript p = written("Eat 16 dried kelp in the vicinity of a player", 100);
         store.issue(player, p);
 
         assertTrue(store.rule(player, p.id(), true));
@@ -130,7 +130,7 @@ class IndexStoreTest {
 
     @Test
     void unaccomplishedMovesTheOtherColumn() {
-        Prescript p = drawn("Ride a pig past a player without acknowledging them", 100);
+        Prescript p = written("Ride a pig past a player without acknowledging them", 100);
         store.issue(player, p);
 
         assertTrue(store.rule(player, p.id(), false));
@@ -140,7 +140,7 @@ class IndexStoreTest {
 
     @Test
     void aPrescriptCannotBeRuledOnTwice() {
-        Prescript p = drawn("Throw 3 eggs at the same player", 100);
+        Prescript p = written("Throw 3 eggs at the same player", 100);
         store.issue(player, p);
 
         assertTrue(store.rule(player, p.id(), true));
@@ -156,7 +156,7 @@ class IndexStoreTest {
 
     @Test
     void withdrawalNeverCountsAgainstAnyone() {
-        Prescript p = drawn("Ring a bell 10 times within earshot of a player", 100);
+        Prescript p = written("Ring a bell 10 times within earshot of a player", 100);
         store.issue(player, p);
 
         assertTrue(store.withdraw(player, p.id()));
@@ -168,7 +168,7 @@ class IndexStoreTest {
 
     @Test
     void aPrescriptSurvivesARestartIntact() {
-        Prescript p = drawn("Mine a stack of mud and throw it to a player today", 1752681600L);
+        Prescript p = written("Mine a stack of mud and throw it to a player today", 1752681600L);
         store.issue(player, p);
 
         backing.restart();
@@ -178,7 +178,6 @@ class IndexStoreTest {
         Prescript back = after.get(0);
         assertEquals(p.id(), back.id());
         assertEquals(p.text(), back.text());
-        assertEquals("kelp_vicinity", back.poolId());
         assertEquals(weaver, back.issuer());
         assertEquals(1752681600L, back.issued());
         assertFalse(back.claimed());
@@ -186,8 +185,8 @@ class IndexStoreTest {
 
     @Test
     void aTallySurvivesARestart() {
-        Prescript a = drawn("one", 100);
-        Prescript b = drawn("two", 200);
+        Prescript a = written("one", 100);
+        Prescript b = written("two", 200);
         store.issue(player, a);
         store.issue(player, b);
         store.rule(player, a.id(), true);
@@ -200,18 +199,20 @@ class IndexStoreTest {
     }
 
     @Test
-    void aCustomPrescriptRoundTripsAsCustom() {
-        // pool_id is null for a hand-written one, and YAML simply omits it — the read must not invent one.
-        Prescript custom = new Prescript(UUID.randomUUID(), "Go and apologise to the fox.", null,
-                weaver, 100, false);
-        store.issue(player, custom);
+    void aPrescriptDrawnBeforeThePoolWasRemovedStillReads() {
+        // The pool is gone, but a record written while it existed carries a pool_id key. That key is now
+        // inert: a prescript that was once drawn is just a prescript, and an orphaned key must never cost
+        // someone an outstanding errand. Nothing rewrites the file to tidy it — reads do not mutate.
+        store.issue(player, written("Eat 16 dried kelp in the vicinity of a player", 100));
+        ConfigurationSection one = backing.get(player).section("prescript")
+                .getConfigurationSection("active").getConfigurationSection(store.active(player).get(0).id().toString());
+        one.set("pool_id", "kelp_vicinity"); // as a pre-cut record would have it
 
         backing.restart();
 
-        Prescript back = store.active(player).get(0);
-        assertNull(back.poolId());
-        assertTrue(back.isCustom());
-        assertEquals("Go and apologise to the fox.", back.text());
+        List<Prescript> after = store.active(player);
+        assertEquals(1, after.size(), "an orphaned pool_id must not cost the prescript");
+        assertEquals("Eat 16 dried kelp in the vicinity of a player", after.get(0).text());
     }
 
     // ---- claiming -----------------------------------------------------------------------------------
@@ -220,7 +221,7 @@ class IndexStoreTest {
     void aClaimSurvivesARestartEvenThoughTheQueueDoesNot() {
         // The point of persisting the flag: the Weaver's queue is session-scoped, but a raised hand is a
         // fact about the player and must not be quietly forgotten.
-        Prescript p = drawn("Eat 8 sweet berries while crouched beside a player", 100);
+        Prescript p = written("Eat 8 sweet berries while crouched beside a player", 100);
         store.issue(player, p);
         assertTrue(store.claim(player, p.id()));
 
@@ -231,7 +232,7 @@ class IndexStoreTest {
 
     @Test
     void aHandCannotBeRaisedTwice() {
-        Prescript p = drawn("Feed 64 items into a composter", 100);
+        Prescript p = written("Feed 64 items into a composter", 100);
         store.issue(player, p);
 
         assertTrue(store.claim(player, p.id()));
@@ -247,8 +248,8 @@ class IndexStoreTest {
 
     @Test
     void outstandingPrescriptsReadOldestFirst() {
-        Prescript newer = drawn("newer", 300);
-        Prescript older = drawn("older", 100);
+        Prescript newer = written("newer", 300);
+        Prescript older = written("older", 100);
         store.issue(player, newer);
         store.issue(player, older);
 
@@ -261,7 +262,7 @@ class IndexStoreTest {
     void aHandEditedMalformedEntryIsSkippedRatherThanThrown() {
         // The store is hand-editable on purpose — admins rig prescripts beforehand. One fat-fingered edit
         // must cost that entry, never the player's whole record.
-        Prescript good = drawn("a real one", 100);
+        Prescript good = written("a real one", 100);
         store.issue(player, good);
         ConfigurationSection open = backing.get(player).section("prescript")
                 .getConfigurationSection("active");
@@ -276,7 +277,7 @@ class IndexStoreTest {
     @Test
     void twoPlayersDoNotSeeEachOthersPrescripts() {
         UUID other = UUID.randomUUID();
-        store.issue(player, drawn("mine", 100));
+        store.issue(player, written("mine", 100));
 
         assertTrue(store.active(other).isEmpty());
         assertNull(store.find(other, store.active(player).get(0).id()));
@@ -288,7 +289,7 @@ class IndexStoreTest {
     void everyMutationTellsTheStoreToFlush() {
         // The contract's rule: mutate, then touch(). Never write files. A tally that forgets to touch is a
         // tally that loses its last increment to a restart.
-        Prescript p = drawn("Break 64 dirt with a diamond shovel", 100);
+        Prescript p = written("Break 64 dirt with a diamond shovel", 100);
 
         store.issue(player, p);
         assertEquals(1, backing.touches(player), "issue must touch");
@@ -312,7 +313,7 @@ class IndexStoreTest {
     void theIndexWritesOnlyItsOwnNamespace() {
         // Namespace discipline: the file is shared with other systems, which is an implementation detail and
         // not licence to write anywhere else.
-        store.issue(player, drawn("mine", 100));
+        store.issue(player, written("mine", 100));
         store.rule(player, store.active(player).get(0).id(), true);
 
         Set<String> top = backing.configs.get(player).getKeys(false);
@@ -335,7 +336,7 @@ class IndexStoreTest {
     @Test
     void revokingTheRoleLeavesTheirTallyStanding() {
         // A change of office does not undo history.
-        Prescript p = drawn("something they did", 100);
+        Prescript p = written("something they did", 100);
         store.issue(weaver, p);
         store.rule(weaver, p.id(), true);
         store.grantWeaver(weaver);

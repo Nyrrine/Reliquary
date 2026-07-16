@@ -38,10 +38,13 @@ import java.util.UUID;
  * event-driven — no per-player loop, no scheduled task, no spawned entity — so it costs nothing at rest and
  * needs no {@code onDisable}.
  *
- * <p><b>A person rules on every prescript</b>, randomized ones included — there is no auto-detection and none
- * is planned. The register is full of instructions no machine could check ("without acknowledging them",
- * "saying nothing"), and those clauses are only affordable because a Weaver reads the line and decides. It is
- * also the lore: the Library has no hit detection, it has someone who passes judgement.
+ * <p><b>A Weaver writes every prescript and rules on it.</b> There is no pool, no drawing, and no
+ * auto-detection: an instruction can therefore be anything a person can read and judge, which is the whole
+ * freedom the system trades its machinery for. It is also the lore — the Library has no hit detection, it has
+ * someone who passes judgement.
+ *
+ * <p><b>That someone is anonymous.</b> No paper and no message names the Weaver who issued a prescript. It
+ * arrives from the Index.
  *
  * <p>Nothing expires. A prescript bears the date it was issued, and that date is flavour — the Index keeps no
  * clock, and whether an errand has gone stale is a Weaver's opinion.
@@ -83,7 +86,7 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
 
     /** Subcommands anyone may run. Everything else is a Weaver's or an admin's. */
     private static final List<String> PLAYER_SUBS = List.of("paper", "claim");
-    private static final List<String> WEAVER_SUBS = List.of("issue", "draw", "withdraw", "judge", "pending");
+    private static final List<String> WEAVER_SUBS = List.of("issue", "withdraw", "judge", "pending");
     private static final List<String> ADMIN_SUBS  = List.of("weaver");
 
     /** How a Weaver rules. Nyrrine's words, not "complete" and "fail". */
@@ -123,7 +126,6 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
             }
             switch (sub) {
                 case "issue"    -> issue(player, args);
-                case "draw"     -> draw(player, args);
                 case "withdraw" -> withdraw(player, args);
                 case "judge"    -> judge(player, args);
                 case "pending"  -> pending(player);
@@ -163,8 +165,7 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
         for (Prescript p : active) {
             player.sendMessage(msg("  " + i++ + ".", PrescriptPaper.seal())
                     .append(msg(" " + p.text(), PrescriptPaper.ink())));
-            player.sendMessage(msg("     issued by " + name(p.issuer()) + " · "
-                    + PrescriptPaper.ago(p.outstandingSeconds())
+            player.sendMessage(msg("     issued " + PrescriptPaper.ago(p.outstandingSeconds())
                     + (p.claimed() ? " · claimed" : ""), PrescriptPaper.faint()));
         }
     }
@@ -203,7 +204,7 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
         int given = 0;
         for (Prescript p : active) {
             if (holds(player, p.id())) continue; // don't hand out a second copy of one they already carry
-            hand(player, PrescriptPaper.create(p, player.getUniqueId(), player.getName(), name(p.issuer())));
+            hand(player, PrescriptPaper.create(p, player.getUniqueId(), player.getName()));
             given++;
         }
         player.sendMessage(given == 0
@@ -230,35 +231,18 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
             weaver.sendMessage(msg("A prescript with no instruction is just paper.", NamedTextColor.RED));
             return;
         }
-        hand(weaver, target, new Prescript(UUID.randomUUID(), text, null,
-                weaver.getUniqueId(), now(), false));
-    }
-
-    /** {@code /prescript draw <player>} — the Index chooses. */
-    private void draw(Player weaver, String[] args) {
-        if (args.length < 2) {
-            weaver.sendMessage(msg("Usage: /prescript draw <player>", PrescriptPaper.faint()));
-            return;
-        }
-        Player target = Bukkit.getPlayerExact(args[1]);
-        if (target == null) {
-            weaver.sendMessage(msg(args[1] + " is not here. A prescript is handed over in person.",
-                    NamedTextColor.RED));
-            return;
-        }
-        Prescripts.Entry e = Prescripts.draw();
-        hand(weaver, target, new Prescript(UUID.randomUUID(), e.text(), e.id(),
-                weaver.getUniqueId(), now(), false));
+        hand(weaver, target, new Prescript(UUID.randomUUID(), text, weaver.getUniqueId(), now(), false));
     }
 
     /** Record the prescript, hand over the paper, and tell them both. */
     private void hand(Player weaver, Player target, Prescript p) {
         store.issue(target.getUniqueId(), p);
-        hand(target, PrescriptPaper.create(p, target.getUniqueId(), target.getName(), weaver.getName()));
+        hand(target, PrescriptPaper.create(p, target.getUniqueId(), target.getName()));
 
+        // The recipient is told the Index wants something, never who decided it should.
         target.sendMessage(Component.empty());
         target.sendMessage(msg("The Index has a prescript for you.", PrescriptPaper.seal()));
-        for (Component line : PrescriptPaper.read(p, weaver.getName())) target.sendMessage(line);
+        for (Component line : PrescriptPaper.read(p)) target.sendMessage(line);
         target.playSound(target.getLocation(), Sound.ITEM_BOOK_PAGE_TURN, 1f, 0.8f);
 
         weaver.sendMessage(msg("Issued to " + target.getName() + " — ", PrescriptPaper.seal())
@@ -293,10 +277,10 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
 
     // ---- adjudication -------------------------------------------------------------------------------
     //
-    // A person rules on every prescript, randomized ones included. That is the design: the register is full
-    // of instructions no machine could ever check — "without acknowledging them", "saying nothing", "without
-    // comment" — and those clauses are only affordable because a Weaver reads the line and decides. A judge
-    // is also the lore. The Library does not have hit detection; it has someone who passes judgement.
+    // A person rules on every prescript. Nothing is detected, which is what lets a Weaver write an
+    // instruction no machine could ever check — "without acknowledging them", "saying nothing" — and still
+    // have it mean something. A judge is also the lore: the Library does not have hit detection; it has
+    // someone who passes judgement.
 
     /** {@code /prescript claim [#]} — the recipient says they've carried it out. */
     private void claim(Player player, String[] args) {
@@ -510,7 +494,7 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
             reader.sendMessage(msg("This prescript is spent. The Index has closed it.", PrescriptPaper.faint()));
             return;
         }
-        for (Component line : PrescriptPaper.read(p, name(p.issuer()))) reader.sendMessage(line);
+        for (Component line : PrescriptPaper.read(p)) reader.sendMessage(line);
         if (target != null && !target.equals(reader.getUniqueId())) {
             reader.sendMessage(msg("It is addressed to " + name(target) + ", not to you.",
                     PrescriptPaper.faint()));
@@ -528,7 +512,6 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
         player.sendMessage(msg("  /prescript claim [#] — say you've done it", PrescriptPaper.ink()));
         if (store.isWeaver(player)) {
             player.sendMessage(msg("  /prescript issue <player> <text…>", PrescriptPaper.ink()));
-            player.sendMessage(msg("  /prescript draw <player>", PrescriptPaper.ink()));
             player.sendMessage(msg("  /prescript judge <player> [#] <accomplished|unaccomplished>",
                     PrescriptPaper.ink()));
             player.sendMessage(msg("  /prescript pending — claimed, awaiting you", PrescriptPaper.ink()));
