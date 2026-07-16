@@ -529,7 +529,10 @@ public final class HornetWeapon implements Weapon {
         Location at = player.getLocation();
         world.playSound(at, Sound.ITEM_CROSSBOW_LOADING_START, 0.7f, 0.8f);
         world.playSound(at, Sound.BLOCK_COMPOSTER_FILL_SUCCESS, 0.6f, 0.7f); // the chamber packing wet
-        world.playSound(at, Sound.ENTITY_BEE_LOOP_AGGRESSIVE, 0.5f, 0.7f);   // the hive stirring
+        // A short stir, not a drone. This was BEE_LOOP_AGGRESSIVE at 0.7 — an ambient loop, which is long
+        // by nature and longer still pitched down, so every reload left a buzz hanging in the room after
+        // the wielder had walked away. BEE_HURT is a clipped note: the hive objects, briefly.
+        world.playSound(at, Sound.ENTITY_BEE_HURT, 0.45f, 0.8f);             // the hive stirring
     }
 
     /** Both magazines are back: a bright hive chirp and a puff of fresh spores off the breech. */
@@ -668,7 +671,9 @@ public final class HornetWeapon implements Weapon {
 
         world.playSound(at, Sound.ITEM_CROSSBOW_LOADING_MIDDLE, 0.7f, rifle ? 1.6f : 0.8f);
         world.playSound(at, Sound.BLOCK_SNIFFER_EGG_CRACK, 0.5f, rifle ? 1.5f : 0.7f); // the mutated shell shifting
-        world.playSound(at, Sound.ENTITY_BEE_LOOP, 0.4f, rifle ? 1.7f : 0.6f);
+        // Was BEE_LOOP — an ambient drone, and the swap is a thing you do mid-fight, repeatedly. Stacked
+        // loops meant the buzz never actually stopped. A single clipped wing-beat marks the change instead.
+        world.playSound(at, Sound.ENTITY_BEE_HURT, 0.4f, rifle ? 1.8f : 1.0f);
 
         Location breech = at.clone().add(at.getDirection().multiply(0.7));
         if (rifle) {

@@ -1371,10 +1371,9 @@ public final class FlowerBuryingWedgeWeapon implements Weapon {
     private static final List<List<Seg>> LORE_SRC = List.of(
         List.of(new Seg("Ying", L_RED, false, true), new Seg("long", L_WHITE, false, true)),   // abnormality
         List.of(),
-        List.of(new Seg("The winged dragon of rain, who once", L_WHITE)),
-        List.of(new Seg("parted the heavens — now it weeps", L_WHITE)),
-        List.of(new Seg("tarnished ", L_WHITE), new Seg("blood", L_RED), new Seg(" for a sky lost to it.", L_WHITE)),
-        List.of(),
+        // The winged-dragon-of-rain gloss that sat here was cut on Nyrrine's word (2026-07-17). What is
+        // left is the Abnormality's name and then its own voice — which introduces itself perfectly well
+        // without a narrator standing in front of it.
         List.of(new Seg("“", L_RED, true), new Seg("With contemplation, I shall", L_TEAL, true)),
         List.of(new Seg("darken the clear skies above; with", L_TEAL, true)),
         List.of(new Seg("my sacrifice, I shall exsanguinate", L_TEAL, true)),

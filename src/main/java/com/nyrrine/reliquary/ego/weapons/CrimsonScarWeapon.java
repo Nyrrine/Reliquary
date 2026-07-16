@@ -123,6 +123,15 @@ public final class CrimsonScarWeapon implements Weapon {
     private static final double SPLASH_KNOCKBACK     = 0.45;  // horizontal shove on the splashed
     private static final double SPLASH_KNOCKBACK_UP  = 0.22;  // little upward pop
 
+    /**
+     * What the spray takes out of each body it catches. Deliberately a third of the chop that threw it:
+     * the frenzy's weight is the ×{@value #BLOOD_DRUNK_MULT} on the blow itself, and the spray is the
+     * blood coming off it — everyone nearby is cut, nobody nearby is executed. Six of these at once is
+     * {@value #SPLASH_CAP} × 2.0 spread across six different bodies, never stacked on one, so no single
+     * instance goes anywhere near the netherite band's ceiling.
+     */
+    private static final double SPLASH_DAMAGE        = 2.0;
+
     // Palette — crimson red, blood on snow.
 
     /** Primary — crimson. Display name, "How to use:", the ability headers, and the form-swap action bar. */
@@ -393,8 +402,8 @@ public final class CrimsonScarWeapon implements Weapon {
     }
 
     /**
-     * The blood-drunk splash: sweep once for living bodies near the wielder, cap the count, and knock +
-     * cut every one of them — allies and other players included. No ally check; that is the drawback.
+     * The blood-drunk splash: sweep once for living bodies near the wielder, cap the count, and cut and
+     * knock every one of them — allies and other players included. No ally check; that is the drawback.
      */
     private void splash(Player attacker, LivingEntity struck) {
         int hit = 0;
@@ -411,6 +420,16 @@ public final class CrimsonScarWeapon implements Weapon {
                 away = new Vector(1, 0, 0);
             }
             away.normalize().multiply(SPLASH_KNOCKBACK).setY(SPLASH_KNOCKBACK_UP);
+
+            // The spray cuts, and it did not used to. This method only ever shoved, while its own javadoc
+            // and the class docs both said it "cut every one of them" — the wound the text promised was
+            // never in the code. On a weapon called Blood-drunk, carried by Little Red Riding Hooded
+            // Mercenary, a spray that politely creates space is the story backwards: Red wades in.
+            //
+            // The shove stays, because being struck and reeling is the drama. Each body is cut once; the
+            // wielder's own chop victim is skipped above, so nothing here is hit twice in a swing and no
+            // i-frames need clearing.
+            other.damage(SPLASH_DAMAGE, attacker);
             other.setVelocity(other.getVelocity().add(away));
 
             Location at = other.getLocation().add(0, 1.0, 0);
@@ -643,8 +662,9 @@ public final class CrimsonScarWeapon implements Weapon {
     private static final List<EgoLore.Ability> MOVES = List.of(
             new EgoLore.Ability("[Passive] Blood-Drunk",
                     "Below half health, steel-form chops",
-                    "deal 1.5x damage and shove everything",
-                    "nearby away — allies and other players",
+                    "deal 1.5x damage and throw a spray that",
+                    "cuts everything nearby for 2 and shoves",
+                    "it back — allies and other players",
                     "included."),
             new EgoLore.Ability("[Left Click] Lunging Stab",
                     "Every 3rd steel-form chop dashes you",

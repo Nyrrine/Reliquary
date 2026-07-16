@@ -1381,13 +1381,15 @@ public final class MagicBulletWeapon implements Weapon {
                             "Every shot fired is counted. After the",
                             "sixth, the normal shot is locked out and",
                             "only the Seventh Bullet remains."),
-                    new EgoLore.Ability("[Passive] Shield Block",
-                            "A raised shield facing into the shot",
-                            "blocks it — the bullet and the orb."),
+                    // "Shield Block" was listed here as a [Passive] of its own. It is not a passive and it
+                    // is not the musket's — it is what someone else does to survive it. Nyrrine, 2026-07-17:
+                    // "Do not mention shield block passives since it's a counter not a passive." The fact
+                    // still matters to whoever is aiming, so it rides the shot it applies to.
                     new EgoLore.Ability("[Left Click] Charged Shot",
                             "Begins a 2.4 second charge, then looses",
                             "one shot down the aim at full charge.",
-                            "13 second reload before the next."),
+                            "13 second reload before the next. A",
+                            "shield raised into it turns the bullet."),
                     new EgoLore.Ability("[Right Click] Target Lock",
                             "Marks the enemy you are looking at, or",
                             "the last one you struck. While the lock",
@@ -1399,7 +1401,8 @@ public final class MagicBulletWeapon implements Weapon {
                             "second wind-up inscribes four circles,",
                             "then looses a huge homing orb: it tears",
                             "a temporary hole through all it passes",
-                            "and devastates what it touches.",
+                            "and devastates what it touches. A",
+                            "shield raised into it turns the orb.",
                             "If the orb kills, it turns back on the",
                             "wielder for 8 hearts. Then 15 seconds",
                             "of downtime, and the counter resets.")

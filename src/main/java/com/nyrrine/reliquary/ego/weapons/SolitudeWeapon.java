@@ -78,8 +78,10 @@ public final class SolitudeWeapon implements Weapon {
     // ---- tuning: a patient, rusty six-shooter ----------------------------------------
 
     private static final int    MAG               = 6;      // chambers in the cylinder — a six-shooter
-    private static final long   SHOT_INTERVAL_MS  = 1500L;  // the hammer cycle between aimed rounds
-    private static final long   RELOAD_MS         = 5000L;  // the on-demand shift+RC reload
+    // Both halved after playtest — she liked the gun and wanted less waiting in it. The old woman is still
+    // slow, she is just no longer testing anyone's patience: 750ms a round, 2.5s to fill the cylinder.
+    private static final long   SHOT_INTERVAL_MS  = 750L;   // the hammer cycle between aimed rounds
+    private static final long   RELOAD_MS         = 2500L;  // the on-demand shift+RC reload
     private static final double SHOT_DAMAGE       = 8.0;    // per aimed round — a netherite sword's hit, paid for by the 1.5s cycle
     private static final double SHOT_SPREAD       = 0.012;  // a hair of scatter so an aimed shot isn't a laser
     private static final double RANGE             = 30.0;   // hitscan reach, shared by both fire modes
@@ -511,7 +513,7 @@ public final class SolitudeWeapon implements Weapon {
             List.of(
                     new EgoLore.Ability("[Left Click] Bang. Bang.",
                             "Shoot your revolver six times; there",
-                            "is a 1.5-second cooldown in between",
+                            "is a 0.75-second cooldown in between",
                             "shots."),
                     new EgoLore.Ability("[Right Click] Stories that Never Cease",
                             "Only works when you have no bullets",
@@ -520,7 +522,7 @@ public final class SolitudeWeapon implements Weapon {
                             "45-second ability cooldown."),
                     new EgoLore.Ability("[Shift+Right-Click] Reload",
                             "Reload your gun at any point; face a",
-                            "5-second reload cooldown.")));
+                            "2.5-second reload cooldown.")));
 
     // ---- lifecycle --------------------------------------------------------------------
 
