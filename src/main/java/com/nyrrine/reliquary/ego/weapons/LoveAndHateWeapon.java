@@ -4,10 +4,10 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -116,11 +116,9 @@ public final class LoveAndHateWeapon implements Weapon {
     private static final long   CARVE_TTL_MS   = 3000L;  // a carved block pops back ~3s after the beam passes
 
     // ---- palette ------------------------------------------------------------------
-    private static final TextColor NAME  = TextColor.color(0xFF5FB0); // rose pink (display name)
-    private static final TextColor BODY  = TextColor.color(0xF890C8); // lore body
-    private static final TextColor FAINT = TextColor.color(0x9A7A90); // faint closing line
+    private static final TextColor NAME  = TextColor.color(0xFF5FB0); // rose pink (display name, "How to use:", ability headers)
     private static final TextColor LOVE_TEXT = TextColor.color(0xFFC4E4); // soft pink/white (Love HUD)
-    private static final TextColor HATE_TEXT = TextColor.color(0xFF3355); // harsh red-violet (Hate HUD)
+    private static final TextColor HATE_TEXT = TextColor.color(0xFF3355); // harsh red-violet (Hate HUD, Abnormality title line)
 
     // Love sparkle — pink / white / blush.
     private static final Color C_PINK  = Color.fromRGB(0xFF, 0x7F, 0xC4);
@@ -873,8 +871,7 @@ public final class LoveAndHateWeapon implements Weapon {
     public ItemStack createItem() {
         ItemStack item = new ItemStack(EgoModels.LOVE_AND_HATE.material());
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text("In the Name of Love and Hate").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.LOVE_AND_HATE);
@@ -884,40 +881,55 @@ public final class LoveAndHateWeapon implements Weapon {
 
     // ---- lore ---------------------------------------------------------------------
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
+    // The wand speaks in its own two hearts: the name stays the rose pink it has always been, and the
+    // Abnormality title line takes HATE_TEXT — the harsh red-violet the action bar already reads Hate in.
+    // The old block set that line in NAME too, which the shared format no longer allows: the name and the
+    // title must not repeat one another's colour. Of the palette's live accents it is the apt one — the
+    // Queen of Hatred, in the colour of her own hatred — and both are bright enough to read against the
+    // tooltip's dark background.
 
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Queen of Hatred", NAME)),
-        List.of(),
-        List.of(new Seg("A magical girl's wand of", BODY)),
-        List.of(new Seg("love — and of hate.", BODY)),
-        List.of(),
-        List.of(new Seg("E.G.O Equipment", FAINT)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT)),
-        List.of(new Seg("LC — cycle ", FAINT), new Seg("Love", LOVE_TEXT), new Seg(" / ", FAINT), new Seg("Hate", HATE_TEXT)),
-        List.of(new Seg("RC — ", FAINT), new Seg("heal", LOVE_TEXT), new Seg(" · ", FAINT), new Seg("homing bolts", HATE_TEXT)),
-        List.of(new Seg("Shift-RC — each form's ultimate", FAINT))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "In the Name of Love and Hate",
+            "Queen of Hatred",
+            NAME,
+            HATE_TEXT,
+            List.of(
+                    "A magical girl's wand of",
+                    "love — and of hate."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Left Click] Switch Form",
+                            "Cycle the wand between its Love and",
+                            "Hate forms. Every other ability",
+                            "changes with it."),
+                    new EgoLore.Ability("[Right Click] Mending Mote",
+                            "Love form. Loose a mote that flies",
+                            "through the living, healing each body",
+                            "it passes 1.5 hearts and granting",
+                            "Regeneration for 5 seconds. It deals",
+                            "no damage. 0.9 second cooldown."),
+                    new EgoLore.Ability("[Right Click] Homing Bolts",
+                            "Hate form. Four bolts rise from",
+                            "behind you and chase the nearest mobs",
+                            "ahead, bursting for 4 damage each.",
+                            "All four land. 3.5 second cooldown."),
+                    new EgoLore.Ability("[Shift + Right-click] Minor Arcana",
+                            "Love form. A bright beam that",
+                            "ricochets off walls, showering",
+                            "Regeneration III for 6 seconds on",
+                            "every living body its light touches.",
+                            "It deals no damage. 2 minute",
+                            "cooldown."),
+                    new EgoLore.Ability("[Shift + Right-click] Reverse Arcana",
+                            "Hate form. A 5 second chant draws",
+                            "magic circles inward, then fires a",
+                            "40 block laser that follows your aim",
+                            "for 10 seconds, dealing 4 damage a",
+                            "pulse with no knockback. It carves a",
+                            "tunnel through the blocks ahead;",
+                            "every one of them grows back.",
+                            "5 minute cooldown.")
+            ));
 
     // ---- lifecycle ----------------------------------------------------------------
 

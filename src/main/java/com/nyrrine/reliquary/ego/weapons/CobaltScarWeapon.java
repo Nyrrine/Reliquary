@@ -3,11 +3,10 @@ package com.nyrrine.reliquary.ego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
 import com.nyrrine.reliquary.ego.EgoHud;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -25,7 +24,6 @@ import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.BoundingBox;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -112,8 +110,7 @@ public final class CobaltScarWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.COBALT_SCAR.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Cobalt Scar").color(COBALT).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.COBALT_SCAR);
@@ -354,49 +351,47 @@ public final class CobaltScarWeapon implements Weapon {
 
     // ---- lore ---------------------------------------------------------------------
 
-    private static final TextColor COBALT = TextColor.color(0x2E6BE6); // name / cobalt blue
-    private static final TextColor PALE   = TextColor.color(0xB9CBE8); // base description
-    private static final TextColor FAINT  = TextColor.color(0x6C7C97); // conditions / faint line
+    /** Primary — cobalt blue. Display name, "How to use:", ability headers. */
+    private static final TextColor COBALT = TextColor.color(0x2E6BE6);
+    /** Secondary — the pale ice off the cobalt. The Abnormality title line. */
+    private static final TextColor PALE   = TextColor.color(0xB9CBE8);
+    /** The action-bar voice: cooldowns, "Too far", the off-hand note. */
+    private static final TextColor FAINT  = TextColor.color(0x6C7C97);
 
     // Particle colors (kept apart from the lore palette so tuning one never disturbs the other).
     private static final Color COBALT_DEEP = Color.fromRGB(40, 96, 230);   // deep cobalt claw-spark
     private static final Color COBALT_ICE  = Color.fromRGB(140, 190, 255); // bright ice-blue flare (dash)
     private static final Color BLOOD       = Color.fromRGB(0x8A, 0x0B, 0x0B); // flayed-flesh red
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
-
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Big and Will be Bad Wolf", COBALT)),
-        List.of(),
-        List.of(new Seg("Claws of a vicious wolf. Once, they", PALE)),
-        List.of(new Seg("cut open bellies and tore out guts.", PALE)),
-        List.of(),
-        List.of(new Seg("It flays the flesh and makes the", FAINT, true)),
-        List.of(new Seg("target bleed without end.", FAINT, true)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT)),
-        List.of(new Seg("Attack — fast flurry, no cooldown", FAINT)),
-        List.of(new Seg("Close only — each cut draws blood", FAINT)),
-        List.of(new Seg("Right-click — short dash (7s)", FAINT)),
-        List.of(new Seg("Off hand kept empty while held", FAINT))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Cobalt Scar",             // display name — always the weapon
+            "Big and Will be Bad Wolf", // title line — always the Abnormality
+            COBALT,
+            PALE,
+            List.of(
+                    "Claws of a vicious wolf. Once, they",
+                    "cut open bellies and tore out guts.",
+                    "",
+                    "It flays the flesh and makes the",
+                    "target bleed without end."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Left Click] Close-Range Flurry",
+                            "No swing cooldown — every blow lands",
+                            "at full force. Only reaches 2.2",
+                            "blocks, though: a swing from further",
+                            "out is nullified entirely."),
+                    new EgoLore.Ability("[Left Click] Flaying Bleed",
+                            "Every cut that lands opens a wound —",
+                            "half a heart every 0.5s for 2",
+                            "seconds. A fresh cut refreshes it",
+                            "rather than stacking it."),
+                    new EgoLore.Ability("[Right Click] Dash",
+                            "A short forward lunge. 7 second",
+                            "cooldown."),
+                    new EgoLore.Ability("[Passive] Off Hand Seal",
+                            "While held, your off hand is kept",
+                            "empty — anything in it is pushed back",
+                            "into your inventory.")
+            ));
 }

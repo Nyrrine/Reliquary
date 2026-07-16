@@ -4,10 +4,9 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -30,7 +29,6 @@ import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -137,8 +135,7 @@ public final class GrinderMk4Weapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.GRINDER_MK4.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Grinder Mk.4").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.GRINDER_MK4);
@@ -519,47 +516,46 @@ public final class GrinderMk4Weapon implements Weapon {
 
     // ---- lore ----------------------------------------------------------------------
 
+    /** Primary — the bare-metal body. Display name, "How to use:", ability headers. */
     private static final TextColor NAME       = TextColor.color(0xD9DCE2); // name — light silver
-    private static final Color     STEEL_DUST = Color.fromRGB(0xC6, 0xCA, 0xD2); // silver swarf / debris (dust)
-    private static final Color     RED_SPARK  = Color.fromRGB(0xD0, 0x3A, 0x2E); // red warning-paint spark (dust)
+    /** Secondary — the warning paint. The Abnormality title line. */
+    private static final TextColor RED        = TextColor.color(0xC0342B); // sawtooth / dicing accent
+
+    // Action-bar palette, kept apart from the lore palette so tuning one never disturbs the other.
     private static final TextColor SILVER     = TextColor.color(0xC2C7CF); // action-bar / gauge silver
     private static final TextColor STEEL      = TextColor.color(0x8A8F98); // spin-down / no-target gray
-    private static final TextColor PALE       = TextColor.color(0xCBD0D7); // base description silver
-    private static final TextColor RED        = TextColor.color(0xC0342B); // sawtooth / dicing accent
-    private static final TextColor FAINT      = TextColor.color(0x808690); // the faint closing myth
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
+    // Particle colours (kept apart from both palettes so tuning one never disturbs the others).
+    private static final Color     STEEL_DUST = Color.fromRGB(0xC6, 0xCA, 0xD2); // silver swarf / debris (dust)
+    private static final Color     RED_SPARK  = Color.fromRGB(0xD0, 0x3A, 0x2E); // red warning-paint spark (dust)
 
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("The sharp ", PALE), new Seg("sawtooth", RED), new Seg(" of the grinder", PALE)),
-        List.of(new Seg("makes a ", PALE), new Seg("clean cut", RED), new Seg(" through its foe.", PALE)),
-        List.of(),
-        List.of(new Seg("Machines have no morals of their own.", FAINT, true)),
-        List.of(),
-        List.of(new Seg("E.G.O Equipment", FAINT)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT)),
-        List.of(new Seg("Attack — grinding sawtooth burst", FAINT)),
-        List.of(new Seg("Shift-right — toggle sustained grind:", FAINT)),
-        List.of(new Seg("3x3 mining + close grinding damage", FAINT))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    // The moveset below is read off the code, not off the old hand-rolled block it replaces: the burst is
+    // six bites that stand in for the cancelled vanilla blow, and the sustained grind is a TOGGLE, because
+    // right-mouse-hold isn't detectable here. Ability names are descriptive placeholders — this weapon's
+    // spec never named them.
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Grinder Mk.4",
+            "All-Around Helper",
+            NAME,
+            RED,
+            List.of(
+                    "The sharp sawtooth of the grinder",
+                    "makes a clean cut through its foe.",
+                    "",
+                    "Machines have no morals of their own."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Left Click] Grinding Burst",
+                            "The swing itself lands no blow — in",
+                            "its place the motor drives 6 grinding",
+                            "bites (1.1 each) into one body over",
+                            "~0.75s. No knockback; armour applies."),
+                    new EgoLore.Ability("[Shift + Right-click] Sustained Grind",
+                            "A toggle — press again, release sneak,",
+                            "or unequip to spin down. Grinds bodies",
+                            "in a 3.5 block cone for 2 damage every",
+                            "0.5s, no knockback, and chews the 3x3",
+                            "block face you look at — stone in",
+                            "~1.5s — dropping blocks normally.")
+            ));
 }

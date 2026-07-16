@@ -2,10 +2,9 @@ package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -103,8 +102,7 @@ public final class HeavenWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.HEAVEN.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Heaven").color(CRIMSON).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.HEAVEN);
@@ -266,11 +264,16 @@ public final class HeavenWeapon implements Weapon {
 
     // ---- colours / particles ------------------------------------------------------
 
-    private static final TextColor CRIMSON = TextColor.color(0xDC143C); // name / title — crimson
-    private static final TextColor EYE     = TextColor.color(0xE6C74C); // the sickly yellow eye
-    private static final TextColor BODY    = TextColor.color(0xC98A8A); // base description — muted, bloodless red
-    private static final TextColor FAINT   = TextColor.color(0x8A6A6A); // conditions / controls
-    private static final TextColor QUOTE   = TextColor.color(0x74585C); // epithet
+    /** Primary — the blade's crimson. Display name, "How to use:", ability headers. */
+    private static final TextColor CRIMSON = TextColor.color(0xDC143C);
+    /**
+     * Secondary — the sickly yellow of the eye at the blade's heart. The Abnormality title line.
+     *
+     * <p>This colour has always been in Heaven's palette; it used to pick out the single word "eye" inside
+     * the flavour line. The shared tooltip paints the whole flavour block in one off-white, so the yellow
+     * moves up to the title line, where the Abnormality the eye belongs to now carries it.
+     */
+    private static final TextColor EYE     = TextColor.color(0xE6C74C);
 
     private static final Color CRIMSON_RGB = Color.fromRGB(0xDC, 0x14, 0x3C); // rising motes / pupil
     private static final Color DARKRED_RGB = Color.fromRGB(0x8B, 0x00, 0x00); // ground accent
@@ -281,35 +284,31 @@ public final class HeavenWeapon implements Weapon {
 
     // ---- lore ---------------------------------------------------------------------
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
+    // The whole weapon is one melee gimmick, so both entries below are [Left Click]: there is no
+    // onInteract and no onTick on this relic, and nothing here fires unless a swing lands. The old
+    // how-to read "Its gaze may pin them in stasis", which suggested the pin was its own thing; the
+    // roll in onHit sits INSIDE the isLookingAt guard, so a foe who is not facing you can never be
+    // pinned at all. The moveset follows the code.
 
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("The Burrowing Heaven", CRIMSON)),
-        List.of(),
-        List.of(new Seg("Just contain it in your sight.", BODY)),
-        List.of(new Seg("A great yellow ", BODY), new Seg("eye", EYE), new Seg(" watches within.", BODY)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT, true)),
-        List.of(new Seg("Melee a foe facing you — +10% dmg.", FAINT, true)),
-        List.of(new Seg("Its gaze may pin them in stasis.", FAINT, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Heaven",
+            "The Burrowing Heaven",
+            CRIMSON,
+            EYE,
+            List.of(
+                    "Just contain it in your sight.",
+                    "A great yellow eye watches within."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Left Click] Eye Contact Bonus",
+                            "Melee hits on a foe who is facing",
+                            "you deal +10% damage. A foe looking",
+                            "away takes no bonus."),
+                    new EgoLore.Ability("[Left Click] Stasis Pin",
+                            "Each hit that lands the eye contact",
+                            "bonus has a 25% chance to open the",
+                            "heaven: the foe is pinned in place",
+                            "for 1.5 seconds, crushed to a crawl.",
+                            "Mobs also lose their AI for the hold.")
+            ));
 }

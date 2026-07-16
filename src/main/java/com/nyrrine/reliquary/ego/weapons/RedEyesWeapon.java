@@ -4,10 +4,9 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -418,8 +417,7 @@ public final class RedEyesWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.RED_EYES.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Red Eyes").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.RED_EYES);
@@ -454,48 +452,45 @@ public final class RedEyesWeapon implements Weapon {
 
     // ---- palette & lore ------------------------------------------------------------
 
-    private static final TextColor NAME  = TextColor.color(0xB01414); // deep blood-red (name / accents)
-    private static final TextColor FLESH = TextColor.color(0xC96A6A); // base description (dull red)
-    private static final TextColor VEIN  = TextColor.color(0x8A0303); // hunt accent
-    private static final TextColor FAINT = TextColor.color(0x7A5A5A); // conditions / controls
+    /** Primary — deep blood-red. Display name, "How to use:", ability headers, and the action bar. */
+    private static final TextColor NAME  = TextColor.color(0xB01414);
+    /** Secondary — the darker blood beneath it. The Abnormality title line. */
+    private static final TextColor VEIN  = TextColor.color(0x8A0303);
+    /** Conditions / controls — the action-bar hint when the off-hand is wrong. */
+    private static final TextColor FAINT = TextColor.color(0x7A5A5A);
 
     private static final Color EYE_RED   = Color.fromRGB(0xC8, 0x10, 0x10); // the eyes / mark
-    private static final Color AURA_RED  = Color.fromRGB(0x9B, 0x10, 0x10); // the hunting aura / web
+    private static final Color AURA_RED  = Color.fromRGB(0x9B, 0x10, 0x10); // the aura / web
     private static final Particle.DustOptions EYE_DUST  = new Particle.DustOptions(EYE_RED, 0.7f);
     private static final Particle.DustOptions AURA_DUST = new Particle.DustOptions(AURA_RED, 0.8f);
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
-
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Spider Bud", NAME)),
-        List.of(),
-        List.of(new Seg("The Spider Bud's ", FLESH), new Seg("dozens of eyes", NAME), new Seg(" never", FLESH)),
-        List.of(new Seg("close, forever hunting in the dark for", FLESH)),
-        List.of(new Seg("prey to feed its hungry ", FLESH), new Seg("spiderlings", VEIN), new Seg(".", FLESH)),
-        List.of(),
-        List.of(new Seg("E.G.O Equipment — how to use:", FAINT, true)),
-        List.of(new Seg("Held, you move a little quicker.", FAINT, true)),
-        List.of(new Seg("Every 4th strike roots the target.", FAINT, true)),
-        List.of(new Seg("With Penitence off-hand: ", FAINT, true), new Seg("Serious", NAME, true)),
-        List.of(new Seg("Skullbuster", NAME, true), new Seg(" — a leaping ground slam.", FAINT, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Red Eyes",
+            "Spider Bud",
+            NAME,
+            VEIN,
+            List.of(
+                    "The Spider Bud's dozens of eyes never",
+                    "close, forever hunting in the dark for",
+                    "prey to feed its hungry spiderlings."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Passive] Movement Speed",
+                            "While held, you move 12% faster."),
+                    new EgoLore.Ability("[Left Click] Four-Strike Root",
+                            "Every 4th strike roots the target for",
+                            "about a second. Hits landed less than",
+                            "0.35s apart don't count toward it."),
+                    new EgoLore.Ability("[Passive] Inherited Penitence Passive",
+                            "With Penitence in the off-hand, each",
+                            "hit has a 10% chance to restore food.",
+                            "A separate 5% chance mends 2 HP, and",
+                            "climbs 5% per hit until it lands."),
+                    new EgoLore.Ability("[Right Click] Serious Skullbuster",
+                            "Needs Penitence in the off-hand. Leap,",
+                            "then slam on landing: up to 10 targets",
+                            "within 4.5 blocks are rooted and take",
+                            "3 damage. Your fall damage is waived.",
+                            "3 minute cooldown.")
+            ));
 }

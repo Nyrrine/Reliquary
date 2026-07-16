@@ -65,7 +65,8 @@ public final class EgoLore {
      * @param abnormality the source Abnormality — becomes the bold title line, in {@code secondary}
      * @param primary     the item's primary colour (name, {@code How to use:}, ability headers)
      * @param secondary   the item's secondary colour (the Abnormality title line)
-     * @param descLines   the flavour block, pre-wrapped
+     * @param descLines   the flavour block, pre-wrapped. An empty string renders as a blank line, which
+     *                    is how a two-paragraph flavour block gets its break.
      * @param howLines    the moveset, in the order it should read
      */
     public static Tooltip egoLore(String name,

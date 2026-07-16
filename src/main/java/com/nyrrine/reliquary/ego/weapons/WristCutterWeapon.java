@@ -2,10 +2,9 @@ package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -21,7 +20,6 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -92,8 +90,7 @@ public final class WristCutterWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.WRIST_CUTTER.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Wrist Cutter").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.WRIST_CUTTER);
@@ -240,46 +237,33 @@ public final class WristCutterWeapon implements Weapon {
 
     // ---- lore ---------------------------------------------------------------------
 
-    private static final TextColor NAME  = TextColor.color(0xB3121B); // name — deep blood red
-    private static final Color     BLOOD = Color.fromRGB(0x8A, 0x0B, 0x0B); // droplet / trail dust
-    private static final TextColor PALE  = TextColor.color(0xD8C6C6); // base description
-    private static final TextColor GORE  = TextColor.color(0xC0392B); // wound / bleed accent
-    private static final TextColor FAINT = TextColor.color(0x8C7A7A); // conditions
-    private static final TextColor QUOTE = TextColor.color(0x746262); // epithet
+    /** Primary — deep blood red. Display name, "How to use:", ability headers. Unchanged from the old name colour. */
+    private static final TextColor PRIMARY = TextColor.color(0xB3121B);
+    /** Secondary — the wound accent this weapon already carried. The Abnormality title line. */
+    private static final TextColor SECONDARY = TextColor.color(0xC0392B);
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
+    // Particle colour, kept apart from the lore palette so tuning one never disturbs the other.
+    private static final Color BLOOD = Color.fromRGB(0x8A, 0x0B, 0x0B); // droplet / trail dust
 
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Bloodbath", NAME)),
-        List.of(),
-        List.of(new Seg("It bears bloodstains soaked in", PALE)),
-        List.of(new Seg("ever-lasting red. Its keen blade", PALE)),
-        List.of(new Seg("leaves a ", PALE), new Seg("wound that never heals", GORE), new Seg(".", PALE)),
-        List.of(new Seg("How to use:", FAINT)),
-        List.of(new Seg("Each cut stacks bleed on the foe.", FAINT)),
-        List.of(new Seg("Stacks bleed out slowly over time.", FAINT)),
-        List.of(),
-        List.of(new Seg("\"You know, after joining Lobotomy", QUOTE, true)),
-        List.of(new Seg("Corporation I really feel like I have", QUOTE, true)),
-        List.of(new Seg("my life back together.\"", QUOTE, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Wrist Cutter",
+            "Bloodbath",
+            PRIMARY,
+            SECONDARY,
+            List.of(
+                    "It bears bloodstains soaked in",
+                    "ever-lasting red. Its keen blade",
+                    "leaves a wound that never heals."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Passive] Bleed Drain",
+                            "Bleed stacks drain one per second,",
+                            "each dealing half a heart. The drain",
+                            "starts from the first stack and never",
+                            "knocks the foe back."),
+                    new EgoLore.Ability("[Left Click] Bleeding Cut",
+                            "Each landed hit deepens the wound by",
+                            "one bleed stack, up to 6. Sword damage",
+                            "is unchanged.")
+            ));
 }

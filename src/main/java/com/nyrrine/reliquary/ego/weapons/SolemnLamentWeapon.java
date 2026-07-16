@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -32,7 +33,6 @@ import org.bukkit.util.Vector;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -115,12 +115,11 @@ public final class SolemnLamentWeapon implements Weapon {
     private static final long   HOLD_WINDOW_MS  = 300L;  // spray sustains ~300ms past the last swing
     private static final long   RELOAD_MS       = 1500L; // automatic dry reload (both mags empty)
 
-    // Palette — funereal white and black.
+    // Palette — funereal white and black. The body text and the epithet used to have their own entries
+    // here (bone white, and a dimmer grey); EgoLore owns both of those colours now, so they are gone.
     private static final TextColor NAME  = TextColor.color(0xEDEDF2); // pallbearer white (name)
-    private static final TextColor BONE  = TextColor.color(0xD8D8DE); // body text — bone white
     private static final TextColor CREPE = TextColor.color(0x1C1C22); // funeral black accent
     private static final TextColor FAINT = TextColor.color(0x74747E); // conditions / controls
-    private static final TextColor QUOTE = TextColor.color(0x63636C); // epithet
     private static final TextColor FRAME = NamedTextColor.DARK_GRAY;   // brackets, matching EgoHud
     private static final TextColor COUNT = NamedTextColor.GRAY;        // ammo count text
     private static final TextColor EMPTY = NamedTextColor.RED;         // an emptied pistol goes red
@@ -691,8 +690,7 @@ public final class SolemnLamentWeapon implements Weapon {
     public ItemStack createItem() {
         ItemStack item = new ItemStack(EgoModels.SOLEMN_LAMENT.material());
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text("Solemn Lament").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.SOLEMN_LAMENT);
@@ -721,39 +719,43 @@ public final class SolemnLamentWeapon implements Weapon {
 
     // ---- lore ----------------------------------------------------------------------
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
-
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("The Funeral of the Dead Butterflies", NAME)),
-        List.of(),
-        List.of(new Seg("The somber design is a reminder that not", BONE)),
-        List.of(new Seg("a sliver of frivolity is allowed for the", BONE)),
-        List.of(new Seg("minds of those who mourn.", BONE)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT)),
-        List.of(new Seg("Left-click — fire (alternates L/R, hold to spray)", FAINT)),
-        List.of(new Seg("Right-click — fast mag dump", FAINT)),
-        List.of(new Seg("Empties auto-reload (1.5s).", FAINT))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    // The title line is the Abnormality and needs a secondary distinct from the near-white name, so it is
+    // set in FAINT — the grey this weapon's own controls text has always read in. CREPE is the palette's
+    // nominal accent and the thematically obvious pick, but at #1C1C22 it is near-black: a tooltip's
+    // background is near-black too, and the line would be all but invisible. FAINT is the readable member
+    // of the same funereal palette, so nothing is invented here.
+    //
+    // The moveset below is written from the code in this file, not from the how-to block it replaces:
+    // onSwing fires and onInteract dumps both mags. Reload is automatic-only — there is no manual reload
+    // path anywhere in this class.
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Solemn Lament",
+            "The Funeral of the Dead Butterflies",
+            NAME,
+            FAINT,
+            List.of(
+                    "The somber design is a reminder that not",
+                    "a sliver of frivolity is allowed for the",
+                    "minds of those who mourn."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Passive] Twin Magazines",
+                            "Each pistol holds 12 shots, drained",
+                            "independently as you alternate. When",
+                            "both run dry they reload automatically",
+                            "(1.5 seconds), and cannot fire until",
+                            "the reload finishes."),
+                    new EgoLore.Ability("[Left Click] Alternating Fire",
+                            "Fire one pistol, alternating sides",
+                            "each click — 3 pellets in a short cone",
+                            "out to 16 blocks, with no knockback.",
+                            "Hold to keep firing."),
+                    new EgoLore.Ability("[Right Click] Fast Mag Dump",
+                            "Unloads both pistols as fast as the",
+                            "trigger cycles, one shot per tick,",
+                            "alternating sides until both",
+                            "magazines run dry.")
+            ));
 
     // ---- lifecycle -----------------------------------------------------------------
 

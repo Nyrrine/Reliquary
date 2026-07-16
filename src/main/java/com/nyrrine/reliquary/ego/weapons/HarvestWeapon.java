@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
@@ -30,7 +31,6 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -106,8 +106,7 @@ public final class HarvestWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.HARVEST.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Harvest").color(RED).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.HARVEST);
@@ -376,10 +375,8 @@ public final class HarvestWeapon implements Weapon {
     // ---- palette: farmer red + shirt white + overall denim-blue, a hint of straw --
 
     private static final TextColor RED   = TextColor.color(0xC0392B); // name / barn red — primary
-    private static final TextColor WHITE = TextColor.color(0xEDE7D9); // shirt white / base text
     private static final TextColor DENIM = TextColor.color(0x3E5C82); // overall denim-blue accent
-    private static final TextColor STRAW = TextColor.color(0xC9A94E); // minor straw accent
-    private static final TextColor FAINT = TextColor.color(0x8A8272); // quiet / conditions
+    private static final TextColor STRAW = TextColor.color(0xC9A94E); // minor straw accent — secondary
 
     private static final Particle.DustOptions RED_DUST   = new Particle.DustOptions(Color.fromRGB(0xC0392B), 1.0f);
     private static final Particle.DustOptions WHITE_DUST = new Particle.DustOptions(Color.fromRGB(0xEDE7D9), 0.9f);
@@ -388,37 +385,38 @@ public final class HarvestWeapon implements Weapon {
 
     // ---- lore ---------------------------------------------------------------------
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
+    // Primary stays the barn red the display name has always been. Secondary is STRAW — the palette's
+    // own straw accent, and the only one bright enough to carry a bold title line: DENIM (#3E5C82) is
+    // the other candidate but sits dim against a tooltip's near-black background. The title line was the
+    // name's red under the old format; the new format wants the two distinct, and a scarecrow reading in
+    // straw is the reason the accent is in the palette at all.
 
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Scarecrow Searching for Wisdom", RED)),
-        List.of(),
-        List.of(new Seg("The rake of the man who sought", WHITE)),
-        List.of(new Seg("wisdom, that tilled minds not soil.", WHITE)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT, true)),
-        List.of(new Seg("Every 3rd strike — a healing slash.", FAINT, true)),
-        List.of(new Seg("Kills feed drops + XP to you.", FAINT, true)),
-        List.of(new Seg("Right-click ripe crops to reap", FAINT, true)),
-        List.of(new Seg("and replant them.", FAINT, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Harvest",
+            "Scarecrow Searching for Wisdom",
+            RED,
+            STRAW,
+            List.of(
+                    "The rake of the man who sought",
+                    "wisdom, that tilled minds not soil."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Passive] Harvest",
+                            "Anything you fell with the rake — not",
+                            "players — sends its drops and XP",
+                            "straight to your inventory. Overflow",
+                            "spills at your feet."),
+                    new EgoLore.Ability("[Left Click] Third-Strike Slash",
+                            "Every 3rd strike sweeps a wide arc:",
+                            "5 bonus damage to everything in a",
+                            "150° fan out to 3.6 blocks, up to 8",
+                            "targets, and mends you 2 hearts.",
+                            "4 second cooldown — until it comes up,",
+                            "the 3rd strike is a plain hit too."),
+                    new EgoLore.Ability("[Right Click] Crop Harvest and Replant",
+                            "Right-click a ripe crop within 5",
+                            "blocks to reap it into your inventory",
+                            "and replant it. Half the time it turns",
+                            "up one extra of its produce.")
+            ));
 }

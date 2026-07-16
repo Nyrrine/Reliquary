@@ -4,10 +4,10 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -28,7 +28,6 @@ import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -139,8 +138,7 @@ public final class LoggingWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.LOGGING.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Logging").color(BARK).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.LOGGING);
@@ -402,42 +400,37 @@ public final class LoggingWeapon implements Weapon {
 
     // ---- lore ---------------------------------------------------------------------
 
-    private static final TextColor BARK  = TextColor.color(0x9C6B3F); // name / warm woodsman brown
-    private static final TextColor PALE  = TextColor.color(0xCDBBA3); // base description
-    private static final TextColor HEART = TextColor.color(0xC0392B); // heart red (gauge + accents)
-    private static final TextColor FAINT = TextColor.color(0x8A7A64); // flavor / conditions
+    /** Primary — the warm woodsman brown. Display name, "How to use:", ability headers. */
+    private static final TextColor BARK  = TextColor.color(0x9C6B3F);
+    /**
+     * Heart red. The Abnormality title line, and the charge gauge on the action bar — the one accent this
+     * axe has ever had, and the colour the old tooltip already picked out "Rip Their Heart" in.
+     */
+    private static final TextColor HEART = TextColor.color(0xC0392B);
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
-
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Warm-Hearted Woodsman", BARK)),
-        List.of(),
-        List.of(new Seg("E.G.O Equipment — made to cut down", PALE)),
-        List.of(new Seg("trees and people alike.", PALE)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT, true)),
-        List.of(new Seg("Strike foes to charge the heart.", FAINT, true)),
-        List.of(new Seg("At full charge, right-click to tear", FAINT, true)),
-        List.of(new Seg("Rip Their Heart", HEART, true), new Seg(" from your last foe:", FAINT, true)),
-        List.of(new Seg("a burst, bleed, slow + weakness.", FAINT, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    // Kept verbatim: the flavour opens with the same words the helper's footer closes on, so
+    // "E.G.O Equipment" reads twice on this tooltip. The prose is the owner's — this pass moves the
+    // format and nothing else, and quietly rewording her line would be the worse fix.
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Logging",
+            "Warm-Hearted Woodsman",
+            BARK,
+            HEART,
+            List.of(
+                    "E.G.O Equipment — made to cut down",
+                    "trees and people alike."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Left Click] Heart Charge",
+                            "Striking a foe builds heart charge —",
+                            "5 spaced hits fill it. Hits landed",
+                            "under 0.35s apart build nothing."),
+                    new EgoLore.Ability("[Right Click] Rip Their Heart",
+                            "At a full charge, tear the heart from",
+                            "the last foe you hit — within 8 blocks",
+                            "and struck in the last 9 seconds. A",
+                            "heavy burst, a short bleed, and 9s of",
+                            "Slowness II and Weakness. Spends the",
+                            "charge.")
+            ));
 }

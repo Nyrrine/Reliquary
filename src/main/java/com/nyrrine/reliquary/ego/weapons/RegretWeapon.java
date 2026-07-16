@@ -3,6 +3,7 @@ package com.nyrrine.reliquary.ego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
@@ -20,7 +21,6 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -89,8 +89,7 @@ public final class RegretWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.REGRET.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Regret").color(IRON).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.REGRET);
@@ -235,10 +234,14 @@ public final class RegretWeapon implements Weapon {
 
     // ---- lore ----------------------------------------------------------------------
 
-    private static final TextColor IRON  = TextColor.color(0x8A8F96); // name / grim iron-gray
-    private static final TextColor STEEL = TextColor.color(0x9AA0A8); // base description
-    private static final TextColor HEAVY = TextColor.color(0x6E7278); // crush / weight accent
-    private static final TextColor FAINT = TextColor.color(0x63666C); // conditions / controls
+    /** Primary — the hammer's grim iron. Display name, "How to use:", ability headers, action bar. */
+    private static final TextColor IRON  = TextColor.color(0x8A8F96);
+    /**
+     * Secondary — the crush/weight accent from this weapon's own palette, now carrying the Abnormality
+     * title line. The old block set that line in {@link #IRON} like the name; the shared tooltip wants the
+     * two distinct, and this is the accent already here that sits nearest the head of a maul.
+     */
+    private static final TextColor HEAVY = TextColor.color(0x6E7278);
 
     private static final Color GRIT = Color.fromRGB(0x70, 0x74, 0x7A); // the shockwave grit — cold iron-gray
     private static final Particle.DustOptions DUST = new Particle.DustOptions(GRIT, 1.4f);
@@ -248,38 +251,30 @@ public final class RegretWeapon implements Weapon {
         return Component.text(text).color(IRON).decoration(TextDecoration.ITALIC, false);
     }
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
-
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Forsaken Murderer", IRON)),
-        List.of(),
-        List.of(new Seg("A ", STEEL), new Seg("heavy", HEAVY), new Seg(" maul left behind by", STEEL)),
-        List.of(new Seg("the one the world forgot.", STEEL)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT)),
-        List.of(new Seg("Hold to charge a heavy hit —", FAINT)),
-        List.of(new Seg("shown on the bar. Strike at", FAINT)),
-        List.of(new Seg("full for a crushing blow.", FAINT)),
-        List.of(),
-        List.of(new Seg("E.G.O Equipment", FAINT, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    // The moveset below is read off this file's code, not off the block it replaces. Two things the old
+    // text got wrong are worth naming so they are not written back in: the charge is NOT held down — there
+    // is no hold input on this platform, and onTick winds it up on its own for as long as the hammer is in
+    // the main hand — and the ability that slammed the ground is gone, along with the mace it belonged to.
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Regret",
+            "Forsaken Murderer",
+            IRON,
+            HEAVY,
+            List.of(
+                    "A heavy maul left behind by",
+                    "the one the world forgot."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Passive] Charge Buildup",
+                            "The hammer winds itself up while held,",
+                            "reaching full charge in about 4.5",
+                            "seconds. The bar reads out how far",
+                            "along it is."),
+                    new EgoLore.Ability("[Left Click] Charged Strike",
+                            "A blow deals 3 damage from empty, up",
+                            "to 12.5 at full charge, then spends",
+                            "the charge and winds up again from",
+                            "empty. Falling onto a target adds",
+                            "nothing.")
+            ));
 }

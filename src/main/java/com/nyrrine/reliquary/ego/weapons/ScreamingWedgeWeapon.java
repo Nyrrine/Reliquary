@@ -4,10 +4,9 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
@@ -17,7 +16,6 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +23,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Screaming Wedge — "The Lady Facing the Wall". A WAW-tier Lobotomy Corp E.G.O Equipment crossbow.
+ * Screaming Wedge — "The Lady Facing the Wall". An HE-tier Lobotomy Corp E.G.O Equipment crossbow.
  *
  * <p>The Lady's hair has grown over the stock of the crossbow, and it does not forget her dejection.
  * <b>Right-click</b> looses a single black strand of that hair — a slow, creeping bolt that curls
@@ -94,8 +92,7 @@ public final class ScreamingWedgeWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.SCREAMING_WEDGE.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Screaming Wedge").color(VIOLET).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.SCREAMING_WEDGE);
@@ -179,41 +176,40 @@ public final class ScreamingWedgeWeapon implements Weapon {
 
     // ---- lore ----------------------------------------------------------------------
 
-    private static final TextColor VIOLET = TextColor.color(0x8A6FA3); // name / discordant dark-violet
-    private static final TextColor PALE   = TextColor.color(0xBFB4C6); // base description
-    private static final TextColor FAINT  = TextColor.color(0x6E6874); // conditions
+    /** Primary — the discordant dark-violet. Display name, "How to use:", ability headers, action bar. */
+    private static final TextColor VIOLET = TextColor.color(0x8A6FA3);
+    /**
+     * Secondary — the pale lavender the old block set its description in. The Abnormality title line.
+     *
+     * <p>The title line used to be the name's violet; the roster now wants the two apart, and this is the
+     * only other accent the wedge has ever owned that a bold line can carry (the third, the dim 0x6E6874
+     * the old block put its conditions in, sits almost on top of the helper's grey footer).
+     */
+    private static final TextColor PALE = TextColor.color(0xBFB4C6);
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
-
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("The Lady Facing the Wall", VIOLET)),
-        List.of(),
-        List.of(new Seg("Her hair has grown over the", PALE)),
-        List.of(new Seg("crossbow; its scream never", PALE)),
-        List.of(new Seg("forgets her dejection.", PALE)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT, true)),
-        List.of(new Seg("Right-click: a slow homing", FAINT)),
-        List.of(new Seg("hair-strand every 5s.", FAINT)),
-        List.of(new Seg("30% root, 50% saturation cost.", FAINT))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    /** Built once: the display name is the weapon, the title line is the Abnormality. Never the reverse. */
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Screaming Wedge",
+            "The Lady Facing the Wall",
+            VIOLET,
+            PALE,
+            List.of(
+                    "Her hair has grown over the crossbow;",
+                    "its scream never forgets her dejection."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Passive] Saturation Cost",
+                            "Each shot has a 50% chance to drain",
+                            "12.8 saturation; if saturation is",
+                            "already empty, it takes 4 food",
+                            "points instead."),
+                    new EgoLore.Ability("[Right Click] Homing Strand Shot",
+                            "Loose a slow strand of hair that",
+                            "curls onto a body roughly ahead of",
+                            "it, biting for 3 damage. 30% of the",
+                            "time it tangles them in Slowness VI",
+                            "for 2.25s — heavily slowed, not",
+                            "held in place. A wall or 3.5s aloft",
+                            "fizzles it out. 5-second cooldown.")
+            ));
 }

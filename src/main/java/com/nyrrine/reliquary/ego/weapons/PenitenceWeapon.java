@@ -3,10 +3,9 @@ package com.nyrrine.reliquary.ego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -23,7 +22,6 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -95,8 +93,7 @@ public final class PenitenceWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.PENITENCE.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Penitence").color(GOLD).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.PENITENCE);
@@ -214,46 +211,40 @@ public final class PenitenceWeapon implements Weapon {
 
     // ---- lore ---------------------------------------------------------------------
 
-    private static final TextColor GOLD  = TextColor.color(0xE8D9A0); // name / pale church gold
-    private static final Color GLYPH = Color.fromRGB(0xF3EEDC);       // the traced cross — near-white gold (dust)
-    private static final TextColor PALE  = TextColor.color(0xD8D2C0); // base description
-    private static final TextColor WARM  = TextColor.color(0xC9A94E); // grace / mending accent
+    /** Primary — pale church gold. Display name, "How to use:", ability headers. */
+    private static final TextColor GOLD  = TextColor.color(0xE8D9A0);
+    /** Secondary — the grace/mending accent, already the weapon's own. The Abnormality title line. */
+    private static final TextColor WARM  = TextColor.color(0xC9A94E);
     private static final TextColor WARM_HUD = WARM;                   // subtle action-bar cue on grace
-    private static final TextColor FAINT = TextColor.color(0x8C8672); // conditions
-    private static final TextColor QUOTE = TextColor.color(0x746F5E); // epithet
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
+    // Particle colour (kept apart from the lore palette so tuning one never disturbs the other).
+    private static final Color GLYPH = Color.fromRGB(0xF3EEDC);       // the traced cross — near-white gold (dust)
 
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("One Sin and Hundreds of Good Deeds", GOLD)),
-        List.of(),
-        List.of(new Seg("Not made to kill, but to atone.", PALE)),
-        List.of(new Seg("It comforts the one who wields it.", PALE)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT, true)),
-        List.of(new Seg("Hit foes — its damage is tiny.", FAINT, true)),
-        List.of(new Seg("Each hit may restore saturation,", FAINT, true)),
-        List.of(new Seg("and sometimes mend you (chance ramps).", FAINT, true)),
-        List.of(),
-        List.of(new Seg("vs. 'Paradise Lost': +50000% dmg.", QUOTE, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Penitence",
+            "One Sin and Hundreds of Good Deeds",
+            GOLD,
+            WARM,
+            List.of(
+                    "Not made to kill, but to atone.",
+                    "It comforts the one who wields it.",
+                    "",
+                    // Paradise Lost is flavour only — no such mechanic is implemented. It closed the old
+                    // tooltip, below the moveset; the shared format has no room down there, so it sits at
+                    // the foot of the flavour instead. The words are hers, untouched.
+                    "vs. 'Paradise Lost': +50000% dmg."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Left Click] Damage Cap",
+                            "Attacks deal at most 2 damage. Even",
+                            "a mace fall-slam only grazes."),
+                    new EgoLore.Ability("[Passive] Saturation Grace",
+                            "Each hit has a 10% chance to restore",
+                            "a little food and saturation."),
+                    new EgoLore.Ability("[Passive] Mending Grace",
+                            "Each hit has a chance to mend one",
+                            "heart, never overhealing. Starts at",
+                            "5% and climbs 5% per hit until it",
+                            "procs, then resets to 5%.")
+            ));
 }

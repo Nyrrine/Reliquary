@@ -4,10 +4,9 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
@@ -96,12 +95,10 @@ public final class OurGalaxyWeapon implements Weapon {
     private static final long   BLINK_FALL_GRACE_MS = 1_500L; // brief fall-damage waiver after a blink
 
     // Palette — cosmic purple / void-blue / starlight white.
-    private static final TextColor NAME   = TextColor.color(0xB388FF); // nebula purple (name)
-    private static final TextColor VOID   = TextColor.color(0x9B7BF0); // body text
-    private static final TextColor AZURE  = TextColor.color(0x6C8CFF); // void-blue accent / cooldowns
+    private static final TextColor NAME   = TextColor.color(0xB388FF); // nebula purple — lore primary
+    private static final TextColor AZURE  = TextColor.color(0x6C8CFF); // void-blue accent / cooldowns / lore secondary
     private static final TextColor STAR   = TextColor.color(0xEDEBFF); // starlight highlight / pips
     private static final TextColor FAINT  = TextColor.color(0x7A7A96); // conditions / controls
-    private static final TextColor QUOTE  = TextColor.color(0x6E6E86); // epithet
 
     // Particle dusts — small, cosmic.
     private static final Color C_PURPLE = Color.fromRGB(0xB3, 0x88, 0xFF);
@@ -501,8 +498,7 @@ public final class OurGalaxyWeapon implements Weapon {
     public ItemStack createItem() {
         ItemStack item = new ItemStack(EgoModels.OUR_GALAXY.material());
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text("Our Galaxy").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.OUR_GALAXY);
@@ -512,39 +508,37 @@ public final class OurGalaxyWeapon implements Weapon {
 
     // ---- lore ---------------------------------------------------------------------
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
+    // The Abnormality title line takes AZURE rather than the name's nebula purple: the shared tooltip needs
+    // the weapon (primary) and the Abnormality (secondary) to read apart, and the rod's own void-blue accent
+    // is the only colour in this palette far enough from NAME to do it — VOID sat a hair off the name, STAR
+    // is the flavour's own off-white, and FAINT is the footer's grey. It is the colour the rod's cooldowns
+    // already speak in, so the item and its action bar stay one voice.
 
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Child of the Galaxy", NAME)),
-        List.of(),
-        List.of(new Seg("There's a universe in a ", VOID), new Seg("pebble", STAR), new Seg(".", VOID)),
-        List.of(new Seg("Its light becomes the stars.", VOID)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT, true)),
-        List.of(new Seg("Right-click — loose a homing comet.", FAINT, true)),
-        List.of(new Seg("3 charges, then it recharges.", FAINT, true)),
-        List.of(new Seg("It can be parried or shield-blocked.", FAINT, true)),
-        List.of(new Seg("Sneak + RC — blink a short step.", FAINT, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Our Galaxy",
+            "Child of the Galaxy",
+            NAME,
+            AZURE,
+            List.of(
+                    "There's a universe in a pebble.",
+                    "Its light becomes the stars."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Right Click] Comet",
+                            "Looses a homing comet that bursts",
+                            "for 6 damage on contact. A blade can",
+                            "strike it out of the air, and a raised",
+                            "shield negates it. 3 charges; all",
+                            "three refill 6 seconds after the",
+                            "last is spent."),
+                    new EgoLore.Ability("[Shift + Right-click] Blink",
+                            "Steps up to 8 blocks the way you look.",
+                            "It stops short of walls rather than",
+                            "passing through, and is not spent if",
+                            "there is nowhere to land. Fall damage",
+                            "is waived briefly on arrival.",
+                            "25 second cooldown.")
+            ));
 
     // ---- lifecycle ----------------------------------------------------------------
 

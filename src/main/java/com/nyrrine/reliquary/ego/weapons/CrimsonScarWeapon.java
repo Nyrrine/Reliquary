@@ -4,10 +4,9 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
@@ -30,7 +29,6 @@ import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -126,8 +124,15 @@ public final class CrimsonScarWeapon implements Weapon {
     private static final double SPLASH_KNOCKBACK_UP  = 0.22;  // little upward pop
 
     // Palette — crimson red, blood on snow.
-    private static final TextColor NAME  = TextColor.color(0xC01823); // crimson (name)
-    private static final TextColor BLOOD = TextColor.color(0xD8323C); // body / blood accent
+
+    /** Primary — crimson. Display name, "How to use:", the ability headers, and the form-swap action bar. */
+    private static final TextColor NAME  = TextColor.color(0xC01823);
+    /**
+     * Secondary — the blood accent, a shade brighter than the crimson above it. The Abnormality title line.
+     * It used to tint the flavour block; the shared tooltip sets flavour in its own off-white, so the accent
+     * carries the title rather than letting it repeat the name's colour.
+     */
+    private static final TextColor BLOOD = TextColor.color(0xD8323C);
     private static final TextColor STEEL = TextColor.color(0xB8BCC6); // steel / reload accent
     private static final TextColor FAINT = TextColor.color(0x8A6A6C); // conditions / controls / last line
 
@@ -178,11 +183,10 @@ public final class CrimsonScarWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.CRIMSON_SCAR.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Crimson Scar").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
-        // CMD "ego/crimson_scar" + the shared 7.0/0.9 melee curve.
+        // CMD "ego/crimson_scar" + the shared melee curve.
         EgoModels.stampWeapon(meta, EgoModels.CRIMSON_SCAR);
 
         item.setItemMeta(meta);
@@ -198,8 +202,7 @@ public final class CrimsonScarWeapon implements Weapon {
         ItemStack item = new ItemStack(Material.CROSSBOW);
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Crimson Scar — Flintlock").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        PISTOL_TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         meta.getPersistentDataContainer().set(formKey, PersistentDataType.BYTE, (byte) 1);
@@ -620,37 +623,60 @@ public final class CrimsonScarWeapon implements Weapon {
 
     // ---- lore ----------------------------------------------------------------------
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
+    // Crimson Scar is the roster's one two-form weapon, so it builds two tooltips off a single body: same
+    // Abnormality, same flavour, same moveset, and only the display name differs — the flintlock still says
+    // so on the tin, exactly as it always has. Both forms carry the WHOLE moveset on purpose: the wielder
+    // reading the flintlock's tooltip is precisely the one who needs to know steel is a shift-right-click
+    // away, and vice versa. Every ability line therefore names the form it belongs to.
 
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Little Red Riding Hooded Mercenary", NAME)),
-        List.of(),
-        List.of(new Seg("With steel in one hand and", BLOOD)),
-        List.of(new Seg("gunpowder in the other, there's", BLOOD)),
-        List.of(new Seg("nothing to fear in this place.", BLOOD)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT, true)),
-        List.of(new Seg("Combo — 3rd strike lunges & bleeds", FAINT)),
-        List.of(new Seg("Shift-RC — swap steel / flintlock", FAINT)),
-        List.of(new Seg("RC (flintlock) — fire, then reload", FAINT))
+    /** The flavour block, carried over word for word from the weapon's original tooltip. */
+    private static final List<String> DESC = List.of(
+            "With steel in one hand and",
+            "gunpowder in the other, there's",
+            "nothing to fear in this place."
     );
 
-    private static final List<Component> LORE = buildLore();
+    /**
+     * The moveset, read off the code rather than the old tooltip — which listed three terse controls and
+     * left the blood-drunk frenzy off the item entirely.
+     */
+    private static final List<EgoLore.Ability> MOVES = List.of(
+            new EgoLore.Ability("[Passive] Blood-Drunk",
+                    "Below half health, steel-form chops",
+                    "deal 1.5x damage and shove everything",
+                    "nearby away — allies and other players",
+                    "included."),
+            new EgoLore.Ability("[Left Click] Lunging Stab",
+                    "Every 3rd steel-form chop dashes you",
+                    "into the target and opens a bleed —",
+                    "1.5 damage every 0.5s, three times.",
+                    "Chops landed too fast don't count."),
+            new EgoLore.Ability("[Right Click] Flintlock Shot",
+                    "In flintlock form, fires one ball down",
+                    "your eye line — 9 damage, 30 blocks.",
+                    "Then a 4 second reload locks the",
+                    "trigger. Does nothing in steel form."),
+            new EgoLore.Ability("[Shift + Right-click] Form Swap",
+                    "Swaps between the steel sickle and the",
+                    "flintlock. Enchantments and wear carry",
+                    "across both forms.")
+    );
 
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    /** The melee (steel) form's tooltip — the item {@link #createItem()} hands out. */
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Crimson Scar",
+            "Little Red Riding Hooded Mercenary",
+            NAME,
+            BLOOD,
+            DESC,
+            MOVES);
+
+    /** The flintlock form's tooltip: the same lore under the name the pistol form has always carried. */
+    private static final EgoLore.Tooltip PISTOL_TOOLTIP = EgoLore.egoLore(
+            "Crimson Scar — Flintlock",
+            "Little Red Riding Hooded Mercenary",
+            NAME,
+            BLOOD,
+            DESC,
+            MOVES);
 }

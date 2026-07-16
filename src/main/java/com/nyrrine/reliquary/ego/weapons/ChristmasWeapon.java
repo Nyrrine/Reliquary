@@ -3,10 +3,10 @@ package com.nyrrine.reliquary.ego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -22,7 +22,6 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -76,8 +75,7 @@ public final class ChristmasWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.CHRISTMAS.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Christmas").color(RED).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.CHRISTMAS);
@@ -230,45 +228,37 @@ public final class ChristmasWeapon implements Weapon {
 
     // ---- lore ---------------------------------------------------------------------
 
+    /** Primary — holly red. Display name, "How to use:", ability headers. */
     private static final TextColor RED   = TextColor.color(0xD7263D); // name / holly red
+    /** Secondary — the pine green already in the sleigh's colours. The Abnormality title line. */
     private static final TextColor GREEN = TextColor.color(0x2E8B57); // pine green accent
     private static final TextColor GOLD  = TextColor.color(0xF1C40F); // gift / ribbon gold
     private static final TextColor WHITE = TextColor.color(0xF5F5F5); // snow-white base
-    private static final TextColor FAINT = TextColor.color(0x9AA0A6); // conditions / flavor
-    private static final TextColor QUOTE = TextColor.color(0x7C8288); // epithet
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
-
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Rudolta of the Sleigh", RED)),
-        List.of(),
-        List.of(new Seg("Patched with heavy leather of unknown", WHITE)),
-        List.of(new Seg("origin — its colors recall a festive", WHITE)),
-        List.of(new Seg("holiday now long forgotten.", WHITE)),
-        List.of(),
-        List.of(new Seg("E.G.O Equipment — how to use:", FAINT, true)),
-        List.of(new Seg("A slow, heavy club. Each hit may bless", FAINT, true)),
-        List.of(new Seg("you or gift your foe a fleeting effect.", FAINT, true)),
-        List.of(),
-        List.of(new Seg("\"Here comes a present, just for you.\"", QUOTE, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Christmas",
+            "Rudolta of the Sleigh",
+            RED,
+            GREEN,
+            List.of(
+                    "Patched with heavy leather of unknown",
+                    "origin — its colors recall a festive",
+                    "holiday now long forgotten."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Left Click] Heavy Club Hit",
+                            "A slow, heavy club. Every landed blow",
+                            "lands with a bone-crunching thwack."),
+                    new EgoLore.Ability("[Passive] Self Buff Roll",
+                            "Each landed hit has an 11% chance to",
+                            "bless you with a random fleeting gift:",
+                            "Swiftness, Regeneration, Absorption,",
+                            "Strength, Resistance, or a Spring in",
+                            "your step."),
+                    new EgoLore.Ability("[Passive] Enemy Gift Roll",
+                            "A separate 11% roll per hit gifts the",
+                            "struck enemy Sluggishness, Weakness,",
+                            "Dizziness, a Prickle, Heavy Hands or",
+                            "Weightlessness. One hit can do both.")
+            ));
 }

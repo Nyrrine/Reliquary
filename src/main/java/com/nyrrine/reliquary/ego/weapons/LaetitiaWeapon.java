@@ -4,10 +4,9 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -24,7 +23,6 @@ import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -91,11 +89,11 @@ public final class LaetitiaWeapon implements Weapon {
     private static final double BLOCK_FACING_DOT = 0.2; // shot heading vs blocker's look: <this = roughly facing it
 
     // Palette — deep maroon red, a childlike sparkle of light, and near-black dried blood.
-    private static final TextColor NAME   = TextColor.color(0xA5323A); // maroon red (name)
-    private static final TextColor BODY   = TextColor.color(0xC2565C); // body text — lighter maroon
-    private static final TextColor GLOOM  = TextColor.color(0x7B1E23); // deep maroon accent
+    private static final TextColor NAME   = TextColor.color(0xA5323A); // maroon red — the tooltip's primary
+    private static final TextColor BODY   = TextColor.color(0xC2565C); // lighter maroon — action bar
+    private static final TextColor GLOOM  = TextColor.color(0x7B1E23); // deep maroon accent — the tooltip's
+                                                                       // secondary, and the fire cooldown
     private static final TextColor FAINT  = TextColor.color(0x8A6A6C); // conditions / controls (muted rose-grey)
-    private static final TextColor QUOTE  = TextColor.color(0x7A5A5C); // epithet
 
     private static final Color VOID_C   = Color.fromRGB(0x3D, 0x0F, 0x12); // near-black maroon
     private static final Color MAROON_C = Color.fromRGB(0xA5, 0x32, 0x3A); // maroon red shot
@@ -436,8 +434,7 @@ public final class LaetitiaWeapon implements Weapon {
     public ItemStack createItem() {
         ItemStack item = new ItemStack(EgoModels.LAETITIA.material());
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text("Laetitia").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.LAETITIA);
@@ -447,39 +444,42 @@ public final class LaetitiaWeapon implements Weapon {
 
     // ---- lore ----------------------------------------------------------------------
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
+    // The title line here is a PLACEHOLDER and is meant to be overwritten.
+    //
+    // The house rule is that the display name is the weapon and the bold title line is the Abnormality it
+    // came from, and that the two never repeat each other. This item is the one place the rule cannot be
+    // kept: the spec records it as "Laetitia — Laetitia", because the toy and the Abnormality genuinely
+    // share the name, and the old lore opened by simply saying "Laetitia" a second time. Rather than mint a
+    // lore name for the Abnormality and pass it off as settled, the title below just describes what the
+    // Abnormality is, marked TODO so it cannot be mistaken for the final wording.
+    //
+    // Ability names are placeholders on the same footing — plain descriptions of what each input does, not
+    // titles. "Playmate" is the one word here that is not up for grabs: the mark is called that in the code
+    // and on the action bar ("A new playmate is chosen…"), so the tooltip says it too.
 
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Laetitia", NAME)),
-        List.of(),
-        List.of(new Seg("A child's toy that once yearned", BODY)),
-        List.of(new Seg("for happiness, long ago.", BODY)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT, true)),
-        List.of(new Seg("Right-click — fire a maroon shot.", FAINT, true)),
-        List.of(new Seg("It curves toward a marked playmate.", FAINT, true)),
-        List.of(new Seg("Sneak + RC — mark that playmate.", FAINT, true)),
-        List.of(new Seg("A raised shield blocks the shot.", FAINT, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Laetitia",
+            "TODO — The Doll That Yearned for Happiness",
+            NAME,
+            GLOOM,
+            List.of(
+                    "A child's toy that once yearned",
+                    "for happiness, long ago."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Right Click] Curving Shot",
+                            "Fire a weaving maroon shot — 5 damage",
+                            "on contact. It curves toward your",
+                            "playmate while the shot is within 34",
+                            "blocks of them, else flies nearly",
+                            "straight. A shield raised toward it",
+                            "blocks it. 1 second cooldown."),
+                    new EgoLore.Ability("[Shift + Right-click] Mark Playmate",
+                            "Mark the body under your crosshair —",
+                            "or the nearest one ahead, within 30",
+                            "blocks — as your playmate for 30",
+                            "seconds. Marking again replaces them.")
+            ));
 
     // ---- lifecycle -----------------------------------------------------------------
 

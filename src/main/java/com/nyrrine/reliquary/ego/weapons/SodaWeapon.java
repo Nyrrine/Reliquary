@@ -4,10 +4,9 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -25,7 +24,6 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -78,8 +76,7 @@ public final class SodaWeapon implements Weapon {
     private static final int REGEN_AMP   = 0;
 
     // Palette — refreshing grape/blueberry plastic.
-    private static final TextColor NAME  = TextColor.color(0x9B6BE8); // grape purple (name)
-    private static final TextColor GRAPE = TextColor.color(0xA97BF0); // body text
+    private static final TextColor NAME  = TextColor.color(0x9B6BE8); // grape purple (name, charge gauge)
     private static final TextColor FIZZ  = TextColor.color(0x5FB8FF); // carbonated blue accent
     private static final TextColor FAINT = TextColor.color(0x7A7A90); // conditions / controls
 
@@ -302,8 +299,7 @@ public final class SodaWeapon implements Weapon {
     public ItemStack createItem() {
         ItemStack item = new ItemStack(EgoModels.SODA.material());
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text("Soda").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.SODA);
@@ -313,40 +309,37 @@ public final class SodaWeapon implements Weapon {
 
     // ---- lore ----------------------------------------------------------------------
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
+    // Primary stays the grape purple the name has always been. Secondary is FIZZ — the carbonated blue
+    // already in this weapon's own palette, and the accent the charge gauge reads "Fizzing" in — so the
+    // Abnormality title line and the action bar agree on the same blue. The old block set that title line
+    // in NAME; under the shared format the title needs a colour of its own, and grape-on-grape would not
+    // have been one. Nothing here is invented: both colours were already in the palette above.
 
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Opened Can of WellCheers", NAME)),
-        List.of(),
-        List.of(new Seg("Extracted by an employee who", GRAPE)),
-        List.of(new Seg("particularly loved shrimp.", GRAPE)),
-        List.of(new Seg("A pistol in a ", GRAPE), new Seg("refreshing purple", FIZZ), new Seg(";", GRAPE)),
-        List.of(new Seg("in use, a faint scent of ", GRAPE), new Seg("grapes", NAME), new Seg(".", GRAPE)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT)),
-        List.of(new Seg("Sneak + RC — charge a fizz", FAINT, true)),
-        List.of(new Seg("RC when charged — spray heals allies", FAINT, true)),
-        List.of(new Seg("(+Speed & Regen; never you)", FAINT, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Soda",
+            "Opened Can of WellCheers",
+            NAME,
+            FIZZ,
+            List.of(
+                    "Extracted by an employee who",
+                    "particularly loved shrimp.",
+                    "A pistol in a refreshing purple;",
+                    "in use, a faint scent of grapes."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Shift + Right-click] Charge Fizz",
+                            "Start shaking the can. Keep sneaking",
+                            "for 2.2 seconds to bank a shot.",
+                            "Release sneak or stow the can early",
+                            "and the pressure is lost."),
+                    new EgoLore.Ability("[Right Click] Fizz Shot",
+                            "Spends a banked charge to erupt a",
+                            "9-block spray cone. Every ally in it",
+                            "is healed (Instant Health I), plus",
+                            "Speed I for 6s and Regeneration I",
+                            "for 5s. Hostile mobs are ignored,",
+                            "and the spray never touches you.")
+            ));
 
     // ---- lifecycle -----------------------------------------------------------------
 
