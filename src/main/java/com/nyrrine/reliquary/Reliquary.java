@@ -159,6 +159,9 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         getServer().getPluginManager().registerEvents(
                 new com.nyrrine.reliquary.extraction.StationListener(extraction, stations), this);
 
+        // The Index (/prescript) wires its own command and listener, and holds no state to disable.
+        new com.nyrrine.reliquary.index.PrescriptCommand(this).register();
+
         PluginCommand cmd = getCommand("reliquary");
         if (cmd != null) cmd.setTabCompleter(this);
 

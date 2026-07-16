@@ -12,7 +12,15 @@ commands:
     description: The Cogito extraction testbed.
     usage: /cogito help
     aliases: [ext, co]
+  prescript:
+    description: The Index — prescripts and their tally.
+    usage: /prescript help
 permissions:
   reliquary.admin:
     description: Access to Reliquary's relic commands.
     default: op
+  reliquary.weaver:
+    description: May issue prescripts and rule on them. The Index's own role index is the real
+      mechanism (admins grant it with /prescript weaver add); this node is honoured as well, so a
+      permissions plugin works without a code change if one is ever installed.
+    default: false
