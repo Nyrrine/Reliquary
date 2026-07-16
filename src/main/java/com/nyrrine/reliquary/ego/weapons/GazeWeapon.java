@@ -36,11 +36,13 @@ import java.util.concurrent.ThreadLocalRandom;
  * through a keyhole and is <em>delighted</em> by what it sees. It never blinks, so nothing gets behind
  * you; it never looks away, so the longer you keep hurting things the happier it gets.
  *
- * <p><b>The base stat is deliberately half a sword.</b> {@link EgoModels#GAZE} is stamped at 3.5 atk /
- * 1.6 spd — half the usual band — precisely because <b>Constant Surveillance</b> makes every attack land
- * <em>twice</em>. Two instances of ~3.5 total ~7 per swing, which is where a WAW sword belongs (a plain
- * netherite sword is 8). The doubling <em>is</em> the damage: nothing here adds flat bonus damage on top
- * of the base, and nothing should be added later to "fix" the low number on the tooltip.
+ * <p><b>It is a poor sword and a superb one, depending entirely on what you have fed it.</b>
+ * {@link EgoModels#GAZE} is stamped at a feeble 2.4 atk / 1.6 spd, and <b>Constant Surveillance</b> lands
+ * every attack twice — but only the first cut carries your enchantments; the second is the bare blade
+ * (see {@link #BARE_CUT}). Bare, a swing is 4.8 against a netherite sword's 8, and it should feel like
+ * it. Sharpened, and only once Delight is full, it reaches 10.92 — level with the band, never past it.
+ * The doubling <em>is</em> the damage: nothing here adds flat bonus damage on top of the base, and
+ * nothing should be added later to "fix" the low number on the tooltip.
  *
  * <ul>
  *   <li><b>[Passive] Schadenfreude</b> — every attack feeds the watcher a stack of <b>Delight</b>
@@ -50,8 +52,9 @@ import java.util.concurrent.ThreadLocalRandom;
  *       note below). Delight is per-wielder, never per-victim.</li>
  *   <li><b>[Left Click] Constant Surveillance</b> — attacks hit 2 times. The vanilla swing is hit one
  *       (scaled by Delight via {@code event.setDamage}); hit two is a scripted follow-up
- *       {@link #FOLLOW_UP_DELAY_TICKS} ticks later for the same number. One stack per <em>attack</em>,
- *       not per hit — the follow-up feeds nothing.</li>
+ *       {@link #FOLLOW_UP_DELAY_TICKS} ticks later carrying {@link #BARE_CUT} — the blade alone, lifted
+ *       by Delight but never by an enchantment. One stack per <em>attack</em>, not per hit — the
+ *       follow-up feeds nothing.</li>
  *   <li><b>[Right Click] Fixed Stare</b> — for {@link #FIXED_STARE_MS} the watcher refuses to look away:
  *       Delight cannot decay and builds at {@link #STARE_STACK_MULT}x. {@link #FIXED_STARE_COOLDOWN_MS}
  *       cooldown, read on the action bar in whole seconds.</li>
@@ -88,8 +91,23 @@ public final class GazeWeapon implements Weapon {
 
     /** Damage added per stack of Delight. 0.02 -> +2% each, +40% at the cap. */
     private static final double DAMAGE_PER_STACK = 0.02;
-    /** Hard cap on Delight. 20 stacks -> +40%: a ~7 swing becomes a ~9.8 swing. */
+    /** Hard cap on Delight. 20 stacks -> +40%. */
     private static final int MAX_DELIGHT = 20;
+
+    /**
+     * What hit two carries: the blade's own stamped damage ({@link EgoModels#GAZE}), with no enchantment
+     * on it. Delight still lifts it; Sharpness never does.
+     *
+     * <p>This is the load-bearing number of the whole weapon, so it is worth saying why. An enchantment
+     * adds a flat amount to <em>each</em> instance of damage, and Gaze deals two — so a follow-up that
+     * copied hit one would pay Sharpness V's +3 twice, and a swing at full Delight would reach 18 against
+     * a netherite sword's 11. Paying it once is what lets the base stay honest: bare, a swing is
+     * {@code 2 x 2.4 = 4.8}, feeble next to a netherite sword's 8, which is the point — the thing behind
+     * the keyhole is not much of a swordsman. Sharpened and fully delighted it reaches
+     * {@code 1.4 x (5.4 + 2.4) = 10.92}, level with the band and never past it. The weapon is weak in the
+     * hand and dangerous only once you have fed it.
+     */
+    private static final double BARE_CUT = EgoModels.GAZE.atk();
     /** Stacks fed to the watcher by one attack. One per ATTACK — the follow-up hit feeds nothing. */
     private static final int STACKS_PER_ATTACK = 1;
 
@@ -257,10 +275,12 @@ public final class GazeWeapon implements Weapon {
         Delight d = state(aid);
 
         int stacks = delight(d, now);
-        double scaled = event.getDamage() * (1.0 + stacks * DAMAGE_PER_STACK);
-        event.setDamage(scaled);                     // hit one — the vanilla swing, at Delight's rate
+        double rate = 1.0 + stacks * DAMAGE_PER_STACK;
+        event.setDamage(event.getDamage() * rate);   // hit one — the vanilla swing, enchants and all
 
-        scheduleFollowUp(attacker, victim, scaled);  // hit two — the watcher's own cut, same number
+        // Hit two is the watcher's own cut and knows nothing of your enchantments — it carries the bare
+        // blade, never what you laid on it. That asymmetry is the whole balance; see BARE_CUT.
+        scheduleFollowUp(attacker, victim, BARE_CUT * rate);
 
         boolean wasCapped = stacks >= MAX_DELIGHT;
         feed(d, now);
@@ -501,13 +521,18 @@ public final class GazeWeapon implements Weapon {
 
     // ---- lore -------------------------------------------------------------------------
 
-    /** Primary — the keyhole's shadow. Display name, "How to use:", ability headers. */
-    private static final TextColor PRIMARY = TextColor.color(0x3A3636);
-    /** Secondary — the dark behind it. The Abnormality title line. */
-    private static final TextColor SECONDARY = TextColor.color(0x242424);
+    // Gaze's colours are the keyhole and the dark behind it, and they were specified as #3A3636 and
+    // #242424 — near-black, which a tooltip's own near-black background swallows whole. Both are lifted
+    // here to the ash the action bar already reads in, so the item and its gauge speak with one voice.
+    // The hues and their order are untouched: the shadow still sits above the dark behind it, and the
+    // pair still reads as something watching from a place with no light in it.
 
-    // Action-bar palette, kept apart from the lore palette: the tooltip colours are near-black by design
-    // and would be invisible drawn over the world, so the HUD reads in ash instead.
+    /** Primary — the keyhole's shadow. Display name, "How to use:", ability headers. */
+    private static final TextColor PRIMARY = TextColor.color(0x9C9494);
+    /** Secondary — the dark behind it. The Abnormality title line. */
+    private static final TextColor SECONDARY = TextColor.color(0x6E6666);
+
+    // Action-bar palette, kept apart from the lore palette so tuning one never disturbs the other.
     private static final TextColor DELIGHT_HUD = TextColor.color(0x9C9494); // the gauge + stack count
     private static final TextColor STARE_HUD   = TextColor.color(0xD8D0D0); // the eye, open
     private static final TextColor FAINT_HUD   = TextColor.color(0x6E6666); // cooldown / ready

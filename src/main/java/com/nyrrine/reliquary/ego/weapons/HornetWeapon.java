@@ -57,8 +57,16 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li><b>Left-click — Hornet [Shotgun]</b> — a {@value #BUCKSHOT_PELLETS}-pellet <b>buckshot</b> cone
  *       ({@value #BUCKSHOT_PELLET_DAMAGE} a pellet, {@value #SHOTGUN_RANGE}-block reach),
  *       {@value #SHOTGUN_COOLDOWN_MS}ms between shots. {@value #BUCKSHOT_MAG} in the magazine. Every pellet
- *       is its own hitscan, so point-blank lands the lot and range scatters it.</li>
+ *       is its own hitscan and punches through up to {@value #BUCKSHOT_PIERCE} bodies, so point-blank
+ *       lands the lot and a blast into a crowd reaches everything in the line.</li>
  * </ul>
+ *
+ * <p><b>Which gun is for what.</b> The rifle is the single-target weapon and is meant to win there — 6/s
+ * sustained against the shotgun's 3.6/s. The shotgun's case is bodies: its pellets bite through, so one
+ * blast into a press at close range is worth several times what it is worth against one man, while no
+ * single body ever takes more than the same 10.8. That is a trade, not a shortfall. It matters because
+ * neither magazine is optional — nothing reloads until both are spent, so buckshot has to be worth
+ * firing rather than something to be emptied into a wall to get the rifle back.
  *
  * <p><b>The tension — and it is the whole weapon.</b> Hornet reloads only when <b>BOTH</b> magazines are
  * empty, and at that instant a {@value #RELOAD_MS}ms reload fires <em>on its own</em>. There is no manual
@@ -118,6 +126,15 @@ public final class HornetWeapon implements Weapon {
     private static final double SHOTGUN_RAY_SIZE       = 0.5;   // entity ray fatness
     private static final double SHOTGUN_CONE           = 0.13;  // spread scatter on each pellet
     private static final long   SHOTGUN_COOLDOWN_MS    = 3000L; // 3s between shots
+
+    /**
+     * How many bodies one buckshot pellet bites through. This is the shotgun's niche in a single number:
+     * it will never out-damage the rifle on one target and is not meant to, but fired into a press of
+     * bodies at close range the same blast reaches everything in the line. Raising it widens the crowd
+     * payoff without ever lifting what a single body can take (still 10.8 a blast, whatever it stands
+     * behind), which is why the ceiling stays honest no matter how this is tuned.
+     */
+    private static final int    BUCKSHOT_PIERCE        = 3;     // bodies one pellet punches through
 
     // ---- tuning: Spore Diffusion (the Slowness proc) --------------------------------
     // Deliberately equal to each magazine's size: a clean full magazine procs on its last round.
@@ -359,11 +376,17 @@ public final class HornetWeapon implements Weapon {
     // ---- shotgun: a buckshot cone ----------------------------------------------------
 
     /**
-     * One buckshot blast: {@value #BUCKSHOT_PELLETS} independent hitscan pellets scattered through a cone.
-     * Point-blank the whole cone lands in one body ({@value #BUCKSHOT_PELLETS} &times;
-     * {@value #BUCKSHOT_PELLET_DAMAGE} = 10.8, under the single-instance ceiling); at range the cone opens
-     * and the honest average drops well below it. A pellet each finding a different body is free crowd
-     * damage — that, and not raw single-target weight, is the shotgun's case for its 3-second cadence.
+     * One buckshot blast: {@value #BUCKSHOT_PELLETS} independent hitscan pellets scattered through a cone,
+     * each of which <b>punches on through</b> what it hits into up to {@value #BUCKSHOT_PIERCE} bodies.
+     *
+     * <p>That pierce is the shotgun's whole reason to exist, so it is worth being plain about the balance
+     * it draws. Against a single body nothing has changed: the cone lands
+     * {@value #BUCKSHOT_PELLETS} &times; {@value #BUCKSHOT_PELLET_DAMAGE} = 10.8 point-blank, and on a
+     * 3-second cadence that is a deliberately poor 3.6/s — the rifle is the single-target gun and is meant
+     * to win there. What the pierce buys is the case for ever loading buckshot at all: fire into a press of
+     * bodies at close range and the same blast reaches the ones behind, so the blast's worth scales with
+     * how many things are in front of it. No body can take more than the same 10.8, whatever else it is
+     * standing behind, so the single-instance ceiling is untouched from any angle.
      *
      * <p>The distinct bodies hit are collected into a short-lived local set purely to de-duplicate the
      * Slowness proc (two pellets in one body is two hits but one victim). It is a local, not a victim-keyed
@@ -380,9 +403,13 @@ public final class HornetWeapon implements Weapon {
 
         List<LivingEntity> struck = new ArrayList<>(BUCKSHOT_PELLETS);
         Set<UUID> seen = new HashSet<>();
+        List<LivingEntity> pelletHits = new ArrayList<>(BUCKSHOT_PIERCE);
         for (int i = 0; i < BUCKSHOT_PELLETS; i++) {
-            LivingEntity hit = resolveBuckshotPellet(player, world, eye, scatter(rng, aim, SHOTGUN_CONE));
-            if (hit != null && seen.add(hit.getUniqueId())) struck.add(hit);
+            pelletHits.clear();
+            resolveBuckshotPellet(player, world, eye, scatter(rng, aim, SHOTGUN_CONE), pelletHits);
+            for (LivingEntity hit : pelletHits) {
+                if (seen.add(hit.getUniqueId())) struck.add(hit);
+            }
         }
         if (struck.isEmpty()) return;
 
@@ -395,35 +422,48 @@ public final class HornetWeapon implements Weapon {
         }
     }
 
-    /** Trace one buckshot pellet: clip at the first wall, bite the first living body. Returns it, or null. */
-    private LivingEntity resolveBuckshotPellet(Player player, World world, Location eye, Vector dir) {
+    /**
+     * Trace one buckshot pellet: clip at the first wall, then bite its way through up to
+     * {@value #BUCKSHOT_PIERCE} living bodies along the line, collecting each into {@code out}.
+     *
+     * <p>The wall is found once and bounds every bite, so a pellet can never punch through someone into a
+     * body on the far side of a stone. Each body is bitten at most once by a given pellet — the trace
+     * resumes just past whatever it last hit rather than re-finding it — and the tracer draws the whole
+     * line, so the through-shot reads as a through-shot.
+     */
+    private void resolveBuckshotPellet(Player player, World world, Location eye, Vector dir,
+                                       List<LivingEntity> out) {
         double maxDist = SHOTGUN_RANGE;
         RayTraceResult blockHit = world.rayTraceBlocks(eye, dir, SHOTGUN_RANGE, FluidCollisionMode.NEVER, true);
         if (blockHit != null && blockHit.getHitPosition() != null) {
             maxDist = eye.toVector().distance(blockHit.getHitPosition());
         }
 
-        RayTraceResult entHit = world.rayTraceEntities(
-                eye, dir, maxDist, SHOTGUN_RAY_SIZE,
-                e -> e instanceof LivingEntity && !e.getUniqueId().equals(player.getUniqueId()));
-
         Location muzzle = eye.clone().add(dir.clone().multiply(0.6));
-        Location end;
-        LivingEntity victim = null;
-        if (entHit != null && entHit.getHitEntity() instanceof LivingEntity le) {
-            victim = le;
-            end = entHit.getHitPosition().toLocation(world);
-        } else {
-            end = eye.clone().add(dir.clone().multiply(maxDist));
+        Set<UUID> bitten = new HashSet<>();
+        double advanced = 0.0;
+
+        for (int depth = 0; depth < BUCKSHOT_PIERCE; depth++) {
+            double segLen = maxDist - advanced;
+            if (segLen <= 1.0e-3) break;
+
+            Location from = eye.clone().add(dir.clone().multiply(advanced));
+            RayTraceResult entHit = world.rayTraceEntities(
+                    from, dir, segLen, SHOTGUN_RAY_SIZE,
+                    e -> e instanceof LivingEntity
+                            && !e.getUniqueId().equals(player.getUniqueId())
+                            && !bitten.contains(e.getUniqueId()));
+            if (entHit == null || !(entHit.getHitEntity() instanceof LivingEntity le)) break;
+
+            Location at = entHit.getHitPosition().toLocation(world);
+            le.damage(BUCKSHOT_PELLET_DAMAGE, player);   // routed so other plugins can cancel
+            buckImpactFx(world, at);
+            bitten.add(le.getUniqueId());
+            out.add(le);
+            advanced = eye.toVector().distance(entHit.getHitPosition()) + 0.05;
         }
 
-        drawTracer(world, muzzle, end, BUCK_DUST, BUCK_CORE, 0.7);
-
-        if (victim != null) {
-            victim.damage(BUCKSHOT_PELLET_DAMAGE, player);   // routed so other plugins can cancel
-            buckImpactFx(world, end);
-        }
-        return victim;
+        drawTracer(world, muzzle, eye.clone().add(dir.clone().multiply(maxDist)), BUCK_DUST, BUCK_CORE, 0.7);
     }
 
     // ---- passives: Spore Diffusion & Loyalty Pheromone --------------------------------

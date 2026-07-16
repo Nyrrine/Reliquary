@@ -891,9 +891,17 @@ public final class DiscordWeapon implements Weapon {
 
     /** Primary — near-white. The half of the wheel that is birth. */
     private static final TextColor PALE = TextColor.color(0xD8D4E0);
-    /** Secondary — near-black. The half that is death. */
-    private static final TextColor SHADE = TextColor.color(0x15131A);
-    /** HUD conditions — SHADE itself is far too dark to read on an action bar. */
+
+    /**
+     * Secondary — the half that is death, and the Abnormality title line. Specified as #15131A, which is
+     * so nearly black that a tooltip's background eats it; lifted to the violet-grey the action bar
+     * already reads in, which is the same shadow with light let into it. It still sits far below
+     * {@link #PALE}, so the two halves of the wheel read exactly as they should — the pale one is still
+     * the living one.
+     */
+    private static final TextColor SHADE = TextColor.color(0x7A7684);
+
+    /** HUD conditions. */
     private static final TextColor FAINT = TextColor.color(0x7A7684);
 
     private static final Color C_PALE = Color.fromRGB(0xD8, 0xD4, 0xE0);

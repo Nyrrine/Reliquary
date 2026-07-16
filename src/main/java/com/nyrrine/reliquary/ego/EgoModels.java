@@ -76,8 +76,10 @@ public final class EgoModels {
 
     // ---- WAW ----
     public static final Model HARMONY     = ranged(Material.CROSSBOW, "harmony");
-    // Gaze swings twice per attack, so its base sits at half the sword band — a swing totals ~7.
-    public static final Model GAZE        = melee(Material.NETHERITE_SWORD, "gaze", 3.5, 1.6);
+    // Gaze is meant to be feeble bare and to reward investment: it swings twice, but only the first cut
+    // carries enchants, so a bare swing is 2*2.4 = 4.8 (well under a netherite sword's 8) while Sharpness V
+    // at 20 Delight reaches 1.4*(2*2.4+3) = 10.92 — parity with the band, never past it.
+    public static final Model GAZE        = melee(Material.NETHERITE_SWORD, "gaze", 2.4, 1.6);
     public static final Model HORNET      = ranged(Material.CROSSBOW, "hornet");
     public static final Model FAINT_AROMA = ranged(Material.CROSSBOW, "faint_aroma");
     public static final Model DISCORD     = melee(Material.NETHERITE_SWORD, "discord", 6.5, 1.6);
