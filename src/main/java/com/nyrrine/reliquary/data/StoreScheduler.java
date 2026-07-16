@@ -11,6 +11,15 @@ package com.nyrrine.reliquary.data;
 interface StoreScheduler {
 
     /**
+     * Whether the calling thread is the server's main thread.
+     *
+     * <p>This lives on the seam rather than being read straight off {@code Bukkit} so the store's
+     * threading guard is code the headless tests can actually reach: {@code Bukkit.isPrimaryThread()}
+     * throws without a running server, and a guard that cannot be exercised is a guard nobody trusts.
+     */
+    boolean onMainThread();
+
+    /**
      * Run {@code task} on the main thread in roughly {@code delayTicks}. At most one debounced task
      * is pending at a time; the store only calls this when none is outstanding.
      */

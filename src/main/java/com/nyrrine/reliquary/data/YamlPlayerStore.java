@@ -30,11 +30,12 @@ import java.util.logging.Logger;
  * </pre>
  *
  * <h2>Threading</h2>
- * Records are read and mutated on the main thread only. {@link #markDirty} never writes; it marks
- * the record and arms a ~1s debounce. When the debounce fires — still on the main thread — each
- * dirty config is snapshotted to an immutable String, and only that String crosses to the writer
- * thread. A live {@code ConfigurationSection} is never handed off, so a mutation on the next tick
- * cannot race a half-finished save.
+ * Records are read and mutated on the main thread only, and that is enforced rather than merely
+ * documented — see {@link #requireMainThread}. {@link #markDirty} never writes; it marks the record
+ * and arms a ~1s debounce. When the debounce fires — still on the main thread — each dirty config is
+ * snapshotted to an immutable String, and only that String crosses to the writer thread. A live
+ * {@code ConfigurationSection} is never handed off, so a mutation on the next tick cannot race a
+ * half-finished save.
  *
  * <p>Reads do hit disk on the calling thread, which the contract sanctions ("offline lookups hit
  * disk, so don't call this per-tick"). Joins pay one small YAML read.
@@ -83,6 +84,7 @@ public final class YamlPlayerStore implements PlayerStore {
 
     @Override
     public PlayerRecord get(UUID id) {
+        requireMainThread("get");
         Objects.requireNonNull(id, "id");
         YamlPlayerRecord rec = cache.get(id);
         if (rec == null) {
@@ -131,9 +133,38 @@ public final class YamlPlayerStore implements PlayerStore {
         scheduler.shutdown(); // blocks until every submitted write has landed
     }
 
+    // ---- threading ---------------------------------------------------------
+
+    /**
+     * The store's one hard rule, made enforceable.
+     *
+     * <p>{@link #cache} is a plain access-ordered {@code LinkedHashMap} and {@link #dirty} a plain
+     * {@code HashSet}; neither is synchronised, and that is the design — everything here runs on the
+     * tick loop, so paying for locks would be paying for nothing. The cost of the choice is that an
+     * off-thread caller does not get a slow store, it gets a <em>silently corrupt</em> one: a
+     * concurrent {@code get} can leave the map's access-order links inconsistent, and the damage
+     * surfaces much later as another player's data, or none, with nothing left in the stack to say
+     * who did it.
+     *
+     * <p>So fail here, where the trace still names the caller. The trap worth knowing about is
+     * {@code AsyncChatEvent} — it fires <em>off</em> the main thread despite looking like any other
+     * player event, and anything reading player state from it lands straight in this method.
+     *
+     * @throws IllegalStateException if the caller is not on the main thread
+     */
+    private void requireMainThread(String action) {
+        if (scheduler.onMainThread()) return;
+        throw new IllegalStateException("PlayerStore." + action + " was called from thread '"
+                + Thread.currentThread().getName() + "' — player data may only be touched on the main"
+                + " thread. This store is not thread-safe by design; an off-thread call corrupts the"
+                + " cache instead of failing. If you are in an async event (AsyncChatEvent fires off"
+                + " the main thread), hop back with the scheduler before reading or writing.");
+    }
+
     // ---- dirty tracking ----------------------------------------------------
 
     void markDirty(UUID id) {
+        requireMainThread("touch");
         if (closed) {
             // Touched after shutdown drained. Rare, but dropping it would lose data — write through
             // on this thread instead. We're already off the tick loop by definition here.

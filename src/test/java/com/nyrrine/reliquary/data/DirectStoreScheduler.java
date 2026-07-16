@@ -14,6 +14,17 @@ final class DirectStoreScheduler implements StoreScheduler {
     int writes;
     boolean shutdown;
 
+    /**
+     * What the store's main-thread guard sees. True by default so every other test reads as an
+     * ordinary main-thread caller; a test flips it to stand in for an async event's thread.
+     */
+    boolean onMainThread = true;
+
+    @Override
+    public boolean onMainThread() {
+        return onMainThread;
+    }
+
     @Override
     public void debounce(Runnable task, long delayTicks) {
         pending = task;

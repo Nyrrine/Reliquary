@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -273,6 +274,51 @@ class PlayerStoreTest {
         assertEquals(0, store.cached(), "the record is evicted on quit");
         assertEquals(5, reopen().get(id).section("prescript").getInt("tally"),
                 "quit flushes without waiting for the debounce");
+    }
+
+    // ---- threading ---------------------------------------------------------
+
+    @Test
+    void offThreadReadFailsLoudlyRatherThanCorruptingTheCache() {
+        // The store's collections are unsynchronised on purpose, so an off-thread caller has to be
+        // told, not tolerated. AsyncChatEvent is the live example: it fires off the main thread.
+        DirectStoreScheduler sched = new DirectStoreScheduler();
+        YamlPlayerStore store = store(sched);
+        UUID id = UUID.randomUUID();
+
+        store.get(id); // on the main thread, this is the ordinary case
+        sched.onMainThread = false;
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> store.get(id),
+                "an off-thread read must throw rather than quietly walk the cache");
+        assertTrue(e.getMessage().contains("main"), "the message should name the actual problem: " + e.getMessage());
+    }
+
+    @Test
+    void offThreadTouchFailsLoudly() {
+        DirectStoreScheduler sched = new DirectStoreScheduler();
+        YamlPlayerStore store = store(sched);
+        UUID id = UUID.randomUUID();
+
+        PlayerRecord rec = store.get(id); // handed out on the main thread, kept across the hop
+        sched.onMainThread = false;
+
+        assertThrows(IllegalStateException.class, rec::touch,
+                "marking a record dirty off-thread must throw rather than race the dirty set");
+        assertEquals(0, sched.writes, "and nothing should have been written");
+    }
+
+    @Test
+    void theGuardDoesNotFireOnTheMainThread() {
+        DirectStoreScheduler sched = new DirectStoreScheduler();
+        YamlPlayerStore store = store(sched);
+        UUID id = UUID.randomUUID();
+
+        assertDoesNotThrow(() -> {
+            store.get(id).section("prescript").set("tally", 1);
+            store.get(id).touch();
+            sched.fire();
+        }, "the guard must stay out of the way of the normal path");
     }
 
     // ---- cache pruning -----------------------------------------------------

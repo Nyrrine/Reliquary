@@ -1,5 +1,6 @@
 package com.nyrrine.reliquary.data;
 
+import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -30,6 +31,11 @@ final class BukkitStoreScheduler implements StoreScheduler {
             t.setDaemon(true);
             return t;
         });
+    }
+
+    @Override
+    public boolean onMainThread() {
+        return Bukkit.isPrimaryThread();
     }
 
     @Override
