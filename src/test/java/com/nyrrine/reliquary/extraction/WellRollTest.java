@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Headless tests for the Pocket Well resolution — the anti-luck guarantees the design leans on: the grade
- * floor and volume gate seal luck inside your band, a Certified pour is a guaranteed manifest, and
+ * floor and volume gate seal luck inside your band, a Certified pour is a guaranteed extraction, and
  * over-reaching breaches at the tier you reached for.
  */
 class WellRollTest {
@@ -38,12 +38,12 @@ class WellRollTest {
     }
 
     @Test
-    void certifiedPourIsGuaranteedManifestOfTheCatalystTarget() {
+    void certifiedPourIsGuaranteedExtractionOfTheCatalystTarget() {
         // On-target WAW cogito at Primary Standard, big volume, catalyst loaded → guaranteed Solemn Lament.
         PotState p = pour(WeaponSignatures.SOLEMN_LAMENT.signature(), 1000, 99.5, 85);
         WellRoll.Result r = WellRoll.resolve(p, "solemn_lament", 0.0, seeded());
 
-        assertSame(WellRoll.Outcome.MANIFEST, r.outcome());
+        assertSame(WellRoll.Outcome.EXTRACT, r.outcome());
         assertEquals("solemn_lament", r.weapon().id());
         assertTrue(r.certified(), "Primary Standard + locked catalyst should certify");
     }
@@ -78,8 +78,8 @@ class WellRollTest {
     }
 
     @Test
-    void cleanZayinPourCanManifestWithoutACatalyst() {
-        // A tidy single-cluster ZAYIN target at reagent grade should manifest on its own often enough.
+    void cleanZayinPourCanExtractWithoutACatalyst() {
+        // A tidy single-cluster ZAYIN target at reagent grade should extract on its own often enough.
         PotState p = pour(WeaponSignatures.PENITENCE.signature(), 200, 92.0, 80);
         WellRoll.Result r = WellRoll.resolve(p, null, 0.0, seeded());
 
@@ -101,12 +101,12 @@ class WellRollTest {
         assertEquals(1.0, pool.stream().mapToDouble(WellRoll.Chance::odds).sum(), 1.0e-6, "odds are a distribution");
 
         RandomGenerator rng = new java.util.Random(1L);
-        Set<String> manifested = new HashSet<>();
+        Set<String> extracted = new HashSet<>();
         for (int i = 0; i < 300; i++) {
             WellRoll.Result r = WellRoll.resolve(p, null, 0.0, rng);
-            if (r.outcome() == WellRoll.Outcome.MANIFEST) manifested.add(r.weapon().id());
+            if (r.outcome() == WellRoll.Outcome.EXTRACT) extracted.add(r.weapon().id());
         }
-        assertTrue(manifested.size() >= 2, "the gacha should produce variety, got " + manifested);
+        assertTrue(extracted.size() >= 2, "the gacha should produce variety, got " + extracted);
     }
 
     @Test
@@ -116,7 +116,7 @@ class WellRollTest {
         RandomGenerator rng = new java.util.Random(2L);
         for (int i = 0; i < 50; i++) {
             WellRoll.Result r = WellRoll.resolve(p, "penitence", 0.0, rng);
-            assertSame(WellRoll.Outcome.MANIFEST, r.outcome());
+            assertSame(WellRoll.Outcome.EXTRACT, r.outcome());
             assertEquals("penitence", r.weapon().id(), "the catalyst must cut the RNG to a guaranteed pull");
         }
     }

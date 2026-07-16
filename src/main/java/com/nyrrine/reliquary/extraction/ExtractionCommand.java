@@ -24,7 +24,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * A driver for the extraction system that runs the whole pipeline through chat, before the polished
  * custom-block stations exist. It is the testbed for validating <b>feel and tuning</b>: brew a blank vial,
  * add reagents to it (the Censer), consult the lectern's what-if, distill (the Centrifuge), and pour it into
- * the Well to manifest, near-miss, or breach.
+ * the Well to extract, near-miss, or breach.
  *
  * <p>Reached via the short {@code /cogito <sub> ...} command (aliases {@code /ext}, {@code /co}) or the
  * equivalent {@code /reliquary ext <sub> ...}. Operates on the Cogito potion in the player's main hand.
@@ -320,7 +320,7 @@ public final class ExtractionCommand {
             player.sendMessage(msg("Catalyst — " + (w != null ? w.display() : cw)
                     + (w != null ? " (" + w.grade().display() + ")" : "")
                     + ". Insert it into a cogito (sneak the Crucible, or /cogito insert): "
-                    + (apex ? "REQUIRED to manifest this apex weapon — it makes a Radiant Cogito."
+                    + (apex ? "REQUIRED to extract this apex weapon — it makes a Radiant Cogito."
                             : "adds 1–15% to its odds per stack (up to 3), once it's your top pull past 70%."),
                     GOLD));
             trackAndGuide(player, cw);
@@ -331,7 +331,7 @@ public final class ExtractionCommand {
         if (wpn != null) {
             WeaponSpec w = WeaponSignatures.byId(wpn.id());
             player.sendMessage(msg((w != null ? w.display() : wpn.id())
-                    + (w != null ? " (" + w.grade().display() + ")" : "") + " — a manifested E.G.O.", GOLD));
+                    + (w != null ? " (" + w.grade().display() + ")" : "") + " — an extracted E.G.O.", GOLD));
             trackAndGuide(player, wpn.id());
             return;
         }
@@ -776,7 +776,7 @@ public final class ExtractionCommand {
 
     /**
      * The Pocket Well — an ominous chamber. Right-click <b>peers in</b>: it reveals (floating inside) the
-     * weapon your current cogito is most likely to manifest, without consuming anything. Sneak-right-click
+     * weapon your current cogito is most likely to extract, without consuming anything. Sneak-right-click
      * <b>pours</b> for real (the commit).
      */
     public void stationWell(Player player, org.bukkit.Location wellLoc, boolean sneaking) {
@@ -803,7 +803,7 @@ public final class ExtractionCommand {
                 + Math.round(top.odds() * 100) + "%) — sneak-click to pour.", GREEN));
     }
 
-    /** Pour an Extraction Ticket at the Well: spin the carousel over its pools, then manifest a random weapon. */
+    /** Pour an Extraction Ticket at the Well: spin the carousel over its pools, then extract a random weapon. */
     private void ticketWell(Player player, org.bukkit.Location wellLoc, boolean sneaking, ItemStack ticket) {
         java.util.Set<String> pools = ExtractionTicket.pools(ticket);
         List<WeaponSpec> pool = new ArrayList<>();
@@ -823,7 +823,7 @@ public final class ExtractionCommand {
                     + String.join("/", pools) + ". Sneak-click to pull.", GREEN));
             return;
         }
-        // Pull a random weapon; only spend the ticket if a weapon actually manifests.
+        // Pull a random weapon; only spend the ticket if a weapon is actually extracted.
         WeaponSpec pick = pool.get(ThreadLocalRandom.current().nextInt(pool.size()));
         Weapon weapon = plugin.weapons().get(pick.id());
         if (weapon == null) {
@@ -976,7 +976,7 @@ public final class ExtractionCommand {
     }
 
     /**
-     * The status line under the gauges: a green "manifestable now" cue for anything already reachable (so you
+     * The status line under the gauges: a green "extractable now" cue for anything already reachable (so you
      * know when to stop and pour), plus the closest weapon by shape and what it still needs.
      */
     private void showNearest(Player player, PotState st) {
@@ -1396,7 +1396,7 @@ public final class ExtractionCommand {
         String name = w != null ? w.display() : wid;
         if (apex) {
             player.sendMessage(msg("Bonded the " + name + " catalyst — this is now a Radiant Cogito, the "
-                    + "REQUIRED form to manifest it. Get it to your top pull past 70% and pour.", GREEN));
+                    + "REQUIRED form to extract it. Get it to your top pull past 70% and pour.", GREEN));
         } else {
             player.sendMessage(msg("Bonded the " + name + " catalyst (" + st.catalystCount() + "/3) — each "
                     + "stack adds 1–15% to its odds, once it's your top pull past 70%.", GREEN));
@@ -1434,7 +1434,7 @@ public final class ExtractionCommand {
         // The inserted catalyst is spent with the vial (already consumed above).
 
         switch (r.outcome()) {
-            case MANIFEST -> onManifest(player, r);
+            case EXTRACT -> onExtract(player, r);
             case BREACH -> player.sendMessage(msg(String.format(
                     "BREACH — the Well ruptures. A %s-class Abnormality would climb out. "
                     + "(your pour: %s match, %s, stability %d) (Combat: coming soon.)",
@@ -1443,9 +1443,9 @@ public final class ExtractionCommand {
         }
     }
 
-    private void onManifest(Player player, WellRoll.Result r) {
+    private void onExtract(Player player, WellRoll.Result r) {
         WeaponSpec spec = r.weapon();
-        player.sendMessage(msg((r.certified() ? "CERTIFIED manifest — " : "Manifest — ")
+        player.sendMessage(msg((r.certified() ? "CERTIFIED extraction — " : "Extraction — ")
                 + spec.display() + " climbs out of the Well.", GREEN));
 
         Weapon weapon = plugin.weapons().get(spec.id());
@@ -1517,7 +1517,7 @@ public final class ExtractionCommand {
         Grade minGrade = tgt != null ? tgt.grade().minCogito() : EgoGrade.ZAYIN.minCogito();
         String who = tgt != null ? tgt.display() : "anything (even a ZAYIN)";
         return String.format(
-                "Too weak to manifest %s — you have %.0f volume at %.1f%% (%s); it needs >=%.0f volume and "
+                "Too weak to extract %s — you have %.0f volume at %.1f%% (%s); it needs >=%.0f volume and "
                 + ">=%s grade. Add much more reagent, or blend vials for volume. (Vial kept.)",
                 who, st.titer(), st.purity(), st.grade().display(), minVol, minGrade.display());
     }

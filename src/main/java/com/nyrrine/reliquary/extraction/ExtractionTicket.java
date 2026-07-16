@@ -19,7 +19,7 @@ import java.util.Set;
 /**
  * An <b>Extraction Ticket</b> — an admin / event item (a PDC-tagged Paper) that can be poured straight at the
  * Pocket Well <i>without</i> brewing a cogito. It carries one or more grade "pools" (ZAYIN…ALEPH); pouring it
- * spins the Well carousel and manifests a random weapon from the union of those pools. Pools are chained onto
+ * spins the Well carousel and extracts a random weapon from the union of those pools. Pools are chained onto
  * a ticket with {@code /cogito ticket add <grade>}, so a single ticket can span any range you like — handy for
  * previewing the Well animation and for event giveaways.
  */

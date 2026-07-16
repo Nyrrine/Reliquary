@@ -5,7 +5,7 @@ import net.kyori.adventure.text.format.TextColor;
 /**
  * The analytical-chemistry grade ladder — how clean a Cogito is, derived purely from its purity.
  *
- * <p>Grade is the gate the Pocket Well reads: a pour can only manifest weapons whose required grade is
+ * <p>Grade is the gate the Pocket Well reads: a pour can only extract weapons whose required grade is
  * {@code <=} the cogito's grade (the hard grade floor — luck never crosses tiers). Ordinal order is the
  * ladder order, so {@link #atLeast(Grade)} / {@link #atMost(Grade)} express the floor directly.
  *
@@ -19,7 +19,7 @@ public enum Grade {
     REAGENT          ("Reagent",          85.0,   0x7FC24A), // reliable TETH/HE working stock
     ANALYTICAL       ("Analytical",       95.0,   0x4ADF7A), // tight targeting — what WAW demands
     PRIMARY_STANDARD ("Primary Standard", 99.0,   0x3BE2C0), // reference-quality; the refining cap
-    CERTIFIED        ("Certified",       100.0,   0xFFD54A); // catalyst-locked, guaranteed manifest
+    CERTIFIED        ("Certified",       100.0,   0xFFD54A); // catalyst-locked, guaranteed extraction
 
     private final String display;
     private final double minPurity;

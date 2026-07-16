@@ -237,7 +237,7 @@ public final class Cogito {
             out.add(line("◆ Catalyst: " + (cw != null ? cw.display() : state.catalystTarget())
                     + "  (" + Math.max(1, state.catalystCount()) + "/3)", TextColor.color(0xFFC94A)));
             out.add(line(apex
-                    ? "REQUIRED to manifest this apex weapon"
+                    ? "REQUIRED to extract this apex weapon"
                     : "adds 1–15% per stack to its odds, once it's your top pull past 70%", FAINT, true));
         }
         return out;

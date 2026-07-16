@@ -1,7 +1,7 @@
 package com.nyrrine.reliquary.extraction;
 
 /**
- * A manifestable weapon as the Well sees it: an id (matching the E.G.O weapon's model id), a display name,
+ * An extractable weapon as the Well sees it: an id (matching the E.G.O weapon's model id), a display name,
  * its {@link EgoGrade}, and its target {@link SinProfile signature} — a single point in 7-sin space. The
  * whole roster is just a list of these, so adding a weapon costs nothing systemically (§11).
  */

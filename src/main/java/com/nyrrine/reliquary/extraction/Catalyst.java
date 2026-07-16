@@ -15,7 +15,7 @@ import java.util.List;
 /**
  * A signature-lock catalyst — the per-weapon "Certified Reference Material" forged at the Well from its
  * grind-gated sub-components (see {@link Catalysts}). Pour one in with a matching cogito and it <b>cuts the
- * RNG</b>: the exact weapon it locks manifests, guaranteed, and at Primary Standard purity it certifies to
+ * RNG</b>: the exact weapon it locks is extracted, guaranteed, and at Primary Standard purity it certifies to
  * 100%. This is where the top-end weapons are <i>earned</i> — the components are the wall, not luck.
  *
  * <p>A Nether Star carrying the target weapon's id in its persistent data. Static utility.

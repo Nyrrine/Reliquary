@@ -4,7 +4,7 @@ package com.nyrrine.reliquary.extraction;
  * The E.G.O rarity grade of a weapon (Project Moon's ZAYIN → WAW ladder) — distinct from the analytical
  * {@link Grade} of a cogito. Each E.G.O grade sets the two hard gates the Pocket Well enforces before a
  * weapon can even enter the roll: the <b>minimum cogito grade</b> (the grade floor — luck never crosses
- * tiers) and the <b>minimum volume</b> (deeper manifestations demand a bigger charge; a vial is ~120 titer).
+ * tiers) and the <b>minimum volume</b> (deeper extractions demand a bigger charge; a vial is ~120 titer).
  */
 public enum EgoGrade {
 
@@ -26,10 +26,10 @@ public enum EgoGrade {
     /** Display label (e.g. {@code "WAW"}). */
     public String display() { return display; }
 
-    /** Lowest cogito grade that can manifest this tier — the grade floor. */
+    /** Lowest cogito grade that can extract this tier — the grade floor. */
     public Grade minCogito() { return minCogito; }
 
-    /** Lowest cogito volume (titer) that can manifest this tier — the volume gate. */
+    /** Lowest cogito volume (titer) that can extract this tier — the volume gate. */
     public double minVolume() { return minVolume; }
 
     /** Apex tiers (WAW, and ALEPH once it exists) — these MANDATE an inserted catalyst (a Radiant Cogito). */

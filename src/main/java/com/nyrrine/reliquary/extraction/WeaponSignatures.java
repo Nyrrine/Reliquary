@@ -17,7 +17,7 @@ import static com.nyrrine.reliquary.extraction.Sin.WRATH;
 
 /**
  * The weapon roster as 7-sin coordinates — what the Pocket Well rolls against (§27). Ids match the E.G.O
- * weapon model ids so a manifest can hand back the real item. Signatures are the emotional <i>contradiction</i>
+ * weapon model ids so an extraction can hand back the real item. Signatures are the emotional <i>contradiction</i>
  * of each abnormality; single-cluster weapons sit calm, cross-axis ones straddle an opposition bridge and
  * are the hard extractions.
  *

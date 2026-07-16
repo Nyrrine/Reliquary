@@ -10,8 +10,8 @@ import java.util.random.RandomGenerator;
  * it lands on one of three rungs:
  *
  * <ol>
- *   <li>{@link Outcome#MANIFEST} — you get the weapon. Certified (catalyst-locked at Primary Standard) is a
- *       guaranteed manifest of the catalyst's target.</li>
+ *   <li>{@link Outcome#EXTRACT} — you get the weapon. Certified (catalyst-locked at Primary Standard) is a
+ *       guaranteed extraction of the catalyst's target.</li>
  *   <li>{@link Outcome#BREACH} — the Well ruptures and an Abnormality climbs out, scaled to the grade you
  *       reached for (loading a WAW catalyst onto crude cogito can breach a WAW Abnormality).</li>
  * </ol>
@@ -44,15 +44,15 @@ public final class WellRoll {
     public static final double BREACH_W_RESIDUE = 0.30;  // Well spray-and-pray taint
 
     /** Which rung a pour resolved to. */
-    public enum Outcome { MANIFEST, BREACH }
+    public enum Outcome { EXTRACT, BREACH }
 
     /**
      * The result of a pour.
      *
      * @param outcome     which rung
-     * @param weapon      the manifested / near-missed weapon (null only on a blank-pour breach)
+     * @param weapon      the extracted / near-missed weapon (null only on a blank-pour breach)
      * @param match       best match achieved, {@code [0,1]}
-     * @param certified   whether a catalyst guaranteed the manifest
+     * @param certified   whether a catalyst guaranteed the extraction
      * @param cogitoGrade the analytical grade of the pour
      * @param purity      the pour's purity (0–100) — for the attribution stamp
      * @param aimedGrade  the E.G.O grade reached for — sets breach severity
@@ -62,7 +62,7 @@ public final class WellRoll {
 
     /**
      * Resolve a pour. {@code catalystTargetId} may be null (no catalyst); {@code wellResidue} in {@code [0,1]}
-     * is the Well's spray-and-pray taint (raises breach chance); {@code rng} drives the manifest/breach rolls.
+     * is the Well's spray-and-pray taint (raises breach chance); {@code rng} drives the extract/breach rolls.
      */
     public static Result resolve(PotState pour, String catalystTargetId, double wellResidue,
                                  RandomGenerator rng) {
@@ -94,8 +94,8 @@ public final class WellRoll {
                 && pool.get(0).odds() >= CATALYST_MIN_ODDS) {
             boolean certified = purity >= CERTIFIED_PURITY - 1.0e-9;
             if (target.grade().isApex()) {
-                // Apex: the catalyst is the requirement (no buff) — top pull + past 70% → it manifests.
-                return new Result(Outcome.MANIFEST, target, pool.get(0).match(), certified,
+                // Apex: the catalyst is the requirement (no buff) — top pull + past 70% → it extracts.
+                return new Result(Outcome.EXTRACT, target, pool.get(0).match(), certified,
                         cogitoGrade, purity, target.grade());
             }
             // ZAYIN/TETH/HE: a random 1–15% odds bump per stacked catalyst (up to 3).
@@ -106,7 +106,7 @@ public final class WellRoll {
             }
             double boosted = Math.min(1.0, pool.get(0).odds() + buff);
             if (rng.nextDouble() < boosted) {
-                return new Result(Outcome.MANIFEST, target, pool.get(0).match(), certified,
+                return new Result(Outcome.EXTRACT, target, pool.get(0).match(), certified,
                         cogitoGrade, purity, target.grade());
             }
         }
@@ -123,7 +123,7 @@ public final class WellRoll {
 
         // The gacha (which weapon): almost always your best match, with a small off-chance of a neighbour.
         WeaponSpec pulled = weightedPick(pool, rng);
-        return new Result(Outcome.MANIFEST, pulled, bestMatch, false, cogitoGrade, purity, pulled.grade());
+        return new Result(Outcome.EXTRACT, pulled, bestMatch, false, cogitoGrade, purity, pulled.grade());
     }
 
     /** Drop apex (WAW/ALEPH) weapons that aren't the inserted catalyst's target, then renormalize the odds. */
