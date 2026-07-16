@@ -15,6 +15,15 @@ commands:
   prescript:
     description: The Index — prescripts and their tally.
     usage: /prescript help
+  abeautifulvoice:
+    description: Become Carmen — name, skin and voice.
+    usage: /abeautifulvoice form [player]
+    permission: reliquary.admin
+    aliases: [abv]
+  carmen:
+    description: Speak a line as Carmen, without transforming.
+    usage: /carmen <message>
+    permission: reliquary.admin
 permissions:
   reliquary.admin:
     description: Access to Reliquary's relic commands.
