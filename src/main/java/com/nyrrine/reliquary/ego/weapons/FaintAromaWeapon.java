@@ -212,8 +212,25 @@ public final class FaintAromaWeapon implements Weapon {
     /** Ticks between the arrows of a burst — ~0.15s apart, i.e. rapid succession. */
     private static final long FULL_BLOOM_GAP_TICKS = 3L;
 
-    /** "Higher in impact" — heavier than a Blossoming arrow, still under a Sharpness-V netherite hit. */
-    private static final double FULL_BLOOM_DAMAGE = 7.0;
+    /**
+     * What one Full Bloom arrow carries. Was 7.0, and only ever delivered once: the volley's other two
+     * arrows died against the first one's hurt-immunity, so the ability quietly dealt a third of itself
+     * and was balanced by an accident. Now that all three land, the number has to be honest — a fixed bug
+     * must never be left doing a balance mechanism's job, or the next person to "fix" it triples her
+     * signature and nobody knows why.
+     *
+     * <p>At 5.0 the volley is {@code 3 x 5.0 x 1.30 = 19.5} at full petals — two and a half Blossoming
+     * arrows in one press, on an eight-second rest, and no single arrow anywhere near the netherite band's
+     * ceiling. Strong, not oppressive.
+     *
+     * <p><b>One tension worth knowing about:</b> the spec calls these arrows "higher in impact" than
+     * Blossoming's, and at 5.0 a single one (6.5 at full petals) lands under a single Blossoming arrow
+     * (7.8). Three of them at Blossoming's weight would be 27.3 in a third of a second, which one-shots an
+     * unarmoured player — the volley's weight is the volley. The impact the spec asks for is real and it
+     * lives in the speed and in the broken guard; what a Full Bloom arrow buys over a Blossoming one is
+     * that it arrives faster, it cannot be blocked, and it brings two friends.
+     */
+    private static final double FULL_BLOOM_DAMAGE = 5.0;
 
     /** "…and velocity" — visibly faster than {@link #BLOSSOM_SPEED}. */
     private static final double FULL_BLOOM_SPEED = 3.2;
@@ -749,6 +766,12 @@ public final class FaintAromaWeapon implements Weapon {
                 breakGuard(blocker);
             }
 
+            // Full Bloom is three arrows three ticks apart, and a body may only be hurt once every ten —
+            // so the second and third used to die against the first one's immunity and the volley landed
+            // one arrow's worth. Only this shot needs the window cleared: Blossoming's arrows are a second
+            // and a half apart, and Magnificent End's blast already spares the body its bolt struck.
+            if (shot == Shot.FULL_BLOOM) victim.setNoDamageTicks(0);
+
             deal(victim, shot.damage * multiplier, caster); // fenced, and still cancellable by other plugins
             flowerBurst(at);
 
@@ -1180,9 +1203,12 @@ public final class FaintAromaWeapon implements Weapon {
                             "A lavender arrow every 1.5s. A raised",
                             "shield blocks it. Every 9th arrow to",
                             "land saps its target: weakness, 5s."),
+                    // Not "heavier" any more — one Full Bloom arrow lands under one Blossoming arrow now
+                    // that all three of them arrive. The tooltip says what the volley actually is.
                     new EgoLore.Ability("[Right-Click] Full Bloom",
-                            "Three heavier, faster arrows in rapid",
-                            "succession. Breaks a raised guard."),
+                            "Three faster arrows at once, and a",
+                            "raised guard does not stop them.",
+                            "Rests 8 seconds."),
                     new EgoLore.Ability("[Shift+Right-Click] Magnificent End",
                             "A single bolt that blooms on contact",
                             "for devastating damage. Spends every",

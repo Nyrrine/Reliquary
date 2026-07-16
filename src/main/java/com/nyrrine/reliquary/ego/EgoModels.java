@@ -54,20 +54,19 @@ public final class EgoModels {
 
     // ---- TETH ----
     public static final Model SOLITUDE    = ranged(Material.CROSSBOW, "solitude");
-    // A TRIDENT, for the spear silhouette — Nyrrine, 2026-07-17: "for fragment a spear silhouette since
-    // itll have a model eventually." It was a NETHERITE_SWORD precisely because a trident's right-click
-    // throws itself, and right-click is this weapon's lunge.
+    // A spear, because vanilla has one. This was a NETHERITE_SWORD (no spear, we thought), then briefly a
+    // TRIDENT as a bet on the interact-cancel suppressing its throw — both were us working around an item
+    // that already existed. Nyrrine knew; she said "netherite spear" plainly and offered to let it stay a
+    // sword "if you do not know it", which would have shipped the worse answer out of our own ignorance.
     //
-    // ⚠️ UNPROVEN IN GAME. WeaponManager.onInteract cancels the interact for any registered weapon, which
-    // is what stops Fourth Match Flame's FLINT_AND_STEEL setting the world alight on every cast — so an
-    // instant right-click use is definitely suppressed. A trident is a *charge-then-release* use, which is
-    // a different path, and nothing in this roster proves that one: the crossbows look like proof and
-    // aren't, since a crossbow with no arrows would never draw regardless. Cancelling should skip the
-    // item's use() entirely and never start the charge, but "should" is not "does".
+    // NETHERITE_SPEAR is the whole want with no trade: the silhouette AND nothing to fight. The evidence it
+    // is inert is the shape of the API rather than the absence of a mention — org.bukkit.entity.Trident
+    // exists because a trident is a thing you throw; there is no org.bukkit.entity.Spear, so a spear has
+    // nothing to throw. It's the absence of the exact mechanism that made the trident wrong.
     //
-    // FIRST THING TO CHECK NEXT PLAYTEST: right-click Fragments and confirm the spear stays in your hand.
-    // If it flies across the room, put this back to NETHERITE_SWORD; the spear comes with the model.
-    public static final Model FRAGMENTS_FROM_SOMEWHERE = melee(Material.TRIDENT, "fragments_from_somewhere", 6.0, 1.4);
+    // Still worth one look in game — right-click it and confirm it stays in hand — but there is no longer a
+    // hack here to be suspicious of.
+    public static final Model FRAGMENTS_FROM_SOMEWHERE = melee(Material.NETHERITE_SPEAR, "fragments_from_somewhere", 6.0, 1.4);
     // Deliberately not a MACE. A mace carries a fall-slam passive that fights whatever gimmick sits on
     // top of it, and every weapon here gets a custom model eventually, so the fallback only has to hold a
     // sensible silhouette and otherwise stay out of the way. A hoe is a haft with a head — a lantern on a
