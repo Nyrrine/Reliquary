@@ -10,6 +10,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -76,6 +77,39 @@ final class CarmenForm implements Listener {
         // accord, without anyone having to fight them for the renderer.
         player.displayName(Component.text(CarmenSkin.NAME));
         return true;
+    }
+
+    /**
+     * Finds a transformed player by the name they had before the voice took them.
+     *
+     * <p>Needed because the rename is real: while she's Carmen, {@code getPlayerExact("Nyrrine")}
+     * finds nobody, which is precisely when someone would be typing it to undo this. Worse, two
+     * people in form are both literally named Carmen, so asking for the name back is ambiguous while
+     * the name they arrived with never is.
+     *
+     * @return the player, or null if nobody in form used to be called that.
+     */
+    Player findByOriginalName(String name) {
+        for (Map.Entry<UUID, Original> entry : originals.entrySet()) {
+            String was = entry.getValue().profile().getName();
+            if (was != null && was.equalsIgnoreCase(name)) return Bukkit.getPlayer(entry.getKey());
+        }
+        return null;
+    }
+
+    /**
+     * The names everyone in form arrived with — what you'd type to give one of them back.
+     *
+     * <p>Completing on live names would offer "Carmen" once per transformed player, which tells you
+     * nothing about which one you're pointing at.
+     */
+    List<String> originalNames() {
+        List<String> names = new ArrayList<>();
+        for (Original original : originals.values()) {
+            String was = original.profile().getName();
+            if (was != null) names.add(was);
+        }
+        return names;
     }
 
     /** @return false if they weren't in form. */

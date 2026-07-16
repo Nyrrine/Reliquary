@@ -75,7 +75,7 @@ final class DistortionCommand implements CommandExecutor, TabCompleter {
         int nameAt = off ? 2 : 1;
         Player target;
         if (args.length > nameAt) {
-            target = Bukkit.getPlayerExact(args[nameAt]);
+            target = resolve(args[nameAt]);
             if (target == null) {
                 sender.sendMessage(Component.text("Nobody here by that name: " + args[nameAt])
                         .color(NamedTextColor.RED));
@@ -114,6 +114,21 @@ final class DistortionCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    /**
+     * Finds who they meant, by the name they're wearing or the one they came in with.
+     *
+     * <p>The rename is real and server-wide, which bites here first: the moment she's Carmen,
+     * {@code getPlayerExact("Nyrrine")} finds nobody — and "form off Nyrrine" is exactly what someone
+     * types to end it. So if the name on the tin doesn't match anyone, ask who used to answer to it.
+     *
+     * <p>Live names win, since that's who you can see. The fallback only ever looks at people in
+     * form, so it can't shadow a real player.
+     */
+    private Player resolve(String name) {
+        Player online = Bukkit.getPlayerExact(name);
+        return online != null ? online : form.findByOriginalName(name);
+    }
+
     /** "You're" when they mean themselves, otherwise the name — reads right in either message. */
     private static String describe(CommandSender sender, Player target) {
         return target.equals(sender) ? "You're" : target.getName() + " is";
@@ -145,7 +160,8 @@ final class DistortionCommand implements CommandExecutor, TabCompleter {
             options.addAll(names());
             return filter(options, args[1]);
         }
-        if (args.length == 3 && args[1].equalsIgnoreCase("off")) return filter(names(), args[2]);
+        // "form off <tab>" — offer who's actually in form, under the name they came in with.
+        if (args.length == 3 && args[1].equalsIgnoreCase("off")) return filter(form.originalNames(), args[2]);
         return Collections.emptyList();
     }
 
