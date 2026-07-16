@@ -57,7 +57,10 @@ import java.util.concurrent.ThreadLocalRandom;
  *       unlocks. The petal charge reads on the action bar.</li>
  *   <li><b>[Left Click] Blossoming Fragrance</b> — a lavender arrow every
  *       {@value #BLOSSOM_CADENCE_MS}ms, loosed the instant you click (the crossbow never draws or
- *       charges). A raised shield facing the shot swallows it whole.</li>
+ *       charges). A raised shield facing the shot swallows it whole. Every arrow that lands gathers the
+ *       aroma charge; on the {@value #AROMA_CHARGE_STRIKES}th the scent catches and saps whoever took
+ *       it ({@value #FAINT_AROMA_WEAKNESS_SECONDS}s of Weakness), then the charge empties and gathers
+ *       again. It reads on the action bar beside the petals.</li>
  *   <li><b>[Right-Click] Full Bloom</b> — {@value #FULL_BLOOM_ARROWS} heavier, faster arrows in rapid
  *       succession. Each one triggers the same passives as a Blossoming arrow. Rather than being stopped
  *       by a raised guard, Full Bloom <em>breaks</em> it: a blocking victim's shield is knocked out of
@@ -95,15 +98,10 @@ public final class FaintAromaWeapon implements Weapon {
     /**
      * The mend laid on the wielder by every strike of [Passive] Unwithering Flower.
      *
-     * <p><b>TODO: BLOCKED — pending a design ruling. This value is an unresolved PLACEHOLDER, not a
-     * decision.</b> The spec reads "Heal half a bar of HP every strike", which parses two ways: half a
-     * <em>heart</em> (1.0 HP) or half the health <em>bar</em> (10.0 HP). That is a 10x swing on a passive
-     * that fires on every single arrow — at 10.0 a Full Bloom burst would full-heal the wielder three
-     * times over, at 1.0 it is a light trickle. 1.0 sits here <b>only</b> so the passive compiles and runs
-     * end-to-end; it is not the chosen number.
-     *
-     * <p>When the ruling lands this constant is the <b>only</b> thing that needs to change. The heal is
-     * wired up completely through {@link #healWielder} and nothing else reads the value.
+     * <p>"Half a bar of HP" reads as half a <b>heart</b> — one point — not half the health bar. On a
+     * passive that fires on every single arrow the other reading would full-heal the wielder several
+     * times over inside one Full Bloom burst; this is a light, constant trickle instead, which is what
+     * an unwithering flower should feel like.
      */
     private static final double UNWITHERING_HEAL_PER_STRIKE = 1.0;
 
@@ -114,7 +112,20 @@ public final class FaintAromaWeapon implements Weapon {
     private static final double PETAL_DAMAGE_PER_STACK = 0.01;
     private static final int PETAL_DAMAGE_PER_STACK_PCT = 1; // the same number, for docs and the HUD
 
-    // ---- faint aroma (the Weakness payload) ----------------------------------------
+    // ---- faint aroma (the charge meter + its Weakness payload) ---------------------
+
+    /**
+     * Arrow strikes needed to fill the aroma charge. Every ninth strike the scent finally catches and
+     * lays its Weakness — the meter then empties and starts gathering again.
+     *
+     * <p>The count is the <b>wielder's</b>, not any one victim's, and it runs across every opponent they
+     * hit: this is a charge meter like Logging's or Regret's, not a per-target debuff timer. Blossoming
+     * Fragrance and Full Bloom arrows both feed it (the spec has Full Bloom triggering "the same passives
+     * as blossoming fragrance"); Magnificent End does not, since it spends the passive rather than feeds
+     * it. Keeping the meter wielder-keyed is also what keeps this weapon free of victim-keyed state —
+     * there is no per-mob map here to leak.
+     */
+    private static final int AROMA_CHARGE_STRIKES = 9;
 
     /** The scent clings for 5 seconds. */
     private static final int FAINT_AROMA_WEAKNESS_TICKS = 100;
@@ -259,6 +270,7 @@ public final class FaintAromaWeapon implements Weapon {
     /** Per-wielder bloom state: petals grown, plus the gates that pace the three inputs. */
     private static final class Bloom {
         int  petals      = 0;   // [Passive] Unwithering Flower — 0..PETAL_CAP
+        int  aroma       = 0;   // the faint-aroma charge — 0..AROMA_CHARGE_STRIKES, empties on trigger
         long lastBlossom = 0L;  // epoch-ms of the last Blossoming Fragrance arrow (the 1.5s cadence gate)
         long holdUntil   = 0L;  // swing-refreshed auto-fire window; onTick looses arrows while it is live
         long fullBloomCd = 0L;  // epoch-ms when Full Bloom is ready again
@@ -447,6 +459,20 @@ public final class FaintAromaWeapon implements Weapon {
         world.spawnParticle(Particle.DUST, chest, 3, 0.3, 0.35, 0.3, 0, PETAL_DUST);
     }
 
+    /**
+     * Gather the scent by one strike and, on every {@value #AROMA_CHARGE_STRIKES}th, let it catch on the
+     * body that took the arrow — {@link #applyFaintAroma}, then the meter empties and begins again.
+     *
+     * <p>The charge belongs to the wielder and carries across targets, so a skirmisher who spreads their
+     * arrows around still earns the scent; it simply lands on whoever happens to take the ninth.
+     */
+    private void feedAroma(Player wielder, LivingEntity victim) {
+        Bloom bloom = blooms.computeIfAbsent(wielder.getUniqueId(), k -> new Bloom());
+        if (++bloom.aroma < AROMA_CHARGE_STRIKES) return;
+        bloom.aroma = 0;
+        applyFaintAroma(victim);
+    }
+
     /** The petal multiplier a shot rides: +1% weapon damage per petal, so x1.30 at full bloom. */
     private static double petalMultiplier(int petals) {
         return 1.0 + Math.min(petals, PETAL_CAP) * PETAL_DAMAGE_PER_STACK;
@@ -456,16 +482,8 @@ public final class FaintAromaWeapon implements Weapon {
      * Faint aroma: lay {@value #FAINT_AROMA_WEAKNESS_SECONDS} seconds of WEAKNESS on a struck body — the
      * scent of a forest that isn't there, sapping the strength out of whoever breathes it in.
      *
-     * <p><b>Ready and complete, but not yet called from anywhere.</b> The payload is finished; the rule
-     * that decides <em>when</em> it fires is blocked on a design ruling — see the TODO in
-     * {@link Bolt#strike}. This is deliberate rather than an oversight: the effect is built as a
-     * one-call helper so that wiring the trigger up once the rule is known is two lines, not a rewrite.
-     *
-     * <p><b>Note for whoever wires the trigger:</b> if the ruling needs a strike counter keyed by
-     * <em>victim</em>, that map must be pruned <b>inline on every write</b> — drop entries whose stamp
-     * has aged out, the way {@code GreenStemWeapon} prunes its per-target thorn cooldown. Mobs never fire
-     * {@link #onQuit}, so a victim-keyed map that only cleans up on quit leaks one key per mob struck,
-     * forever.
+     * <p>Fired by {@link #feedAroma} once the wielder's charge has gathered
+     * {@value #AROMA_CHARGE_STRIKES} arrow strikes.
      */
     private void applyFaintAroma(LivingEntity victim) {
         victim.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, FAINT_AROMA_WEAKNESS_TICKS,
@@ -603,32 +621,7 @@ public final class FaintAromaWeapon implements Weapon {
             }
 
             feedUnwitheringFlower(caster);
-
-            // TODO: BLOCKED — pending a design ruling. Deliberately NOT implemented rather than guessed.
-            //
-            // The spec reads: "Every 9th strike on any opponent you've been hitting triggers faint aroma
-            // on their fourth strike, applying weakness to the enemy for 5 seconds."
-            //
-            // That names TWO different counters — a "9th strike" and a "fourth strike" — and does not say
-            // what either one counts, or whose strikes they are. Open questions, all of which change the
-            // implementation shape:
-            //   * Is the 9th strike counted per-opponent, or across every opponent the wielder has hit?
-            //     ("on any opponent you've been hitting" reads both ways.)
-            //   * Whose "fourth strike" is the second counter? Four more of the wielder's strikes on that
-            //     opponent after the 9th? The opponent's own fourth attack? A fourth strike by someone
-            //     else entirely?
-            //   * Does the 9th-strike count reset on trigger, or roll on every 9th forever?
-            //   * Does a Full Bloom arrow advance the same counter as a Blossoming one? ("Each arrow
-            //     triggers the same passives as blossoming fragrance" inherits this exact ambiguity, so
-            //     Full Bloom is blocked on the same ruling — this branch is shared by both on purpose.)
-            //
-            // The payload is already done and waiting: once the rule is known, call
-            //     applyFaintAroma(victim);
-            // from here under whatever condition the ruling lands on. That is the whole wiring.
-            //
-            // If the ruling needs a strike counter keyed by VICTIM, prune it inline on every write —
-            // mobs never fire onQuit, so a victim-keyed map leaks a key per mob struck, forever. See the
-            // note on applyFaintAroma().
+            feedAroma(caster, victim);
         }
 
         /** The arrow buries itself in a wall: flowers open out of the stone, and Magnificent End blooms. */
@@ -842,9 +835,10 @@ public final class FaintAromaWeapon implements Weapon {
     }
 
     /**
-     * The petal charge. The spec asks for it "in your hotbar"; the action bar is this roster's readout,
-     * so it lives there: a gauge that fills as the petals grow, the live +N% it is worth, and the
-     * unlock cue once [Magnificent End] is off the leash.
+     * The two meters this weapon runs. The spec asks for the petal charge "in your hotbar"; the action
+     * bar is this roster's readout, so both live there: the petals gauge with the live +N% it is worth
+     * and the unlock cue once [Magnificent End] is off the leash, then the aroma charge gathering
+     * toward its next Weakness.
      */
     private void renderBar(Player player, Bloom bloom) {
         boolean bloomed = bloom.petals >= PETAL_CAP;
@@ -856,7 +850,14 @@ public final class FaintAromaWeapon implements Weapon {
         if (bloomed) {
             label = label.append(plain("  ", COUNT)).append(EgoHud.ready("Magnificent End", CYAN));
         }
-        player.sendActionBar(EgoHud.gauge(fill, (double) bloom.petals / PETAL_CAP, label));
+
+        Component aroma = EgoHud.gauge(CYAN, (double) bloom.aroma / AROMA_CHARGE_STRIKES,
+                AROMA_CHARGE_STRIKES,
+                plain("Aroma  " + bloom.aroma + "/" + AROMA_CHARGE_STRIKES, COUNT));
+
+        player.sendActionBar(EgoHud.gauge(fill, (double) bloom.petals / PETAL_CAP, label)
+                .append(plain("   ", COUNT))
+                .append(aroma));
     }
 
     private static Component plain(String s, TextColor c) {
@@ -920,7 +921,8 @@ public final class FaintAromaWeapon implements Weapon {
                             "unlocks."),
                     new EgoLore.Ability("[Left Click] Blossoming Fragrance",
                             "A lavender arrow every 1.5s. A raised",
-                            "shield blocks it."),
+                            "shield blocks it. Every 9th arrow to",
+                            "land saps its target: weakness, 5s."),
                     new EgoLore.Ability("[Right-Click] Full Bloom",
                             "Three heavier, faster arrows in rapid",
                             "succession. Breaks a raised guard."),
