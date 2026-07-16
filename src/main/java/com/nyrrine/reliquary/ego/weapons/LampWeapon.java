@@ -79,7 +79,21 @@ public final class LampWeapon implements Weapon {
 
     // ---- gaze tuning --------------------------------------------------------------
 
-    /** How far the crosshair reaches when fixing a Gaze on a target. */
+    /**
+     * What the debuff-transfer ability calls itself, everywhere a player can see it.
+     *
+     * <p>It was <b>Gaze</b>, which now collides with the weapon of that name (Schadenfreude). Nyrrine is
+     * picking the replacement when the artist's model lands, and asked for this exact string in the
+     * meantime so the tooltip nags her until she does — her words, 2026-07-17: <i>"rename it 'Rename me
+     * Nyrrine' so I remember when I get the model from the artist."</i> It is meant to look wrong.
+     *
+     * <p>The code still calls it {@code Gaze} — the inner class, the {@code gazes} map, {@code gaze()} —
+     * because renaming those to match a placeholder would only have to be undone. When the real name
+     * arrives, change this constant and the identifiers together.
+     */
+    private static final String ABILITY_NAME = "Rename me Nyrrine";
+
+    /** How far the crosshair reaches when fixing the mark on a target. */
     private static final int GAZE_RANGE = 16;
     /** After marking, keep copying the wielder's freshly-received debuffs onto the target this long. */
     private static final long TRANSFER_WINDOW_MS = 8_000L;
@@ -298,7 +312,7 @@ public final class LampWeapon implements Weapon {
     private void gaze(Player player) {
         LivingEntity target = pickTarget(player, GAZE_RANGE);
         if (target == null) {
-            player.sendActionBar(EgoHud.status("Gaze — no target", FAINT));
+            player.sendActionBar(EgoHud.status(ABILITY_NAME + " — no target", FAINT));
             player.playSound(player.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_HIT, 0.4f, 0.7f);
             return;
         }
@@ -308,7 +322,7 @@ public final class LampWeapon implements Weapon {
         transferDebuffs(player, target); // snapshot on the cast
 
         gazeFx(player, target);
-        player.sendActionBar(EgoHud.status("Gaze — marked", EMBER));
+        player.sendActionBar(EgoHud.status(ABILITY_NAME + " — marked", EMBER));
     }
 
     /** A radiant eye opening over the marked body — warm dust, a soft chime, an eye-like ring. */
@@ -503,7 +517,7 @@ public final class LampWeapon implements Weapon {
                             "5 blocks: heavy knockback, half a",
                             "heart of damage. 3 second cooldown,",
                             "though a miss costs none of it."),
-                    new EgoLore.Ability("[Shift + Right-click] Gaze",
+                    new EgoLore.Ability("[Shift + Right-click] " + ABILITY_NAME,
                             "Marks a target within 16 blocks and",
                             "copies your harmful effects onto it —",
                             "at once, then again for 8 seconds.",

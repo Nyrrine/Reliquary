@@ -18,6 +18,7 @@ import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -143,6 +144,17 @@ public final class SolitudeWeapon implements Weapon {
     }
 
     // ---- fire: Bang. Bang. ------------------------------------------------------------
+
+    /**
+     * A revolver is not a cudgel. Left-click is the trigger, so a shot taken at a body within arm's reach
+     * would otherwise land a vanilla blow as well — and the blow, arriving first, stamps hurt-immunity that
+     * swallows the round. The gun appears to stop working at exactly the range where it matters most.
+     * Cancelling costs nothing: Solitude is a {@code ranged} model with no melee damage of its own.
+     */
+    @Override
+    public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        event.setCancelled(true);
+    }
 
     @Override
     public void onSwing(Player player) {

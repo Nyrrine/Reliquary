@@ -23,6 +23,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -163,6 +164,18 @@ public final class SolemnLamentWeapon implements Weapon {
     }
 
     // ---- fire ---------------------------------------------------------------------
+
+    /**
+     * Pistols are not for pistol-whipping. Left-click is the trigger, so firing at a body close enough to
+     * touch would otherwise land a vanilla blow as well — and the blow, arriving first, stamps
+     * hurt-immunity that swallows the pellets. Mourners at close quarters found the gun simply stopped
+     * working. Cancelling costs nothing: Solemn Lament is a {@code ranged} model with no melee damage of
+     * its own.
+     */
+    @Override
+    public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        event.setCancelled(true);
+    }
 
     @Override
     public void onSwing(Player player) {
@@ -434,6 +447,11 @@ public final class SolemnLamentWeapon implements Weapon {
         if (entHit != null && entHit.getHitEntity() instanceof LivingEntity le) {
             end = entHit.getHitPosition().toLocation(world);
             Vector velocity = le.getVelocity();
+            // A shot is three pellets arriving together, and vanilla only lets a body be hurt once every
+            // ten ticks — so without this the first pellet stamped hurt-immunity and the other two were
+            // swallowed. A point-blank shot landed 3.8 of its 11.4 and had done since the day it was
+            // written; the pellets were never weak, they were never arriving.
+            le.setNoDamageTicks(0);
             le.damage(PELLET_DAMAGE, player);
             le.setVelocity(velocity);              // no knockback — the shot never moves the target
             impactFx(world, end, black);

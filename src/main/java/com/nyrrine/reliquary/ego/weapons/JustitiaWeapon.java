@@ -60,8 +60,10 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li><b>Indifference</b> (passive) — every {@link #INDIFFERENCE_PERIOD ninth} landed hit blinds the
  *       guilty with Darkness. A Judgement combo's own cuts each count, so a ten-hit verdict walks the
  *       counter ten places forward.</li>
- *   <li><b>Jurisdiction</b> (left-click, {@link #onSwing}) — every swing tips the scales a little
- *       further, ramping both proc coefficients. The ramp resets the instant a verdict is passed.</li>
+ *   <li><b>Jurisdiction</b> (left-click, {@link #onHit}) — every <em>landed</em> blow tips the scales a
+ *       little further, ramping both proc coefficients; the ramp resets the instant a verdict is passed.
+ *       A blow struck at the top of the swing arc also hurries Judgement's rest along by
+ *       {@link #HURRY_MS}. Swinging at nothing earns neither — the scales weigh sins, not exercise.</li>
  *   <li><b>Persecution</b> (right-click, {@link #onInteract}) — hang the scales behind you and take a
  *       counter-stance. Strike the stance and you are rooted while the bearer appears at your back,
  *       blinded by Indifference.</li>
@@ -118,15 +120,21 @@ public final class JustitiaWeapon implements Weapon {
     private final Set<RootTask> activeRoots = new HashSet<>();
 
     // ---- Judgement: the verdicts ---------------------------------------------------
-    // NOTE (balance): these totals sit deliberately above the netherite band (a plain netherite sword is
-    // 8/hit, ~11 with Sharpness V). This is signed off and flagged for playtest — do not quietly rescale.
-    // Damage is dealt through victim.damage(), so armour still reduces it; these are pre-mitigation.
+    // These still land above the netherite band (a plain netherite sword is 8/hit, ~11 with Sharpness V),
+    // and they are meant to — a verdict is supposed to be a sentence, not a hit. Damage is dealt through
+    // victim.damage(), so armour still reduces it; these are pre-mitigation.
+    //
+    // The ten-hit was 29 (5x3 then 2x7) as originally specified. It was built to that number, flagged, and
+    // playtested at it; the verdict was "too much" (Nyrrine, 2026-07-17), so it came down to 19.5. The
+    // shape is what matters and it is preserved: three heavy opening cuts, then a long light flurry, and
+    // the rare verdict still out-hits the common one. If it ever drops below the five-hit's 15 the jackpot
+    // becomes a downgrade wearing a jackpot's odds.
 
     /** The five-hit verdict: 3 damage, five times = 15, on top of the swing that proc'd it. */
     private static final double[] FIVE_HIT_STEPS = {3.0, 3.0, 3.0, 3.0, 3.0};
 
-    /** The ten-hit verdict: 5 damage three times (15), then 2 damage seven times (14) = 29 total. */
-    private static final double[] TEN_HIT_STEPS = {5.0, 5.0, 5.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0};
+    /** The ten-hit verdict: 3 damage three times (9), then 1.5 damage seven times (10.5) = 19.5 total. */
+    private static final double[] TEN_HIT_STEPS = {3.0, 3.0, 3.0, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5};
 
     /** Ticks between a verdict's cuts — 2 ticks reads as a flurry (five-hit ~0.5s, ten-hit ~1s). */
     private static final long COMBO_STEP_TICKS = 2L;
@@ -141,6 +149,19 @@ public final class JustitiaWeapon implements Weapon {
 
     /** Judgement rests this long after EITHER verdict — no procs at all while it sleeps. */
     private static final long JUDGEMENT_COOLDOWN_MS = 15_000L;
+
+    /**
+     * How much of Judgement's rest a fully-charged landed blow burns off. The rest is not a timer you wait
+     * out; it is a debt you work off, one honest swing at a time.
+     */
+    private static final long HURRY_MS = 1_000L;
+
+    /**
+     * How drawn the swing must be to count as fully charged. {@code getAttackCooldown()} runs 0 → 1 as the
+     * vanilla attack bar refills; 0.9 rather than a strict 1.0 because the bar is sampled a tick or two
+     * late and a perfectly-timed swing should never be told it wasn't.
+     */
+    private static final float FULL_SWING = 0.9f;
 
     // ---- Jurisdiction: the ramp ----------------------------------------------------
 
@@ -238,15 +259,16 @@ public final class JustitiaWeapon implements Weapon {
     // ---- Jurisdiction: every swing tips the scales -----------------------------------
 
     /**
-     * A swing of the greatsword. The manager only dispatches this while Justitia is in the main hand, so
-     * every call is a real swing of it — hit or miss, the balance leans a little further. The ramp keeps
-     * accumulating while Judgement sleeps (the spec gates the <em>procs</em> on the cooldown, not the
-     * enhancer), which turns the 15s rest into ramp time rather than dead time.
+     * A swing of the greatsword — and deliberately, nothing happens here.
+     *
+     * <p>Jurisdiction used to tip the scales from this hook, on every swing, hit or miss. That let a
+     * wielder stand in an empty field beating the air until the ramp was maxed, then walk into a fight
+     * with the proc coefficient already paid for. The scales weigh sins, not exercise: the ramp now lives
+     * in {@link #onHit} and only a landed blow moves it.
      */
     @Override
     public void onSwing(Player player) {
-        Wielder w = wielder(player.getUniqueId());
-        if (w.swingStacks < MAX_BONUS_STACKS) w.swingStacks++;
+        // Intentionally empty — see the javadoc. Jurisdiction ramps on landed hits, in onHit.
     }
 
     /** The current five-hit proc coefficient, ramp included. */
@@ -273,6 +295,15 @@ public final class JustitiaWeapon implements Weapon {
         if (comboing.contains(id)) return; // our own verdict's cut — a proc must never proc itself
 
         Wielder w = wielder(id);
+        if (w.swingStacks < MAX_BONUS_STACKS) w.swingStacks++; // Jurisdiction: only a landed blow tips it
+
+        // A blow struck at the top of the swing arc is worth more than a flurry of half-drawn ones: each
+        // one hurries Judgement back by a second. Spamming light hits earns nothing here, which is the
+        // point — the greatsword rewards the wielder who waits for it.
+        if (attacker.getAttackCooldown() >= FULL_SWING) {
+            w.judgementReadyAt = Math.max(System.currentTimeMillis(), w.judgementReadyAt - HURRY_MS);
+        }
+
         registerHit(victim, w);
         rollJudgement(attacker, victim, w);
     }
@@ -969,17 +1000,20 @@ public final class JustitiaWeapon implements Weapon {
                     new EgoLore.Ability("[Passive] Judgement",
                             "A landed hit weighs the sin.",
                             "40% — five cuts of 3 damage.",
-                            "20% — a ten-hit verdict, 29 damage.",
-                            "Either verdict rests for 15s."),
+                            "20% — a ten-hit verdict, 19.5 damage.",
+                            "Either verdict rests for 15s. A hit",
+                            "struck at full draw hurries the rest",
+                            "along by a second."),
                     new EgoLore.Ability("[Passive] Indifference",
                             "Every 9th hit blinds the guilty with",
                             "Darkness for 5s. Judgement's own",
                             "cuts each count toward the ninth."),
                     new EgoLore.Ability("[Left-Click] Jurisdiction",
-                            "Each swing tips the scales further:",
+                            "Each landed blow tips the scales:",
                             "+1% to the five-cut chance, +0.5% to",
                             "the ten-hit. Resets when Judgement",
-                            "passes a verdict."),
+                            "passes a verdict. Swinging at nothing",
+                            "weighs nothing."),
                     new EgoLore.Ability("[Right-Click] Persecution",
                             "Hang the scales behind you for 3s.",
                             "Strike the stance and you are rooted",

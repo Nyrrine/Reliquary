@@ -19,6 +19,7 @@ import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -267,6 +268,22 @@ public final class HornetWeapon implements Weapon {
      * A swing-refreshed window long enough to bridge a 1s gap would keep firing after the wielder had already
      * let go — a phantom extra shot out of an unforgiving magazine. One click, one round.
      */
+    /**
+     * A gun does not punch. Left-clicking a body at arm's length used to do both — the vanilla melee blow
+     * landed <em>and</em> the trigger pulled — and the melee won, because it stamped hurt-immunity on the
+     * victim a fraction before the round arrived, so the shot was swallowed whole. From the wielder's side
+     * the weapon simply stopped firing whenever an enemy got close, which is the worst possible moment for
+     * a gun to stop firing.
+     *
+     * <p>Cancelling the swing's damage settles it: the blow never lands, no i-frames are stamped, and the
+     * round that {@link #onSwing} fires on the very same click is the only thing that touches them. Nothing
+     * is lost — Hornet is a {@code ranged} model with no melee damage of its own to give up.
+     */
+    @Override
+    public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        event.setCancelled(true);
+    }
+
     @Override
     public void onSwing(Player player) {
         if (!matches(player.getInventory().getItemInMainHand())) return;
@@ -456,6 +473,11 @@ public final class HornetWeapon implements Weapon {
             if (entHit == null || !(entHit.getHitEntity() instanceof LivingEntity le)) break;
 
             Location at = entHit.getHitPosition().toLocation(world);
+            // A blast is six pellets arriving together, and vanilla only lets a body be hurt once every
+            // ten ticks — so without this the first pellet stamped hurt-immunity and the other five were
+            // swallowed whole. A full point-blank blast landed 1.8 instead of 10.8, which read in play as
+            // "buckshot does half a heart". The pellets aren't weak; they were never arriving.
+            le.setNoDamageTicks(0);
             le.damage(BUCKSHOT_PELLET_DAMAGE, player);   // routed so other plugins can cancel
             buckImpactFx(world, at);
             bitten.add(le.getUniqueId());

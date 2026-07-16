@@ -462,16 +462,24 @@ public final class HarmonyWeapon implements Weapon {
     // ---- melee dispatch ------------------------------------------------------------
 
     /**
-     * The wielder landed a vanilla hit with Harmony in hand. Harmony is a cannon, not a club — this adds
-     * nothing and leaves the (negligible) vanilla damage alone; it exists only to notice that the wielder
-     * is in a fight. Rhythm deliberately does <b>not</b> come from here: the machine is charged by its own
-     * music, and letting a melee flurry fill the bar would gut the slow-charging fantasy the passive is
-     * built on. Our own beam's damage re-enters this method and is dropped by the fence.
+     * The wielder swung Harmony at something close enough to touch. Harmony is a cannon, not a club: the
+     * swing notices that the wielder is in a fight, and then the blow is <b>cancelled</b>.
+     *
+     * <p>Cancelling matters more than it looks. Left-click is the trigger, so a swing at a body in reach
+     * used to land a vanilla blow <em>and</em> fire the Note — and the blow, arriving first, stamped
+     * hurt-immunity on the victim that swallowed the beam. The machine appeared to stop working at exactly
+     * the range where its wielder needed it. Nothing is given up: Harmony is a {@code ranged} model with no
+     * melee damage of its own.
+     *
+     * <p>Rhythm deliberately does <b>not</b> come from here — the machine is charged by its own music, and
+     * letting a melee flurry fill the bar would gut the slow-charging fantasy the passive is built on. Our
+     * own beam's damage re-enters this method and is dropped by the fence.
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
         if (ticking.contains(victim.getUniqueId())) return; // the Note's own damage — not a melee strike
         markCombat(performance(attacker));
+        event.setCancelled(true);
     }
 
     // ---- tick ----------------------------------------------------------------------

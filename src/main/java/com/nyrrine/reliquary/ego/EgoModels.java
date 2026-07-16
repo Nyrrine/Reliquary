@@ -55,7 +55,12 @@ public final class EgoModels {
     // ---- TETH ----
     public static final Model SOLITUDE    = ranged(Material.CROSSBOW, "solitude");
     public static final Model FRAGMENTS_FROM_SOMEWHERE = melee(Material.NETHERITE_SWORD, "fragments_from_somewhere", 6.0, 1.4);
-    public static final Model LANTERN     = melee(Material.MACE, "lantern", 6.0, 0.9);
+    // Deliberately not a MACE. A mace carries a fall-slam passive that fights whatever gimmick sits on
+    // top of it, and every weapon here gets a custom model eventually, so the fallback only has to hold a
+    // sensible silhouette and otherwise stay out of the way. A hoe is a haft with a head — a lantern on a
+    // pole — and is one of the few vanilla items with no combat passive at all: no sweep, no
+    // shield-break, no smash. Penitence and Regret are the only maces left, and both are meant to be.
+    public static final Model LANTERN     = melee(Material.NETHERITE_HOE, "lantern", 6.0, 0.9);
     public static final Model FOURTH_MATCH_FLAME = ranged(Material.FLINT_AND_STEEL, "fourth_match_flame");
     public static final Model RED_EYES    = melee(Material.IRON_SWORD, "red_eyes", 6.0, 1.6);
     public static final Model REGRET      = melee(Material.MACE, "regret", 7.0, 0.9);

@@ -25,6 +25,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.FallingBlock;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -92,7 +93,10 @@ public final class MagicBulletWeapon implements Weapon {
     private static final long   SHOT_COOLDOWN_MS = 13000L; // real post-shot reload before the next charge (~13s, musket-slow)
     private static final double RANGE          = 48.0;  // hitscan reach
     private static final double RAY_SIZE       = 0.6;   // entity ray fatness (forgiving aim) when unmarked
-    private static final double SHOT_DAMAGE    = 16.0;  // per shot — slow, charged, never-miss, self-costing
+    // The six normal shots are 10. The old hub note recorded a "cap 16→10" retune that this file never
+    // received — the note was right about the intent and the code simply never got it. Landed 2026-07-17
+    // on Nyrrine's ruling: ten for the normal shots, and the seventh stays devastating (ULT_DAMAGE).
+    private static final double SHOT_DAMAGE    = 10.0;  // per shot — slow, charged, never-miss, self-costing
     private static final int    MAX_BULLETS    = 7;     // meter width (the 7th slot = the Seventh Bullet)
     private static final int    NORMAL_SHOTS   = 6;     // normal shots allowed before the ult is forced
     private static final int    CYCLE          = 6;     // magic-circle cycle length
@@ -221,6 +225,17 @@ public final class MagicBulletWeapon implements Weapon {
     }
 
     // ---- input routing -------------------------------------------------------------
+
+    /**
+     * The musket fires on the vow, not on being swung at someone. Left-click begins a charge, so pointing
+     * it at a body within arm's reach would otherwise land a vanilla blow as well — and that blow, arriving
+     * first, stamps hurt-immunity that swallows the shot the charge was for. Cancelling costs nothing: Magic
+     * Bullet is a {@code ranged} model with no melee damage of its own.
+     */
+    @Override
+    public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        event.setCancelled(true);
+    }
 
     @Override
     public void onSwing(Player player) {
@@ -1352,10 +1367,14 @@ public final class MagicBulletWeapon implements Weapon {
             "Der Freischütz",   // title line — always the Abnormality
             NAME,
             GLOW,
+            // Nyrrine's wording, 2026-07-17, verbatim — only the line breaks are mine.
             List.of(
-                    "It fires on the vow, not the pull.",
-                    "Inscribe the black circle —",
-                    "and never miss."
+                    "Though the original's power couldn't be",
+                    "fully extracted, the magic this holds is",
+                    "still potent.",
+                    "",
+                    "The weapon's bullets travel across the",
+                    "corridor, along the horizon."
             ),
             List.of(
                     new EgoLore.Ability("[Passive] Bullet Counter",

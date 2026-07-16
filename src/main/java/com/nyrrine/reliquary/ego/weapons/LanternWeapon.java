@@ -50,12 +50,11 @@ import java.util.concurrent.ThreadLocalRandom;
  * takes after their armour, so a well-armoured foe feeds the lantern less). The strike counter rides the
  * action bar as pips so the wielder can see the bite coming.
  *
- * <p><b>On the MACE material.</b> The fallback item is a MACE, and vanilla grants a mace a large, uncapped
- * fall-slam bonus on a hit taken while falling — which would blow straight through this roster's balance
- * band. {@link #onHit} clamps the blow to {@link #MACE_SLAM_CAP} to neutralise it. Unlike Regret (which
- * overwrites the damage outright from its charge), the clamp is a ceiling rather than a fixed number, so an
- * ordinary enchanted strike is left completely alone and the weapon stays a genuine enchantable
- * alternative — only the slam is cut back. See {@link #onHit} for the arithmetic.
+ * <p><b>On the fallback item.</b> The Lantern was a MACE and is now a NETHERITE_HOE — a haft with a head,
+ * which is the right silhouette for a lantern on a pole and, more to the point, one of the few vanilla
+ * items carrying no combat passive at all. A mace's fall-slam had to be clamped out of every blow; there
+ * is nothing to clamp now, so an ordinary strike passes through exactly as vanilla intends and its
+ * enchants land. See {@link EgoModels#LANTERN}.
  *
  * <p>Nothing here spawns an entity and nothing edits the world, so there are no orphans to sweep. The only
  * state is per-wielder (digest tally, nibble tally) plus the short-lived digest tasks, all dropped in
@@ -84,13 +83,6 @@ public final class LanternWeapon implements Weapon {
 
     /** I Shall Nibble Thee!: every Nth landed strike is the bite that heals. */
     private static final int NIBBLE_EVERY = 5;
-
-    /**
-     * Ceiling on a single landed blow, purely to neutralise the vanilla MACE fall-slam bonus. Sits at the
-     * roster's stated single-instance ceiling (netherite + Sharpness V ~ 11), so an ordinary strike from
-     * this weapon — base 6.0 plus enchants — never reaches it and is never touched.
-     */
-    private static final double MACE_SLAM_CAP = 11.0;
 
     /** Ambient lure glow cadence, in onTick dispatches (onTick fires every 2 server ticks -> ~1s). */
     private static final int LURE_PERIOD = 10;
@@ -152,26 +144,21 @@ public final class LanternWeapon implements Weapon {
     // ---- [Left Click] I Shall Nibble Thee! ---------------------------------------------
 
     /**
-     * A landed strike. Two things happen here, in this order — the order matters.
+     * A landed strike, and the teeth that ride it. Every {@value #NIBBLE_EVERY}th one bites, and the
+     * wielder is healed for the full damage that strike deals — read via {@code getFinalDamage()}, so the
+     * figure is what the victim actually takes once their armour has had its say, and a well-armoured foe
+     * feeds the lantern less.
      *
-     * <p>First the MACE fall-slam is neutralised. Vanilla folds its large, uncapped slam bonus into the
-     * blow's damage before this event reaches us, so the blow is clamped to {@link #MACE_SLAM_CAP}. This is
-     * a ceiling, not an overwrite: an ordinary strike (base 6.0, plus Sharpness, plus Strength) lands well
-     * under it and passes through completely untouched, which is what keeps the Lantern an enchantable
-     * alternative rather than a weapon whose enchants do nothing. Only a slam is cut back.
+     * <p>Nothing here re-deals damage ({@code victim.damage()} is never called, only the attacker is
+     * healed), so this hook cannot re-enter itself and needs no re-entrancy fence. Wear is left to the
+     * vanilla swing that carried the hit — the bite is not a separate use.
      *
-     * <p>Then the teeth. Every {@value #NIBBLE_EVERY}th landed strike bites, and the wielder is healed for
-     * the full damage that strike deals — read <i>after</i> the clamp via {@code getFinalDamage()}, so the
-     * figure is what the victim actually takes once their armour has had its say, and so a slam can never
-     * be laundered into an oversized heal. Nothing here re-deals damage ({@code victim.damage()} is never
-     * called, only the attacker is healed), so this hook cannot re-enter itself and needs no re-entrancy
-     * fence. Wear is left to the vanilla swing that carried the hit — the bite is not a separate use.
+     * <p>This used to open by clamping a MACE fall-slam out of the blow. The Lantern is no longer a mace
+     * (see {@link EgoModels#LANTERN}), so there is no slam bonus to neutralise and the clamp is gone with
+     * it — the blow now passes through exactly as vanilla and the enchants land it.
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
-        // Neutralise the vanilla MACE fall-slam: clamp only, so ordinary enchanted strikes are untouched.
-        if (event.getDamage() > MACE_SLAM_CAP) event.setDamage(MACE_SLAM_CAP);
-
         UUID id = attacker.getUniqueId();
         int strikes = bumpTally(nibbleTally, id);
 

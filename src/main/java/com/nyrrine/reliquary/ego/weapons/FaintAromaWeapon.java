@@ -23,6 +23,7 @@ import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -300,6 +301,17 @@ public final class FaintAromaWeapon implements Weapon {
     }
 
     // ---- [Left Click] Blossoming Fragrance ------------------------------------------
+
+    /**
+     * The arrowhead is dull and it is not for hitting people with. Left-click is the trigger, so loosing
+     * an arrow at a body within arm's reach would otherwise land a vanilla blow too — and the blow,
+     * arriving first, stamps hurt-immunity that swallows the arrow. Cancelling costs nothing: Faint Aroma
+     * is a {@code ranged} model with no melee damage of its own.
+     */
+    @Override
+    public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        event.setCancelled(true);
+    }
 
     /**
      * Left-click looses a Blossoming Fragrance arrow, subject to the {@value #BLOSSOM_CADENCE_MS}ms

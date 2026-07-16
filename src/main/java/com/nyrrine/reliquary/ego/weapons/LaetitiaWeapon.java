@@ -444,22 +444,20 @@ public final class LaetitiaWeapon implements Weapon {
 
     // ---- lore ----------------------------------------------------------------------
 
-    // The title line here is a PLACEHOLDER and is meant to be overwritten.
+    // The title line repeats the display name, and that is correct — do not "fix" it.
     //
-    // The house rule is that the display name is the weapon and the bold title line is the Abnormality it
-    // came from, and that the two never repeat each other. This item is the one place the rule cannot be
-    // kept: the spec records it as "Laetitia — Laetitia", because the toy and the Abnormality genuinely
-    // share the name, and the old lore opened by simply saying "Laetitia" a second time. Rather than mint a
-    // lore name for the Abnormality and pass it off as settled, the title below just describes what the
-    // Abnormality is, marked TODO so it cannot be mistaken for the final wording.
+    // The house rule is that the display name is the weapon and the title line is the Abnormality it came
+    // from, and that the two never repeat each other. Laetitia is the one item where they do, because the
+    // toy and the Abnormality share a name: "Laetitia — Laetitia" is canon to the source game, per Nyrrine
+    // (2026-07-17). The rule doesn't apply here; there was never a problem to solve.
     //
-    // Ability names are placeholders on the same footing — plain descriptions of what each input does, not
-    // titles. "Playmate" is the one word here that is not up for grabs: the mark is called that in the code
-    // and on the action bar ("A new playmate is chosen…"), so the tooltip says it too.
+    // Ability names are placeholders — plain descriptions of what each input does, not titles.
+    // "Playmate" is the one word here that is not up for grabs: the mark is called that in the code and on
+    // the action bar ("A new playmate is chosen…"), so the tooltip says it too.
 
     private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
             "Laetitia",
-            "TODO — The Doll That Yearned for Happiness",
+            "Laetitia",
             NAME,
             GLOOM,
             List.of(
