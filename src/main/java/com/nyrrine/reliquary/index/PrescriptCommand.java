@@ -23,7 +23,11 @@ import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -34,22 +38,34 @@ import java.util.UUID;
  * event-driven — no per-player loop, no scheduled task, no spawned entity — so it costs nothing at rest and
  * needs no {@code onDisable}.
  *
- * <p><b>Partially built, deliberately.</b> Whether a Weaver rules on prescripts or the server auto-detects
- * them is Nyrrine's call and is not yet made. Everything that survives either ruling is here — the paper, the
- * pool, the tally readout, issuance, the Weaver role. The adjudication flow itself ({@code claim},
- * {@code judge}, {@code pending}) is held rather than guessed at.
+ * <p><b>A person rules on every prescript</b>, randomized ones included — there is no auto-detection and none
+ * is planned. The register is full of instructions no machine could check ("without acknowledging them",
+ * "saying nothing"), and those clauses are only affordable because a Weaver reads the line and decides. It is
+ * also the lore: the Library has no hit detection, it has someone who passes judgement.
+ *
+ * <p>Nothing expires. A prescript bears the date it was issued, and that date is flavour — the Index keeps no
+ * clock, and whether an errand has gone stale is a Weaver's opinion.
  */
 public final class PrescriptCommand implements CommandExecutor, TabCompleter, Listener {
 
     private final Reliquary plugin;
     private final IndexStore store;
 
+    /**
+     * Raised hands, awaiting a Weaver — recipient UUID → the prescripts they say they've done.
+     *
+     * <p><b>In memory, and session-scoped on purpose.</b> Enumerating "everyone with an open prescript"
+     * across offline players would need an index of its own, and the store deliberately doesn't offer one:
+     * per-player data is get-by-UUID, so the alternative is reading every playerdata file the server has ever
+     * accumulated. The claim <i>itself</i> is persisted on the recipient's record, so nothing durable is lost
+     * here — only the convenience of a pre-assembled queue, which rebuilds the moment anyone re-claims. A
+     * restart costs a Weaver one command, not a player their word.
+     */
+    private final Map<UUID, Set<UUID>> raised = new HashMap<>();
+
     public PrescriptCommand(Reliquary plugin) {
         this.plugin = plugin;
-        // TODO(rebase onto March's data/): this facade is backed by an in-memory map until the shared store
-        // lands, so nothing here survives a restart yet. Swap IndexStore's bodies to plugin.store(); no other
-        // file in this package changes.
-        this.store = new IndexStore();
+        this.store = new IndexStore(plugin.store());
     }
 
     /** Wire the command and the paper listener. The only thing {@code Reliquary.onEnable} needs to call. */
@@ -66,9 +82,12 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
     private static final String ADMIN_PERM = "reliquary.admin";
 
     /** Subcommands anyone may run. Everything else is a Weaver's or an admin's. */
-    private static final List<String> PLAYER_SUBS = List.of("paper");
-    private static final List<String> WEAVER_SUBS = List.of("issue", "draw", "withdraw");
+    private static final List<String> PLAYER_SUBS = List.of("paper", "claim");
+    private static final List<String> WEAVER_SUBS = List.of("issue", "draw", "withdraw", "judge", "pending");
     private static final List<String> ADMIN_SUBS  = List.of("weaver");
+
+    /** How a Weaver rules. Nyrrine's words, not "complete" and "fail". */
+    private static final List<String> RULINGS = List.of("accomplished", "unaccomplished");
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
@@ -87,7 +106,15 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
         String sub = args[0].toLowerCase();
 
         if (sub.equals("help")) { help(player); return true; }
-        if (PLAYER_SUBS.contains(sub)) { paper(player); return true; }
+
+        if (PLAYER_SUBS.contains(sub)) {
+            switch (sub) {
+                case "paper" -> paper(player);
+                case "claim" -> claim(player, args);
+                default      -> help(player);
+            }
+            return true;
+        }
 
         if (WEAVER_SUBS.contains(sub)) {
             if (!store.isWeaver(player)) {
@@ -98,6 +125,8 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
                 case "issue"    -> issue(player, args);
                 case "draw"     -> draw(player, args);
                 case "withdraw" -> withdraw(player, args);
+                case "judge"    -> judge(player, args);
+                case "pending"  -> pending(player);
                 default         -> help(player);
             }
             return true;
@@ -262,6 +291,141 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
         }
     }
 
+    // ---- adjudication -------------------------------------------------------------------------------
+    //
+    // A person rules on every prescript, randomized ones included. That is the design: the register is full
+    // of instructions no machine could ever check — "without acknowledging them", "saying nothing", "without
+    // comment" — and those clauses are only affordable because a Weaver reads the line and decides. A judge
+    // is also the lore. The Library does not have hit detection; it has someone who passes judgement.
+
+    /** {@code /prescript claim [#]} — the recipient says they've carried it out. */
+    private void claim(Player player, String[] args) {
+        List<Prescript> active = store.active(player.getUniqueId());
+        if (active.isEmpty()) {
+            player.sendMessage(msg("Nothing is asked of you.", PrescriptPaper.faint()));
+            return;
+        }
+        Prescript p = pick(player, active, args, 1);
+        if (p == null) return;
+        if (!store.claim(player.getUniqueId(), p.id())) {
+            player.sendMessage(msg("Your hand is already up on that one. A Weaver will get to it.",
+                    PrescriptPaper.faint()));
+            return;
+        }
+        raised.computeIfAbsent(player.getUniqueId(), k -> new LinkedHashSet<>()).add(p.id());
+
+        player.sendMessage(msg("The Index notes your claim. A Weaver will judge it.", PrescriptPaper.seal()));
+        player.playSound(player.getLocation(), Sound.ITEM_BOOK_PAGE_TURN, 1f, 1.2f);
+
+        // Tell whichever Weavers are here. Whoever is absent finds it via /prescript pending, or the
+        // recipient simply claims again — a raised hand is cheap to raise twice.
+        int told = 0;
+        for (Player w : Bukkit.getOnlinePlayers()) {
+            if (w.equals(player) || !store.isWeaver(w)) continue;
+            w.sendMessage(msg(player.getName() + " claims a prescript — ", PrescriptPaper.seal())
+                    .append(msg(p.text(), PrescriptPaper.ink())));
+            w.sendMessage(msg("  /prescript judge " + player.getName()
+                    + " accomplished | unaccomplished", PrescriptPaper.faint()));
+            told++;
+        }
+        if (told == 0) {
+            player.sendMessage(msg("No Weaver is here to see it. It will keep.", PrescriptPaper.faint()));
+        }
+    }
+
+    /** {@code /prescript judge <player> [#] <accomplished|unaccomplished>} — the ruling. */
+    private void judge(Player weaver, String[] args) {
+        if (args.length < 3) {
+            weaver.sendMessage(msg("Usage: /prescript judge <player> [#] <accomplished|unaccomplished>",
+                    PrescriptPaper.faint()));
+            return;
+        }
+        OfflinePlayer target = resolve(args[1]);
+        if (target == null) {
+            weaver.sendMessage(msg("The Index has no record of " + args[1] + ".", NamedTextColor.RED));
+            return;
+        }
+        // A Weaver may not rule on their own prescript — that would make the tally a self-report.
+        if (target.getUniqueId().equals(weaver.getUniqueId())) {
+            weaver.sendMessage(msg("You may not rule on yourself.", NamedTextColor.RED));
+            return;
+        }
+        List<Prescript> active = store.active(target.getUniqueId());
+        if (active.isEmpty()) {
+            weaver.sendMessage(msg("Nothing is asked of " + nameOf(target) + ".", PrescriptPaper.faint()));
+            return;
+        }
+
+        // The ruling is the last argument; anything between the name and it is the optional index.
+        String verdict = args[args.length - 1].toLowerCase();
+        if (!RULINGS.contains(verdict)) {
+            weaver.sendMessage(msg("Rule it accomplished or unaccomplished.", NamedTextColor.RED));
+            return;
+        }
+        // "judge <player> <verdict>" carries no index; "judge <player> <#> <verdict>" puts it at 2. Passing
+        // args.length as the position is how pick() is told the index is absent.
+        Prescript p = pick(weaver, active, args, args.length > 3 ? 2 : args.length);
+        if (p == null) return;
+
+        boolean accomplished = verdict.equals("accomplished");
+        if (!store.rule(target.getUniqueId(), p.id(), accomplished)) {
+            weaver.sendMessage(msg("The Index has already closed that one.", PrescriptPaper.faint()));
+            return;
+        }
+        forget(target.getUniqueId(), p.id());
+
+        TextColor c = accomplished ? PrescriptPaper.green() : PrescriptPaper.red();
+        weaver.sendMessage(msg(nameOf(target) + " — " + verdict + ". ", c)
+                .append(msg(p.text(), PrescriptPaper.ink())));
+
+        Player online = target.getPlayer();
+        if (online != null) {
+            online.sendMessage(Component.empty());
+            online.sendMessage(msg("The Index has ruled: ", PrescriptPaper.seal()).append(msg(verdict, c)));
+            online.sendMessage(msg("  " + p.text(), PrescriptPaper.ink()));
+            online.playSound(online.getLocation(),
+                    accomplished ? Sound.BLOCK_AMETHYST_BLOCK_CHIME : Sound.BLOCK_BEACON_DEACTIVATE,
+                    1f, accomplished ? 1.2f : 0.8f);
+            sweep(online, p.id()); // the paper is spent; take it back
+        }
+    }
+
+    /** {@code /prescript pending} — the raised hands a Weaver can see from here. */
+    private void pending(Player weaver) {
+        int shown = 0;
+        for (var entry : raised.entrySet()) {
+            for (UUID prescriptId : entry.getValue()) {
+                Prescript p = store.find(entry.getKey(), prescriptId);
+                if (p == null) continue; // ruled on or withdrawn since the hand went up
+                if (shown++ == 0) weaver.sendMessage(msg("Claimed, awaiting judgement", PrescriptPaper.seal()));
+                weaver.sendMessage(msg("  " + name(entry.getKey()) + " — ", PrescriptPaper.seal())
+                        .append(msg(p.text(), PrescriptPaper.ink())));
+            }
+        }
+        if (shown == 0) {
+            weaver.sendMessage(msg("No hands are up.", PrescriptPaper.faint()));
+            weaver.sendMessage(msg("This queue is only what's been claimed since the server started — a "
+                    + "restart clears it, and claiming again refills it.", PrescriptPaper.faint()));
+        }
+    }
+
+    /** Drop a raised hand once it's been ruled on or withdrawn. */
+    private void forget(UUID target, UUID prescriptId) {
+        Set<UUID> hands = raised.get(target);
+        if (hands == null) return;
+        hands.remove(prescriptId);
+        if (hands.isEmpty()) raised.remove(target); // don't accumulate empty sets for every player who claims
+    }
+
+    /** Take back the paper for a prescript the Index has closed. */
+    private void sweep(Player player, UUID prescriptId) {
+        var inv = player.getInventory();
+        for (int i = 0; i < inv.getSize(); i++) {
+            ItemStack item = inv.getItem(i);
+            if (item != null && prescriptId.equals(PrescriptPaper.idOf(item))) inv.setItem(i, null);
+        }
+    }
+
     // ---- the Weaver role ----------------------------------------------------------------------------
 
     /** {@code /prescript weaver <add|remove|list> [player]} — op-only. */
@@ -361,9 +525,13 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
         player.sendMessage(msg("  /prescript — your standing", PrescriptPaper.ink()));
         player.sendMessage(msg("  /prescript <player> — theirs", PrescriptPaper.ink()));
         player.sendMessage(msg("  /prescript paper — reissue a lost prescript", PrescriptPaper.ink()));
+        player.sendMessage(msg("  /prescript claim [#] — say you've done it", PrescriptPaper.ink()));
         if (store.isWeaver(player)) {
             player.sendMessage(msg("  /prescript issue <player> <text…>", PrescriptPaper.ink()));
             player.sendMessage(msg("  /prescript draw <player>", PrescriptPaper.ink()));
+            player.sendMessage(msg("  /prescript judge <player> [#] <accomplished|unaccomplished>",
+                    PrescriptPaper.ink()));
+            player.sendMessage(msg("  /prescript pending — claimed, awaiting you", PrescriptPaper.ink()));
             player.sendMessage(msg("  /prescript withdraw <player> [#]", PrescriptPaper.ink()));
         }
         if (player.hasPermission(ADMIN_PERM)) {
@@ -466,6 +634,7 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
             if (sub.equals("weaver") && player.hasPermission(ADMIN_PERM)) {
                 return prefix(List.of("add", "remove", "list"), args[1]);
             }
+            if (sub.equals("pending")) return List.of(); // takes nothing
             if (WEAVER_SUBS.contains(sub) && store.isWeaver(player)) {
                 for (Player p : Bukkit.getOnlinePlayers()) out.add(p.getName());
                 return prefix(out, args[1]);
@@ -473,10 +642,19 @@ public final class PrescriptCommand implements CommandExecutor, TabCompleter, Li
             return List.of();
         }
 
-        if (args.length == 3 && sub.equals("weaver") && player.hasPermission(ADMIN_PERM)
-                && !args[1].equalsIgnoreCase("list")) {
-            for (Player p : Bukkit.getOnlinePlayers()) out.add(p.getName());
-            return prefix(out, args[2]);
+        if (args.length == 3) {
+            if (sub.equals("weaver") && player.hasPermission(ADMIN_PERM)
+                    && !args[1].equalsIgnoreCase("list")) {
+                for (Player p : Bukkit.getOnlinePlayers()) out.add(p.getName());
+                return prefix(out, args[2]);
+            }
+            // /prescript judge <player> → the ruling, since one prescript is the common case
+            if (sub.equals("judge") && store.isWeaver(player)) return prefix(RULINGS, args[2]);
+        }
+
+        // /prescript judge <player> <#> → the ruling
+        if (args.length == 4 && sub.equals("judge") && store.isWeaver(player)) {
+            return prefix(RULINGS, args[3]);
         }
 
         return List.of();

@@ -64,6 +64,7 @@ public final class PrescriptPaper {
         lore.add(Component.empty());
         if (p.claimed()) lore.add(line("Claimed — awaiting judgement", CLAIM));
         lore.add(line("Issued by " + issuerName, FAINT));
+        lore.add(line(dated(p.issued()), FAINT));
         lore.add(line("Right-click to read.", FAINT));
         meta.lore(lore);
 
@@ -144,8 +145,23 @@ public final class PrescriptPaper {
     }
 
     /**
-     * A rough human age — "4 hours ago". Deliberately coarse: the Index enforces no deadline, so this exists
-     * to let a Weaver see who is dragging their feet, not to be counted against a clock.
+     * The date a prescript was issued, for the paper — "16 July 2026".
+     *
+     * <p><b>Flavour, and only flavour.</b> A prescript bearing today's date reads like a summons and dates
+     * the errand in a recipient's memory; it is not a due date, nothing expires, and nothing anywhere reads
+     * this back. The Index enforces no clock. If an errand ought to have been done by now, that is a Weaver's
+     * opinion, not the plugin's.
+     */
+    static String dated(long epochSeconds) {
+        return java.time.Instant.ofEpochSecond(epochSeconds)
+                .atZone(java.time.ZoneId.systemDefault())
+                .format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy"));
+    }
+
+    /**
+     * A rough human age — "4 hours ago". Deliberately coarse, and for a Weaver's eyes: it exists so someone
+     * ruling on a prescript can see who has been sitting on one, not so anything can be counted against a
+     * clock. Nothing expires.
      */
     static String ago(long seconds) {
         if (seconds < 60) return "just now";

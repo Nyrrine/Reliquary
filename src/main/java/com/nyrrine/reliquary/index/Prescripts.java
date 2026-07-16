@@ -40,15 +40,12 @@ public final class Prescripts {
             new Entry("mud_stack_throw",      "Mine a stack of mud and throw it to a player today"),
             new Entry("harming_potion",       "Hurt any player using a potion of harming"),
 
-            // TODO(Nyrrine): these two ask for something Minecraft does not allow. Raw kelp is NOT edible —
-            // net.minecraft.world.food.Foods on 26.1.2 defines DRIED_KELP and no KELP, so a recipient cannot
-            // carry this out however willing they are. Her words are kept verbatim rather than quietly
-            // corrected to "dried kelp": it is her line and her call. Awaiting her ruling with the rest of
-            // the pool. (A Weaver can absorb the error by accepting dried kelp — which is rather the argument
-            // for a human judge — but a register should not knowingly ship an impossible errand.)
-            new Entry("kelp_vicinity",        "Eat 16 kelp in the vicinity of a player"),
-            new Entry("harming_then_kelp",    "Hurt any player using a potion of harming and then eat 16 kelp "
-                                            + "3 blocks near any player"),
+            // "dried kelp", not "kelp": raw kelp is not edible. Foods on 26.1.2 defines DRIED_KELP and no
+            // KELP, so the original wording asked for something no recipient could carry out however willing.
+            // Ruled on rather than assumed — the line was Nyrrine's, so the correction was hers to make.
+            new Entry("kelp_vicinity",        "Eat 16 dried kelp in the vicinity of a player"),
+            new Entry("harming_then_kelp",    "Hurt any player using a potion of harming and then eat 16 "
+                                            + "dried kelp 3 blocks near any player"),
 
             // — drafted to match —
             new Entry("golden_apple_full",    "Eat a golden apple at full health, for no reason at all"),
