@@ -4,10 +4,9 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -105,13 +104,10 @@ public final class FourthMatchFlameWeapon implements Weapon {
     private static final float  PROJ_SPIN    = 0.55f;  // radians/tick tumble
     private static final int    PROJ_LIFE    = 40;     // ~2s hard cap before self-removal
 
-    // Palette — a silver cannon spitting matchfire: pale silver body, warm orange/ember accents.
-    private static final TextColor NAME    = TextColor.color(0xFF7A2E); // match-flame orange (title/name)
-    private static final TextColor SILVER  = TextColor.color(0xC9CDD6); // silver barrel — body text
-    private static final TextColor STEEL   = TextColor.color(0x9AA0AC); // dim silver — faint / conditions
+    // Palette — a silver cannon spitting matchfire: warm orange body, ember-red accents.
+    private static final TextColor NAME    = TextColor.color(0xFF7A2E); // match-flame orange — primary
     private static final TextColor EMBER   = TextColor.color(0xFF9A4A); // warm ember accent
-    private static final TextColor CINDER  = TextColor.color(0xE0432B); // ember-red fire accent
-    private static final TextColor QUOTE   = TextColor.color(0x8A8F99); // silvered epithet
+    private static final TextColor CINDER  = TextColor.color(0xE0432B); // ember-red fire accent — secondary
 
     private static final Color FLARE   = Color.fromRGB(0xFF, 0xC2, 0x66); // bright muzzle flare
     private static final Color SPARK   = Color.fromRGB(0xFF, 0x6A, 0x2A); // orange ember spark
@@ -449,8 +445,7 @@ public final class FourthMatchFlameWeapon implements Weapon {
     public ItemStack createItem() {
         ItemStack item = new ItemStack(EgoModels.FOURTH_MATCH_FLAME.material());
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text("Fourth Match Flame").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.FOURTH_MATCH_FLAME);
@@ -460,43 +455,44 @@ public final class FourthMatchFlameWeapon implements Weapon {
 
     // ---- lore ----------------------------------------------------------------------
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
+    // The old block opened with "Fourth Match Flame" as its title line — the weapon's own name, repeated
+    // under itself. The title line is the Abnormality, so it now reads "Scorched Girl" (the name the spec
+    // gives the girl who could not stop striking matches); the display name is still the weapon.
+    //
+    // Primary is the match-flame orange the name has always been. Secondary is CINDER, the ember-red this
+    // weapon already burns its flavour and its molten cooldown in — an accent from its own palette, and far
+    // enough off the primary orange that the title line doesn't read as more of the name.
+    //
+    // The moveset below is taken from onInteract/fire/scald rather than from the old how-to lines, which
+    // had drifted: they hung "Long reload" off the molten shot alone (the 8s cooldown is charged on EVERY
+    // shot), and read as though magma were required to sneak-fire (it isn't — a sneak with an empty bag
+    // hisses and fires the plain cone). Numbers here are the constants, not a re-description of them.
 
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Fourth Match Flame", NAME)),
-        List.of(),
-        // Flavour — compact (≤~38 chars/line).
-        List.of(new Seg("The ", SILVER), new Seg("fire roars and burns", CINDER),
-                new Seg(" like", SILVER)),
-        List.of(new Seg("the first flame.", EMBER)),
-        List.of(),
-        // Guide — faint header + short mechanical lines.
-        List.of(new Seg("How to use:", STEEL, true)),
-        List.of(new Seg("Right-click — a wide cone of fire.", STEEL, true)),
-        List.of(new Seg("Sneak + right-click w/ Magma Block:", STEEL, true)),
-        List.of(new Seg("a molten blast. Long reload.", STEEL, true)),
-        List.of(),
-        List.of(new Seg("E.G.O Equipment", QUOTE, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Fourth Match Flame",
+            "Scorched Girl",
+            NAME,
+            CINDER,
+            List.of(
+                    "The fire roars and burns like",
+                    "the first flame."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Right Click] Flame Cone",
+                            "Fire the cannon: a wide cone of flame",
+                            "out to 14 blocks, and a hard recoil",
+                            "kick. Everything caught in it is set",
+                            "ablaze for 6 seconds and takes 15",
+                            "damage point-blank, falling to 7 at",
+                            "the edge of the range. Hits up to 12",
+                            "bodies. 8 second reload."),
+                    new EgoLore.Ability("[Shift + Right-click] Molten Blast",
+                            "Burns one Magma Block to fire a lava",
+                            "blast alongside the flame cone: 4",
+                            "extra damage and 10 seconds ablaze.",
+                            "With no Magma Block to burn, fires",
+                            "the plain cone instead.")
+            ));
 
     // ---- lifecycle -----------------------------------------------------------------
 

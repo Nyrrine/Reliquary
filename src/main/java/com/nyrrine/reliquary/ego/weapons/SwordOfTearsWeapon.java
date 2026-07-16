@@ -4,10 +4,9 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -109,9 +108,7 @@ public final class SwordOfTearsWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.SWORD_OF_TEARS.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Sword With Sharpened Tears")
-                .color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.SWORD_OF_TEARS);
@@ -647,11 +644,13 @@ public final class SwordOfTearsWeapon implements Weapon {
     }
 
     // ---- palette & lore -----------------------------------------------------------
-    // Dark starry sky-blue + white, with a readable grey standing in where black would be.
+    // Dark starry sky-blue, with a readable grey standing in where black would be. The flavour's own
+    // near-white is the shared off-white every E.G.O tooltip's body reads in; see EgoLore.
 
-    private static final TextColor NAME  = TextColor.color(0x8FB8E6); // name — starry sky-blue
-    private static final TextColor WHITE = TextColor.color(0xEDF2F9); // base description — near-white
-    private static final TextColor GREY  = TextColor.color(0x9AA7B4); // faint conditions (readable grey, not black)
+    /** Primary — starry sky-blue. Display name, "How to use:", ability headers. */
+    private static final TextColor PRIMARY   = TextColor.color(0x8FB8E6);
+    /** Secondary — the palette's readable grey (never black). The Abnormality title line. */
+    private static final TextColor SECONDARY = TextColor.color(0x9AA7B4);
 
     private static final TextColor STAR_HUD  = TextColor.color(0x8FB8E6); // action-bar accent
     private static final TextColor FAINT_HUD = TextColor.color(0x9AA7B4); // action-bar status
@@ -662,41 +661,30 @@ public final class SwordOfTearsWeapon implements Weapon {
     private static final Particle.DustOptions TEAR_FINE = new Particle.DustOptions(TEAR, 0.5f);
     private static final Particle.DustTransition TEAR_SHIMMER = new Particle.DustTransition(TEAR, TEAR_PALE, 0.85f);
 
-    private record Seg(String text, TextColor color, boolean italic, boolean bold) {
-        Seg(String text, TextColor color) { this(text, color, false, false); }
-        Seg(String text, TextColor color, boolean italic) { this(text, color, italic, false); }
-    }
-
-    // Compact: abnormality title, wrapped flavor (<=~38/line), a faint how-to guide, and the E.G.O footer.
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("The Knight of Despair", NAME, false, true)),      // abnormality title
-        List.of(),
-        List.of(new Seg("A rapier for swift thrusts;", WHITE)),
-        List.of(new Seg("unskilled hands puncture fast.", WHITE)),
-        List.of(new Seg("By chivalry: no foul play, no mercy.", GREY, true)),
-        List.of(),
-        List.of(new Seg("How to use:", GREY)),                             // faint header
-        List.of(new Seg("Four rapiers trail behind you.", WHITE)),
-        List.of(new Seg("A hit darts one to double-tag.", WHITE)),
-        List.of(new Seg("Shift + right-click to recall.", WHITE)),
-        List.of(new Seg("E.G.O Equipment", GREY))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic())
-                        .decoration(TextDecoration.BOLD, seg.bold()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    // The moveset is written from the code, not from the old how-to block: the ability names below are
+    // placeholders except "Double Tag" and "Recharge", which the class docs and the action bar already
+    // name. The chivalry line keeps the dim italic the old block gave it, in the helper's quote slot.
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Sword With Sharpened Tears",
+            "The Knight of Despair",
+            PRIMARY,
+            SECONDARY,
+            List.of(
+                    "A rapier for swift thrusts;",
+                    "unskilled hands puncture fast.",
+                    "By chivalry: no foul play, no mercy."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Passive] Rapier Formation",
+                            "Four rapiers wheel in a curved fan",
+                            "behind you while the sword is held."),
+                    new EgoLore.Ability("[Left Click] Double Tag",
+                            "Landing a hit darts one ready rapier",
+                            "in to stab for 2, then ricochet around",
+                            "the body for 0.5 a slash. The sent",
+                            "rapier is spent, and rests 4 seconds."),
+                    new EgoLore.Ability("[Shift + Right-click] Recharge",
+                            "Calls every spent rapier back into the",
+                            "fan. Once per 45 seconds.")
+            ));
 }

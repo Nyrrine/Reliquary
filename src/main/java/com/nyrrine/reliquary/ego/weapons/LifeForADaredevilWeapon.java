@@ -3,10 +3,9 @@ package com.nyrrine.reliquary.ego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -29,7 +28,6 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
@@ -148,8 +146,7 @@ public final class LifeForADaredevilWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.LIFE_FOR_A_DAREDEVIL.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Life for a Daredevil").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.LIFE_FOR_A_DAREDEVIL);
@@ -369,49 +366,36 @@ public final class LifeForADaredevilWeapon implements Weapon {
 
     // ---- lore -----------------------------------------------------------------------
 
-    private static final TextColor NAME  = TextColor.color(0x8FA6BE); // name / abnormality title — pale gray-blue
+    /** Primary — the blade's pale gray-blue. Display name, "How to use:", ability headers. */
+    private static final TextColor NAME  = TextColor.color(0x8FA6BE);
+    /** Secondary — the dimmer steel the conditions were always read in. The Abnormality title line. */
+    private static final TextColor FAINT = TextColor.color(0x7C8794);
+
+    // Particle colours, kept apart from the lore palette so tuning one never disturbs the other.
     private static final Color     SLICE = Color.fromRGB(0xED, 0xEF, 0xF2); // the clean slice — near-white
     private static final Color     BLOOD = Color.fromRGB(0x8A, 0x0F, 0x12); // decapitation blood — dark red
-    private static final TextColor PALE  = TextColor.color(0xC6CFD8); // base description
-    private static final TextColor STEEL = TextColor.color(0x9FB8D8); // mechanic accent
-    private static final TextColor FAINT = TextColor.color(0x7C8794); // conditions / epithet
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
-
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Crumbling Armor", NAME)),
-        List.of(),
-        List.of(new Seg("An ancient sword.", PALE)),
-        List.of(new Seg("Just as its archetype desired, it", FAINT, true)),
-        List.of(new Seg("will be useless in the hands of", FAINT, true)),
-        List.of(new Seg("the frightened", FAINT, true)),
-        List.of(),
-        List.of(new Seg("E.G.O Equipment", FAINT)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT)),
-        List.of(new Seg("Blink behind a faltering foe within", PALE)),
-        List.of(new Seg("9 blocks", STEEL), new Seg(" and take its head.", PALE)),
-        List.of(new Seg("Executes ", FAINT), new Seg("mob <25%", STEEL), new Seg(", ", FAINT), new Seg("player <10%", STEEL), new Seg(",", FAINT)),
-        List.of(new Seg("boss <5%", STEEL), new Seg(" HP.", FAINT)),
-        List.of(new Seg("Holding it costs you ", FAINT), new Seg("2 hearts", STEEL), new Seg(".", FAINT))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Life for a Daredevil",   // display name — always the weapon
+            "Crumbling Armor",        // title line — always the Abnormality
+            NAME,
+            FAINT,
+            List.of(
+                    "An ancient sword.",
+                    "Just as its archetype desired, it",
+                    "will be useless in the hands of",
+                    "the frightened"
+            ),
+            List.of(
+                    new EgoLore.Ability("[Left Click] Blink Execute",
+                            "Blink behind a faltering foe within",
+                            "9 blocks and take its head. The",
+                            "finishing blow ignores armour,",
+                            "shields and Resistance, and costs",
+                            "the victim's gear no durability.",
+                            "Executes mob <25%, player <10%,",
+                            "boss <5% HP."),
+                    new EgoLore.Ability("[Passive] Max Health Penalty",
+                            "Holding it costs you 2 hearts.")
+            ));
 }

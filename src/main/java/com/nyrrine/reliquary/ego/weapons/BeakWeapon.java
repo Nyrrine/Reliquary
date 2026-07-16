@@ -4,10 +4,9 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
 import org.bukkit.Color;
 import org.bukkit.FluidCollisionMode;
@@ -25,7 +24,6 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -81,11 +79,10 @@ public final class BeakWeapon implements Weapon {
     private static final long RELOAD_MS = 5000L;     // dry-magazine reload time
 
     // Palette — white/gray bird with a red-cannon accent.
-    private static final TextColor NAME  = TextColor.color(0xE8E8EC); // pale feather white (name)
-    private static final TextColor GREY  = TextColor.color(0xB8B8C0); // body text
-    private static final TextColor RED   = TextColor.color(0xE23B3B); // red-cannon accent
-    private static final TextColor FAINT = TextColor.color(0x7A7A84); // conditions / controls
-    private static final TextColor QUOTE = TextColor.color(0x6E6E76); // epithet
+    /** Primary — pale feather white. Display name, "How to use:", ability headers. */
+    private static final TextColor NAME = TextColor.color(0xE8E8EC);
+    /** The red-cannon accent — the Abnormality title line, and the action bar's ammo/reload gauge. */
+    private static final TextColor RED  = TextColor.color(0xE23B3B);
 
     private static final Color RED_BULLET = Color.fromRGB(0xE2, 0x3B, 0x3B); // spiked-bullet red
     private static final Color RED_DARK   = Color.fromRGB(0x8C, 0x1F, 0x1F); // the toothed core, darker
@@ -352,8 +349,7 @@ public final class BeakWeapon implements Weapon {
     public ItemStack createItem() {
         ItemStack item = new ItemStack(EgoModels.BEAK.material());
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text("Beak").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.BEAK);
@@ -363,39 +359,34 @@ public final class BeakWeapon implements Weapon {
 
     // ---- lore ----------------------------------------------------------------------
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
-
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Punishing Bird", NAME)),
-        List.of(),
-        List.of(new Seg("Little bird decided to punish", GREY)),
-        List.of(new Seg("bad creatures with his beak.", GREY)),
-        List.of(),
-        List.of(new Seg("E.G.O Equipment — how to use:", FAINT, true)),
-        List.of(new Seg("Right-click to peck; 12-shot mag.", FAINT, true)),
-        List.of(new Seg("Reloads over 5s when it runs dry.", FAINT, true)),
-        List.of(),
-        List.of(new Seg("\"Peck. Peck. Peck.\"", QUOTE, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Beak",
+            "Punishing Bird",
+            NAME,
+            RED,
+            List.of(
+                    "Little bird decided to punish",
+                    "bad creatures with his beak."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Right Click] Fire Spiked Pellet",
+                            "Spends one bullet to fire a spiked",
+                            "pellet up to 22 blocks. 1.8 damage,",
+                            "no knockback. Fires up to about 5",
+                            "times a second."),
+                    new EgoLore.Ability("[Passive] 12-Round Magazine",
+                            "Holds 12 bullets. Running dry starts",
+                            "a 5 second reload; firing is disabled",
+                            "until it finishes."),
+                    new EgoLore.Ability("[Passive] Multishot Burst Fire",
+                            "With Multishot, one trigger fires a",
+                            "3-round burst down the aim line for",
+                            "one bullet."),
+                    new EgoLore.Ability("[Passive] Piercing Through-Shot",
+                            "With Piercing, each pellet punches",
+                            "through the first target and into one",
+                            "more per level.")
+            ));
 
     // ---- lifecycle -----------------------------------------------------------------
 

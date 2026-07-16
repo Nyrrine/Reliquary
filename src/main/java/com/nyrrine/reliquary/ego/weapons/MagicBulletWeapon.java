@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -162,9 +163,8 @@ public final class MagicBulletWeapon implements Weapon {
     // glyph. BLACK is the supporting tone — Magic Bullet's signature "black flame": near-black DUST + SMOKE
     // wisps curling around the sigil, off the muzzle, and shrouding the ult orb (a black-flame shell around a
     // blue core). Black is never the ring material. NO white (no END_ROD).
-    private static final TextColor NAME    = TextColor.color(0x2E6BFF); // deep blue (name)
-    private static final TextColor STEEL   = TextColor.color(0x9BB8FF); // pale barrel-blue body
-    private static final TextColor GLOW    = TextColor.color(0x8FB8FF); // light-blue accent
+    private static final TextColor NAME    = TextColor.color(0x2E6BFF); // deep blue — primary (name, headers)
+    private static final TextColor GLOW    = TextColor.color(0x8FB8FF); // light-blue accent — secondary (title line)
     private static final TextColor FAINT   = TextColor.color(0x76788C); // conditions / controls
     private static final TextColor FRAME   = NamedTextColor.DARK_GRAY;  // meter brackets / empty
     private static final TextColor SEVENTH = TextColor.color(0xADD8FF); // "The Seventh Bullet"
@@ -1337,8 +1337,7 @@ public final class MagicBulletWeapon implements Weapon {
     public ItemStack createItem() {
         ItemStack item = new ItemStack(EgoModels.MAGIC_BULLET.material());
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text("Magic Bullet").color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.MAGIC_BULLET);
@@ -1348,41 +1347,44 @@ public final class MagicBulletWeapon implements Weapon {
 
     // ---- lore ----------------------------------------------------------------------
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
-
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Der Freischütz", NAME)),
-        List.of(),
-        List.of(new Seg("It fires on the vow, not the pull.", STEEL)),
-        List.of(new Seg("Inscribe the black circle — and never miss.", STEEL)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT, true)),
-        List.of(new Seg("Left-click — charge & fire a never-miss shot (×6).", FAINT, true)),
-        List.of(new Seg("Right-click — mark a target to lock on.", FAINT, true)),
-        List.of(new Seg("A raised shield blocks the shot — and the orb.", FAINT, true)),
-        List.of(new Seg("6 shots → the Seventh Bullet is forced:", FAINT, true)),
-        List.of(new Seg("Shift-right-click to loose the orb.", FAINT, true)),
-        List.of(new Seg("Then 15s downtime before it reloads.", FAINT, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Magic Bullet",     // display name — always the weapon
+            "Der Freischütz",   // title line — always the Abnormality
+            NAME,
+            GLOW,
+            List.of(
+                    "It fires on the vow, not the pull.",
+                    "Inscribe the black circle —",
+                    "and never miss."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Passive] Bullet Counter",
+                            "Every shot fired is counted. After the",
+                            "sixth, the normal shot is locked out and",
+                            "only the Seventh Bullet remains."),
+                    new EgoLore.Ability("[Passive] Shield Block",
+                            "A raised shield facing into the shot",
+                            "blocks it — the bullet and the orb."),
+                    new EgoLore.Ability("[Left Click] Charged Shot",
+                            "Begins a 2.4 second charge, then looses",
+                            "one shot down the aim at full charge.",
+                            "13 second reload before the next."),
+                    new EgoLore.Ability("[Right Click] Target Lock",
+                            "Marks the enemy you are looking at, or",
+                            "the last one you struck. While the lock",
+                            "holds the bullet cannot miss, hitting",
+                            "through cover, and the orb homes onto",
+                            "it. The lock lasts 60 seconds."),
+                    new EgoLore.Ability("[Shift + Right-click] The Seventh Bullet",
+                            "Forced once six shots are spent. A 15",
+                            "second wind-up inscribes four circles,",
+                            "then looses a huge homing orb: it tears",
+                            "a temporary hole through all it passes",
+                            "and devastates what it touches.",
+                            "If the orb kills, it turns back on the",
+                            "wielder for 8 hearts. Then 15 seconds",
+                            "of downtime, and the counter resets.")
+            ));
 
     // ---- lifecycle -----------------------------------------------------------------
 

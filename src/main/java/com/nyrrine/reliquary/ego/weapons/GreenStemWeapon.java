@@ -4,10 +4,9 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -30,7 +29,6 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -149,8 +147,7 @@ public final class GreenStemWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.GREEN_STEM.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Green Stem").color(WOOD).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.GREEN_STEM);
@@ -442,50 +439,47 @@ public final class GreenStemWeapon implements Weapon {
 
     // ---- palette & lore -----------------------------------------------------------
 
-    // No green anywhere: predominantly woody brown with hints of apple red.
-    private static final TextColor WOOD  = TextColor.color(0x8A5A2C); // name / title — wood brown
-    private static final TextColor APPLE = TextColor.color(0xC5342C); // apple-red accent
-    private static final TextColor PALE  = TextColor.color(0xC7B199); // base description — pale wood/tan
-    private static final TextColor FAINT = TextColor.color(0x8A7458); // faint flavour / action bar
+    // No green anywhere: predominantly woody brown with hints of apple red. The blade is named for a stem
+    // it does not have — it is splintered wood and one red fruit, and the palette says so on purpose.
+    private static final TextColor WOOD  = TextColor.color(0x8A5A2C); // primary — wood brown
+    private static final TextColor APPLE = TextColor.color(0xC5342C); // secondary — apple-red accent
+    private static final TextColor FAINT = TextColor.color(0x8A7458); // action bar
 
     private static final Color THORN      = Color.fromRGB(0x8A5A2C); // wooden thorn splinters (dust)
     private static final Color THORN_DARK = Color.fromRGB(0x5E3A1E); // deeper bark shadow (dust)
     private static final Color APPLE_TIP  = Color.fromRGB(0xC5342C); // apple-red thorn tip (dust)
     private static final BlockData THORN_BLOCK = Material.STRIPPED_OAK_WOOD.createBlockData(); // splinter debris
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
-
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Snow White's Apple", WOOD)),
-        List.of(),
-        List.of(new Seg("Once realizing that nobody would come, stems and", PALE)),
-        List.of(new Seg("leaves blossomed as if by magic. However, the inherent", PALE)),
-        List.of(new Seg("malice", APPLE), new Seg(" caused all life to crumble as soon as it bloomed.", PALE)),
-        List.of(),
-        List.of(new Seg("Those who come in contact die by the deep-seated", PALE)),
-        List.of(new Seg("hatred", APPLE), new Seg(" rather than the sharpness of its tip.", PALE)),
-        List.of(),
-        List.of(new Seg("E.G.O Equipment — how to use:", FAINT, true)),
-        List.of(new Seg("Strikes poison the wounded.", FAINT, true)),
-        List.of(new Seg("Foes at 5% HP or less are impaled.", FAINT, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Green Stem",
+            "Snow White's Apple",
+            WOOD,
+            APPLE,
+            List.of(
+                    "Once realizing that nobody would come,",
+                    "stems and leaves blossomed as if by",
+                    "magic. However, the inherent malice",
+                    "caused all life to crumble as soon as",
+                    "it bloomed.",
+                    "",
+                    "Those who come in contact die by the",
+                    "deep-seated hatred rather than the",
+                    "sharpness of its tip."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Passive] Poison On Hit",
+                            "Every melee hit poisons the struck",
+                            "body for 4 seconds."),
+                    new EgoLore.Ability("[Passive] Thorn",
+                            "Anything at or below 5% of its max",
+                            "health within 5 blocks is impaled by a",
+                            "wooden thorn — a kill that armour,",
+                            "shields and Resistance cannot stop, and",
+                            "that costs the body's gear nothing.",
+                            "Fires both from your hits and on its",
+                            "own while the blade is held."),
+                    new EgoLore.Ability("[Shift + Right-click] Bite",
+                            "Take a bite of the fruit to mend two",
+                            "hearts. 8 second cooldown.")
+            ));
 }

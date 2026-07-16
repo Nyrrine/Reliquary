@@ -3,10 +3,9 @@ package com.nyrrine.reliquary.ego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -26,7 +25,6 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -166,8 +164,7 @@ public final class LampWeapon implements Weapon {
         ItemStack item = new ItemStack(EgoModels.LAMP.material());
         ItemMeta meta = item.getItemMeta();
 
-        meta.displayName(Component.text("Lamp").color(LAMP_YELLOW).decoration(TextDecoration.ITALIC, false));
-        meta.lore(LORE);
+        TOOLTIP.applyTo(meta);
         meta.setEnchantmentGlintOverride(false);
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.LAMP);
@@ -464,8 +461,9 @@ public final class LampWeapon implements Weapon {
 
     // ---- palette & lore ------------------------------------------------------------
 
+    /** Primary — the warm lamp glow. Display name, "How to use:", ability headers. */
     private static final TextColor LAMP_YELLOW = TextColor.color(0xFFD86E); // name / warm lamp glow
-    private static final TextColor PALE  = TextColor.color(0xE8DCC0); // base description
+    /** Secondary — the deeper warmth inside the glow. The Abnormality title line; also the action bar. */
     private static final TextColor EMBER = TextColor.color(0xF2A94E); // warmth / action-bar accent
     private static final TextColor FAINT = TextColor.color(0x8C8069); // conditions / cooldown
 
@@ -482,37 +480,34 @@ public final class LampWeapon implements Weapon {
     private static final Particle.DustOptions IMPACT =
             new Particle.DustOptions(Color.fromRGB(0xC9, 0x9A, 0x5A), 1.3f);
 
-    private record Seg(String text, TextColor color, boolean italic) {
-        Seg(String text, TextColor color) { this(text, color, false); }
-    }
-
-    private static final List<List<Seg>> LORE_SRC = List.of(
-        List.of(new Seg("Big Bird", LAMP_YELLOW)),
-        List.of(),
-        List.of(new Seg("A great warm lantern; its radiant", PALE)),
-        List.of(new Seg("pride shelters all who stand near.", PALE)),
-        List.of(),
-        List.of(new Seg("How to use:", FAINT, true)),
-        List.of(new Seg("Aura — nearby allies gain Resistance.", FAINT, true)),
-        List.of(new Seg("Right-click — a knockback slam.", FAINT, true)),
-        List.of(new Seg("Sneak + RC — Gaze copies your", FAINT, true)),
-        List.of(new Seg("debuffs onto a foe.", FAINT, true))
-    );
-
-    private static final List<Component> LORE = buildLore();
-
-    private static List<Component> buildLore() {
-        List<Component> out = new ArrayList<>(LORE_SRC.size());
-        for (List<Seg> line : LORE_SRC) {
-            if (line.isEmpty()) { out.add(Component.empty()); continue; }
-            Component c = Component.empty().decoration(TextDecoration.ITALIC, false);
-            for (Seg seg : line) {
-                c = c.append(Component.text(seg.text())
-                        .color(seg.color())
-                        .decoration(TextDecoration.ITALIC, seg.italic()));
-            }
-            out.add(c);
-        }
-        return out;
-    }
+    // The moveset below is written from the code, not from the old lore block it replaces: the aura also
+    // covers the wielder and tamed pets and burns in either hand, the slam refunds its cooldown on a whiff,
+    // and the Gaze keeps copying for a window rather than only on the cast. None of that was on the item.
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Lamp",
+            "Big Bird",
+            LAMP_YELLOW,
+            EMBER,
+            List.of(
+                    "A great warm lantern; its radiant",
+                    "pride shelters all who stand near."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Passive] Aura",
+                            "You, nearby players and tamed pets",
+                            "within 5 blocks are kept under",
+                            "Resistance I. Burns in either hand.",
+                            "A Gaze-marked foe is excluded."),
+                    new EgoLore.Ability("[Right Click] Slam",
+                            "Drives the lantern onto a body within",
+                            "5 blocks: heavy knockback, half a",
+                            "heart of damage. 3 second cooldown,",
+                            "though a miss costs none of it."),
+                    new EgoLore.Ability("[Shift + Right-click] Gaze",
+                            "Marks a target within 16 blocks and",
+                            "copies your harmful effects onto it —",
+                            "at once, then again for 8 seconds.",
+                            "The mark denies it your aura until it",
+                            "has been out of the fight 10 seconds.")
+            ));
 }
