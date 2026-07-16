@@ -258,6 +258,29 @@ public final class WeaponManager implements Listener {
         weapon.onHit(player, victim, event);
     }
 
+    /**
+     * A wielder takes damage: dispatch an on-damaged hook to whatever relic is in their main hand, mirroring
+     * {@link #onEntityDamageByEntity} for the receiving end. Listens on the base event so every cause counts
+     * (fall, fire, drowning, a mob or player strike) — a relic that only cares about its attacker narrows the
+     * event itself.
+     *
+     * <p>Monitor priority with ignoreCancelled: a relic here only ever sees damage that truly landed. Anything
+     * cancelled — by a protection plugin, or by this manager's own {@link #onFallDamage} guard below — never
+     * reaches it, so a counting relic can't tally a hit that never was. The tradeoff is that a relic cannot
+     * change its incoming damage from this hook; that would need a separate, earlier one.
+     *
+     * <p>This fires for every damage event on the server, so the cost for a player holding no relic is one
+     * instanceof plus the {@link #fromItem} material gate.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEntityDamage(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player player)) return;
+        Weapon weapon = fromItem(player.getInventory().getItemInMainHand());
+        if (weapon == null) return;
+        engage(weapon, player.getUniqueId());
+        weapon.onDamaged(player, event);
+    }
+
     @EventHandler(ignoreCancelled = true)
     public void onFallDamage(EntityDamageEvent event) {
         if (event.getCause() != EntityDamageEvent.DamageCause.FALL) return;

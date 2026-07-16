@@ -35,6 +35,23 @@ public interface Weapon {
                        org.bukkit.event.entity.EntityDamageByEntityEvent event) {}
 
     /**
+     * The wielder took damage with this relic in the main hand — the mirror of {@link #onHit}. Fired for
+     * every cause (a mob or player strike, fall, fire, drowning, poison), and only for damage that actually
+     * lands: it runs after every other listener has had its say, so a relic can count real hits without a
+     * later cancel leaving a phantom in the tally. {@code event.getFinalDamage()} is the settled
+     * post-armour figure here. Note a fully-blocked or absorbed strike still arrives with a final damage of
+     * 0 — check it if "was struck" and "lost health" mean different things to your relic.
+     *
+     * <p>Read the event, don't write it. This is dispatched at monitor priority, so {@code setDamage} or
+     * {@code setCancelled} here would mislead the listeners that already read their final values. To reach
+     * the striker, narrow the event: {@code if (event instanceof EntityDamageByEntityEvent e)} then
+     * {@code e.getDamager()}. Avoid calling {@code victim.damage()} in here — it re-enters this dispatch.
+     * Default: no-op.
+     */
+    default void onDamaged(org.bukkit.entity.Player victim,
+                           org.bukkit.event.entity.EntityDamageEvent event) {}
+
+    /**
      * The player pressed the swap-hands key (F). Dispatched to every weapon regardless of what's
      * held, so a relic can react even when its item has left the hand (e.g. Gungnir's recall).
      */
