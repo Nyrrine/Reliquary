@@ -43,14 +43,44 @@ final class CarmenForm implements Listener {
      */
     private final Map<UUID, Original> originals = new ConcurrentHashMap<>();
 
+    /** What came of offering someone the voice. */
+    enum Attempt {
+        /** They're her now. */
+        TOOK,
+        /** They already were. */
+        ALREADY_HER,
+        /** Someone else already is, and there is only one of her. */
+        ANOTHER_IS_HER
+    }
+
     /** Safe from any thread — the chat mask calls this off the main thread on every message. */
     boolean isCarmen(Player player) {
         return originals.containsKey(player.getUniqueId());
     }
 
-    /** @return false if they were already in form. */
-    boolean become(Player player) {
-        if (isCarmen(player)) return false;
+    /**
+     * The name the current Carmen came in with, or null if nobody is her.
+     *
+     * <p>Her live name is no use for saying who she is — it's "Carmen", which is the whole problem.
+     */
+    String carmenOriginalName() {
+        for (Original original : originals.values()) return original.profile().getName();
+        return null;
+    }
+
+    /**
+     * Puts the voice on someone — if she's free.
+     *
+     * <p><b>There is only ever one Carmen.</b> Nyrrine's call, and it's structural rather than
+     * cosmetic: two players in form are both literally named "Carmen", so every name-keyed lookup on
+     * the server goes ambiguous at once and quietly picks one. Ours could fall back to the name
+     * someone arrived with — {@code /kick Carmen} has no such fallback, and that's the half we don't
+     * own and can't fix. One Carmen means it can never resolve to the wrong person in the first
+     * place. Refusing the second transform is what buys that, so this guard is load-bearing.
+     */
+    Attempt become(Player player) {
+        if (isCarmen(player)) return Attempt.ALREADY_HER;
+        if (!originals.isEmpty()) return Attempt.ANOTHER_IS_HER;
 
         // getPlayerProfile() hands back a detached copy, so this snapshot is safe to hold and to
         // mutate independently.
@@ -76,7 +106,7 @@ final class CarmenForm implements Listener {
         // moment they joined. Setting it is what makes chat plugins print "Carmen" of their own
         // accord, without anyone having to fight them for the renderer.
         player.displayName(Component.text(CarmenSkin.NAME));
-        return true;
+        return Attempt.TOOK;
     }
 
     /**

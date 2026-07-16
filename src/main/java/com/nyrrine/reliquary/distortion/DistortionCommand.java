@@ -102,10 +102,28 @@ final class DistortionCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        if (!form.become(target)) {
-            sender.sendMessage(Component.text(describe(sender, target) + " already wearing her.")
-                    .color(NamedTextColor.GRAY));
-            return true;
+        switch (form.become(target)) {
+            case ALREADY_HER -> {
+                sender.sendMessage(Component.text(describe(sender, target) + " already wearing her.")
+                        .color(NamedTextColor.GRAY));
+                return true;
+            }
+            case ANOTHER_IS_HER -> {
+                // Name who has her by the name they came in with — saying "Carmen is already
+                // wearing her" would be true, useless, and exactly the confusion this rule exists
+                // to prevent.
+                String who = form.carmenOriginalName();
+                sender.sendMessage(Component.text("There is only one of her — ")
+                        .color(NamedTextColor.RED)
+                        .append(Component.text(who != null ? who : "someone else").color(NamedTextColor.WHITE))
+                        .append(Component.text(" is wearing her already.").color(NamedTextColor.RED)));
+                sender.sendMessage(Component.text("Give her back first: /abeautifulvoice form off "
+                        + (who != null ? who : "<player>")).color(NamedTextColor.DARK_GRAY));
+                return true;
+            }
+            case TOOK -> {
+                // fall through to the success messages below
+            }
         }
         sender.sendMessage(Component.text("A beautiful voice.").color(NamedTextColor.LIGHT_PURPLE));
         if (!target.equals(sender)) {
