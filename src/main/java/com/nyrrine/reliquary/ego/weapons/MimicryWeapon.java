@@ -11,7 +11,6 @@ import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
@@ -21,7 +20,6 @@ import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
-import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
@@ -29,17 +27,12 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
-import org.bukkit.inventory.EntityEquipment;
-import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -63,13 +56,15 @@ import java.util.concurrent.ThreadLocalRandom;
  *       {@link #LIFESTEAL_FRACTION} of the damage it dealt, throttled to once per
  *       {@link #LIFESTEAL_THROTTLE_MS}.</li>
  *   <li><b>The reservoir</b> ({@link #onDamaged}, passive) — every point of damage that <em>lands on</em>
- *       the wielder pools in the blade. It is the wounds it remembers, not the wounds it gave. There is no
- *       ceiling. The pool evaporates after {@link #RESERVOIR_DECAY_MS} without a fresh wound (whether the
- *       wielder is logged in for that lull or not).</li>
+ *       the wielder pools in the blade. It is the wounds it remembers, not the wounds it gave. The pool
+ *       itself is never clamped; what it can <em>buy</em> is (see below). It evaporates after
+ *       {@link #RESERVOIR_DECAY_MS} without a fresh wound (whether the wielder is logged in for that lull
+ *       or not).</li>
  *   <li><b>Nothing There</b> ({@link #onInteract}, shift + right-click) — the downswing. Empties the
  *       reservoir as one cleave around the wielder, dealing {@link #RELEASE_FRACTION} of the pooled total
- *       to everything inside {@link #RELEASE_RADIUS}. The blade that falls is drawn to the size of the
- *       pool and nothing clamps it.</li>
+ *       — never more than {@link #RELEASE_CAP} — to everything inside {@link #releaseRadius}. Past
+ *       {@link #RESERVOIR_FULL} the cleave stops hitting harder and stops reaching further; it only keeps
+ *       getting <em>bigger</em>.</li>
  *   <li><b>Onrush</b> ({@link #onInteract}, right-click) — a rush onto the foe the wielder last struck.
  *       If that foe is already faltering (a player under {@link #THRESH_PLAYER}, a mob under
  *       {@link #THRESH_MOB}, a boss under {@link #THRESH_BOSS}) Mimicry arrives at its back and finishes
@@ -84,22 +79,46 @@ import java.util.concurrent.ThreadLocalRandom;
  * final damage of zero and banks nothing: there is no wound to remember. The hook is read-only (it runs at
  * monitor priority, so writing the event would lie to every listener that already read its final values).
  *
- * <h2>Why the release costs the victim's armour nothing</h2>
- * The release is uncapped by design, and an uncapped number routed through {@link LivingEntity#damage} is
- * how this weapon once shredded armour sets: vanilla charges armour durability off the damage
- * <em>before</em> reduction, roughly {@code damage/4} <b>per piece</b>, so a four-figure cleave deletes a
- * victim's whole kit in one blow even when their armour soaks nearly all of it. The fix is not to bypass
- * armour — armour must still matter, and it still does, because the blow is a plain {@code damage()} the
- * victim's protection reduces normally. Instead {@link #snapshotArmour}/{@link #restoreArmour} read every
- * piece's {@link Damageable#getDamage()} immediately before the blow and put those exact values back
- * immediately after, per victim, in a {@code finally}. See {@link #restoreArmour} for what each edge case
- * does and for the one case it cannot cover.
+ * <h2>Power is capped. Spectacle is not. They are different numbers.</h2>
+ * The two used to be welded together: one figure decided both how hard the cleave hit and how big it looked,
+ * so making it look absurd made it hit absurdly, and capping the hit capped the look. They are now split,
+ * and the split is the whole design of this weapon:
+ *
+ * <ul>
+ *   <li><b>What it does</b> is bounded. Per body, one cast deals at most {@link #RELEASE_CAP}, and reaches
+ *       at most {@link #RELEASE_RADIUS_MAX}. Both saturate at {@link #RESERVOIR_FULL} pooled and never move
+ *       again.</li>
+ *   <li><b>What it looks like</b> is not. {@link #slashRadius} reads the true pool with no ceiling, so a
+ *       wielder who banked four figures throws an arc that leaves the render distance. It simply does not
+ *       hit any harder than the one that banked {@link #RESERVOIR_FULL}.</li>
+ * </ul>
+ *
+ * <p><b>The clamp therefore lives at the release, not at the intake</b> — {@link #bank} takes everything and
+ * {@link #nothingThere} clamps what it spends. Clamping the pool instead would be the obvious move and it is
+ * wrong: the spectacle is drawn from the pool, so a pool that stops at {@link #RESERVOIR_FULL} is an arc that
+ * stops at {@link #RESERVOIR_FULL}, and the drama dies with the damage. Keeping one honest, uncapped counter
+ * and bounding it where it is <em>spent</em> is what lets both halves be true at once.
+ *
+ * <p>The gauge is built to teach exactly this: the bar is scaled to {@link #RESERVOIR_FULL}, so a full bar
+ * means "this is as hard as it will ever hit", while the number beside it goes on climbing to say "…and it
+ * will keep looking worse".
+ *
+ * <h2>Armour, and why nothing here launders it</h2>
+ * Vanilla charges armour durability off the damage <em>before</em> reduction, roughly {@code damage/4}
+ * <b>per piece</b>. That is why an uncapped release was a gear shredder, and why an earlier build carried a
+ * snapshot/restore that read every piece's durability before the blow and wrote it back after. <b>The cap
+ * retires that machinery.</b> At {@link #RELEASE_CAP} the toll is {@code 60/4 = 15} per piece — about 2.5% of
+ * a netherite chestplate, a shade more than a point-blank creeper (~12) and well under a charged one (~24).
+ * That is ordinary wear from an ordinary big hit, and ordinary wear is exactly what every other weapon on
+ * this roster pays. Restoring it would have made Mimicry the only blow in the game whose damage armour
+ * absorbs for free — armour mattering <em>more</em> than vanilla, not less — at the cost of ~20 item-meta
+ * deep copies per victim per cast and a documented hole it could never close. Every blow this class deals is
+ * now a plain {@code damage()} that armour reduces normally and bills normally.
  *
  * <p><b>The execute is a modest blow plus {@code setHealth(0)}, never an overkill number.</b>
  * {@link #ONRUSH_EXECUTE_DAMAGE} is normal-sized and kill-credited, and {@code setHealth(0.0)} — which
  * never runs the damage pipeline and so takes no toll on armour — guarantees the finish through armour or
- * Resistance. Onrush's two blows are normal-sized on purpose and wear a victim's armour the normal amount;
- * only the uncapped release needs the restore.
+ * Resistance. An overkill damage figure would cost the victim ~{@code damage/4} per piece and delete a set.
  *
  * <h2>Re-entrancy</h2>
  * The release deals damage with {@link LivingEntity#damage(double, Entity)}, which fires its own
@@ -137,28 +156,48 @@ public final class MimicryWeapon implements Weapon {
     private static final double RELEASE_FRACTION = 0.5;
 
     /**
-     * Radius of the cut. One scan, one strike per body inside it.
-     *
-     * <p>Deliberately <b>not</b> scaled by the pool. The blade that falls is drawn as big as the pool
-     * demands — a large enough reservoir throws an arc taller than the render distance — but what it
-     * actually cuts stays five blocks, which is both the Library of Ruina read (a colossal blade, one
-     * target) and the only version of this that a busy box can afford: the entity scan is a fixed cost per
-     * cast no matter how absurd the number in the gauge is.
+     * The pool at which this weapon stops growing teeth — <b>the "certain point"</b>. Damage and reach both
+     * saturate here and never move again; everything past it is show. Nothing clamps the pool <em>to</em>
+     * this value (see the class docs on why that would kill the spectacle) — it is the value the mechanical
+     * numbers stop reading past, and the mark at which the gauge reads full.
      */
-    private static final double RELEASE_RADIUS = 5.0;
+    private static final double RESERVOIR_FULL = 120.0;
+
+    /**
+     * The hardest one body can be cut by one cast, ever. This is the old {@code RESERVOIR_CAP = 120} the
+     * uncapped rework deleted, restored at the only place it can live without taking the drama with it:
+     * {@code RESERVOIR_FULL * RELEASE_FRACTION}, the same 60 that build allowed, now clamped at the release
+     * instead of at the intake.
+     *
+     * <p>Sixty is chosen and not merely inherited. It is three unarmoured hearts short of nothing — a kill
+     * on any player not wearing a set — roughly four times {@link #ONRUSH_DAMAGE}, and it costs a full
+     * {@link #RESERVOIR_FULL} of <em>post-armour</em> damage actually suffered to buy, which is a whole fight
+     * survived rather than a combo. It is also, deliberately, the largest number whose armour toll
+     * ({@code 60/4 = 15} a piece) is still ordinary — see the class docs. Raising it past ~80 would put the
+     * bill back into gear-shredder territory and the restore back on the table.
+     */
+    private static final double RELEASE_CAP = RESERVOIR_FULL * RELEASE_FRACTION;
+
+    /**
+     * Radius of the cut, at an empty pool and at {@link #RESERVOIR_FULL} respectively. One scan, one strike
+     * per body inside it. See {@link #releaseRadius}.
+     *
+     * <p>The reach <em>does</em> grow — that is the "aoe keeps getting bigger" half of the brief — but it is
+     * clamped, and the clamp is the deliberate part. An unbounded hit radius is a power increase wearing a
+     * cosmetic's clothes: a capped 60 per body means nothing if the body count is unbounded, and a 50-block
+     * cleave catching forty players is 2,400 damage delivered from one keypress no matter how modest each
+     * slice reads. It would also break the perf promise outright, since the entity scan is the one cost here
+     * that genuinely tracks the radius. So reach saturates with damage, at 8: a 4.1× volume over the old
+     * flat 5 — a knot of bodies rather than a duel — and a scan box that is fixed-cost at its worst.
+     */
+    private static final double RELEASE_RADIUS_BASE = 5.0;
+    private static final double RELEASE_RADIUS_MAX = 8.0;
 
     /** Below this the pool isn't worth a cast — the wielder keeps it rather than spending nothing. */
     private static final double RELEASE_MIN = 1.0;
 
     /** The pool evaporates after this long without the wielder taking a fresh wound (online or logged out). */
     private static final long RESERVOIR_DECAY_MS = 300_000L; // 5 minutes out of combat
-
-    /**
-     * The gauge's full mark — <b>a display scale, not a cap.</b> Nothing clamps the pool; this is only the
-     * value at which the ten-segment bar reads full. The number beside the bar is always the true total, so
-     * a wielder carrying four figures sees a saturated bar and an honest count.
-     */
-    private static final double HUD_SCALE = 200.0;
 
     // ---- tuning: Onrush ------------------------------------------------------------
 
@@ -203,11 +242,15 @@ public final class MimicryWeapon implements Weapon {
 
     // ---- tuning: the show ----------------------------------------------------------
     //
-    // Every number in this block is a ceiling, and they are the reason an uncapped weapon is still
-    // affordable at ~100 players and ~13 TPS. The rule throughout: the pool scales the arc's SIZE and
-    // THICKNESS without limit, and its POINT COUNT not at all past SLASH_POINTS_MAX. A hundred-block
-    // cleave and a twelve-block cleave cost the server the same packets; the big one just spreads them
-    // further apart and draws them fatter, which is exactly where the drama lives anyway.
+    // This block is where the uncapped half of the weapon lives, and every number in it is a ceiling on
+    // COST rather than on SIZE — that is the trick that makes an unbounded spectacle affordable at ~100
+    // players and ~13 TPS. The rule throughout: the pool scales the arc's SIZE and THICKNESS without limit,
+    // and its POINT COUNT not at all past SLASH_POINTS_MAX. A 153-block cleave and a 12-block one cost the
+    // server the same packets; the big one just spreads them further apart and draws them fatter, which is
+    // exactly where the drama lives anyway.
+    //
+    // Nothing in this block feeds a damage number or an entity scan. It is safe to make any of it more
+    // absurd; it is not safe to let anything above read from it.
 
     /** The arc a bare pool would throw, before {@link #slashRadius} grows it. */
     private static final double SLASH_BASE_RADIUS = 3.0;
@@ -252,13 +295,6 @@ public final class MimicryWeapon implements Weapon {
     private static final int RUSH_POINTS_MAX = 32;
     private static final int RUSH_REVEAL = 3;
     private static final int RUSH_FADE = 4;
-
-    /**
-     * The slots vanilla charges durability to when a blow lands — {@code FEET, LEGS, CHEST, HEAD, BODY} on
-     * 26.1.2. Derived rather than written out so a future armour slot is covered the day it appears.
-     */
-    private static final EquipmentSlot[] ARMOUR_SLOTS =
-            Arrays.stream(EquipmentSlot.values()).filter(EquipmentSlot::isArmor).toArray(EquipmentSlot[]::new);
 
     // ---- housekeeping --------------------------------------------------------------
 
@@ -444,9 +480,11 @@ public final class MimicryWeapon implements Weapon {
     /**
      * Swallow a wound into the wielder's pool and stamp them in combat.
      *
-     * <p><b>Nothing clamps this.</b> The old build capped the pool because the release routed a four-figure
-     * number through {@code damage()} and vanilla billed the victim's armour for it; the cap is gone because
-     * that bill is now torn up in {@link #restoreArmour} instead, which is the honest place to fix it.
+     * <p><b>Nothing clamps this, and that is load-bearing rather than an oversight.</b> The pool is the
+     * honest running total of everything the wielder has been made to swallow, and it is what the spectacle
+     * is drawn from — so clamping it here would silently cap the arc, the one thing the design wants
+     * unbounded. The bound on what the pool can <em>buy</em> lives at the release ({@link #RELEASE_CAP}),
+     * which is the only site where it costs the show nothing. See the class docs.
      */
     private void bank(UUID wielderId, double taken, long now) {
         Reservoir r = reservoirs.get(wielderId);
@@ -519,15 +557,20 @@ public final class MimicryWeapon implements Weapon {
     // ---- Nothing There: give back every wound at once --------------------------------
 
     /**
-     * Bring the blade down. Everything living inside {@link #RELEASE_RADIUS} takes
-     * {@link #RELEASE_FRACTION} of the pooled total. One {@code getNearbyEntities} scan for the whole cast,
-     * one blow per body.
+     * Bring the blade down. Everything living inside {@link #releaseRadius} takes {@link #RELEASE_FRACTION}
+     * of the pooled total, capped at {@link #RELEASE_CAP}. One {@code getNearbyEntities} scan for the whole
+     * cast, one blow per body.
      *
-     * <p>The pool is spent whether or not anything was standing there — the weapon gives it back either
-     * way. Damage is routed through {@code victim.damage(...)} so armour reduces it and other plugins can
-     * veto it, each blow is fenced so it cannot pool itself straight back into the reservoir it just came
-     * out of, and each blow is wrapped in the armour-durability restore that makes an uncapped number safe
-     * to deal. See {@link #restoreArmour}.
+     * <p>Both mechanical numbers are read here and both saturate at {@link #RESERVOIR_FULL}: past that, a
+     * bigger pool buys a bigger <em>picture</em> ({@link #nothingThereFx}, which reads the raw amount and has
+     * no ceiling) and nothing else. This is the only method where the two halves are visible side by side —
+     * {@code perTarget} and {@code radius} are clamped, {@code amount} is handed to the FX untouched.
+     *
+     * <p>The pool is spent whether or not anything was standing there — the weapon gives it back either way,
+     * and the wielder does not get to bank a fortune and cast it repeatedly by finding an empty field.
+     * Damage is routed through {@code victim.damage(...)} so armour reduces it, bills the victim's gear the
+     * ordinary amount, and other plugins can veto it. Each blow is fenced ({@link #striking}) so it cannot
+     * pool straight back into the reservoir it just came out of.
      */
     private void nothingThere(Player player) {
         UUID id = player.getUniqueId();
@@ -539,15 +582,19 @@ public final class MimicryWeapon implements Weapon {
             return;
         }
 
-        double perTarget = amount * RELEASE_FRACTION;
+        // The two clamped reads. Everything the victim actually feels is decided on these two lines.
+        double perTarget = Math.min(amount * RELEASE_FRACTION, RELEASE_CAP);
+        double radius = releaseRadius(amount);
 
         // Spend the pool first: whatever happens below, this cast owns it and nothing can double-dip it.
         reservoirs.remove(id);
 
+        // The FX get the *raw* pool, not the clamped one — this is the uncapped half of the weapon.
         nothingThereFx(player, amount);
 
-        // One scan for the whole cast.
-        List<Entity> nearby = player.getNearbyEntities(RELEASE_RADIUS, RELEASE_RADIUS, RELEASE_RADIUS);
+        // One scan for the whole cast, and its box is bounded by RELEASE_RADIUS_MAX however big the pool got.
+        List<Entity> nearby = player.getNearbyEntities(radius, radius, radius);
+        double radiusSq = radius * radius;
 
         striking.add(id);
         try {
@@ -555,20 +602,12 @@ public final class MimicryWeapon implements Weapon {
                 if (!(e instanceof LivingEntity victim)) continue;
                 if (victim.equals(player) || victim instanceof ArmorStand) continue;
                 if (victim.isDead() || !victim.isValid()) continue;
-                if (victim.getLocation().distanceSquared(player.getLocation()) > RELEASE_RADIUS * RELEASE_RADIUS) continue;
+                if (victim.getLocation().distanceSquared(player.getLocation()) > radiusSq) continue;
 
-                // Per victim, tight around that victim's own blow: read the wear, land the cleave, put the
-                // wear back. The finally is what makes the restore survive a veto from another plugin, or a
-                // listener throwing, or the blow killing outright.
-                List<ArmourWear> wear = snapshotArmour(victim);
-                try {
-                    // A body the wielder just cut is still inside its i-frames; without this the release
-                    // would silently no-op on exactly the foe it was aimed at.
-                    victim.setNoDamageTicks(0);
-                    victim.damage(perTarget, player);
-                } finally {
-                    restoreArmour(victim, wear);
-                }
+                // A body the wielder just cut is still inside its i-frames; without this the release would
+                // silently no-op on exactly the foe it was aimed at.
+                victim.setNoDamageTicks(0);
+                victim.damage(perTarget, player);
             }
         } finally {
             striking.remove(id);
@@ -578,95 +617,22 @@ public final class MimicryWeapon implements Weapon {
         EgoDurability.wearMainHand(player);
     }
 
-    // ---- the armour restore -----------------------------------------------------------
-
     /**
-     * One armour piece's durability as it stood immediately before a blow. The material is carried so the
-     * restore can tell "the same piece, now dented" from "a different item is in that slot now" without
-     * holding a reference to a stack the server may have replaced underneath us.
+     * How far the cleave actually cuts, given what is in the pool. <b>Bounded, unlike the arc that draws
+     * it</b> — {@link #RELEASE_RADIUS_BASE} at nothing, {@link #RELEASE_RADIUS_MAX} at {@link #RESERVOIR_FULL}
+     * and forever after. {@code sqrt} so the early pool is felt at once, matching {@link #slashRadius}'s
+     * curve so the reach and the picture grow in step over the range where both still move.
+     *
+     * <p>Past {@link #RESERVOIR_FULL} the drawn arc outruns this and the cleave visibly over-claims its
+     * reach. That is a deliberate lie, and {@link #slashRadius} is floored against this method to keep it a
+     * <b>one-directional</b> one: the blade is never drawn shorter than it cuts, so the exaggeration can only
+     * ever spare someone who expected to be hit, and can never kill someone who could see they were clear. A
+     * lie that resolves in the victim's favour is the affordable kind, and it is the price of the drama being
+     * uncapped at all.
      */
-    private record ArmourWear(EquipmentSlot slot, Material material, int damage) {}
-
-    /**
-     * Read every armour piece's durability, immediately before the blow.
-     *
-     * <p>Works off {@link LivingEntity#getEquipment()} rather than a player inventory, so a mob in a full
-     * set is covered exactly like a player — vanilla charges their armour too. An entity with no equipment
-     * at all, or nothing but empty slots, yields an empty list and the restore becomes a no-op.
-     *
-     * <p>{@code BODY} is skipped for humans: it is a real armour slot on 26.1.2 (wolf and horse armour live
-     * there) but a player has no such slot, and asking a player inventory for it is a question with no
-     * meaningful answer. Every other armour slot is read for everyone.
-     */
-    private List<ArmourWear> snapshotArmour(LivingEntity victim) {
-        EntityEquipment eq = victim.getEquipment();
-        if (eq == null) return List.of();                       // some entities carry no equipment at all
-
-        List<ArmourWear> out = null;
-        for (EquipmentSlot slot : ARMOUR_SLOTS) {
-            if (slot == EquipmentSlot.BODY && victim instanceof HumanEntity) continue;
-
-            ItemStack piece = eq.getItem(slot);
-            if (piece == null || piece.getType().isAir()) continue;          // empty slot — nothing to keep
-            if (!(piece.getItemMeta() instanceof Damageable d)) continue;    // carries no durability at all
-
-            if (out == null) out = new ArrayList<>(ARMOUR_SLOTS.length);
-            out.add(new ArmourWear(slot, piece.getType(), d.getDamage()));
-        }
-        return out == null ? List.of() : out;
-    }
-
-    /**
-     * Put the durability back, immediately after the blow — the whole reason the reservoir can be uncapped.
-     *
-     * <p>Every case this is asked to survive, and what it does:
-     * <ul>
-     *   <li><b>The ordinary one</b> — the piece is still worn and vanilla has billed it {@code damage/4}.
-     *       Same slot, same material, damage now higher: the recorded value is written straight back, so the
-     *       victim's armour reduced a four-figure cleave and paid nothing for the privilege.</li>
-     *   <li><b>The event was cancelled</b> by another plugin. No blow landed, so no durability moved, so the
-     *       recorded value already equals the live one and the equality check makes the whole restore a
-     *       no-op — not a redundant write, and not a stale value stamped over someone else's change. The
-     *       restore runs from a {@code finally}, so a veto (or a listener throwing) cannot skip it.</li>
-     *   <li><b>The piece broke.</b> Vanilla empties the slot, so the slot reads air and the piece is left
-     *       alone: the recorded stack is <em>not</em> written back, because a destroyed item must stay
-     *       destroyed. This is the one case the restore cannot save — see below.</li>
-     *   <li><b>The piece was replaced</b> mid-event (another plugin swapping gear on hit). The material no
-     *       longer matches what was recorded, so it is left alone: someone else owns that slot now, and
-     *       stamping an unrelated item with our remembered number would be a corruption, not a repair.</li>
-     *   <li><b>The victim died</b> to the blow and dropped everything inside the same {@code damage()} call.
-     *       The slots read air, every piece is skipped, and their drops keep whatever durability they died
-     *       with.</li>
-     *   <li><b>No armour, or a non-player victim.</b> Empty snapshot, or a mob's snapshot handled by the
-     *       same code path as a player's — the loop is over {@link EntityEquipment}, which both have.</li>
-     * </ul>
-     *
-     * <p><b>The hole, stated plainly rather than papered over:</b> a piece vanilla <em>destroys</em> during
-     * the blow cannot be restored, because the only way to bring it back is to write the recorded stack into
-     * the slot, and that is item duplication wearing a repair's clothes. A cleave big enough to bill a piece
-     * more durability than it had left therefore still destroys it. This bites a victim who dies to the cut
-     * (their armour breaks before the death drop) and a victim who survives it wearing nearly-spent gear.
-     * Everything that survives with the piece intact — which is every case where "armour soaked it" is
-     * meaningful — is fully covered. Closing the last case needs either a damage type that skips the armour
-     * bill (rejected: armour must still matter) or a cap on the number (rejected: the point of the rework).
-     */
-    private void restoreArmour(LivingEntity victim, List<ArmourWear> before) {
-        if (before.isEmpty()) return;
-
-        EntityEquipment eq = victim.getEquipment();
-        if (eq == null) return;                                  // equipment went away with the entity
-
-        for (ArmourWear w : before) {
-            ItemStack piece = eq.getItem(w.slot());
-            if (piece == null || piece.getType().isAir()) continue;      // broke, or dropped — do not resurrect
-            if (piece.getType() != w.material()) continue;               // someone else's item now — leave it
-            if (!(piece.getItemMeta() instanceof Damageable d)) continue;
-            if (d.getDamage() == w.damage()) continue;                   // untouched (or cancelled) — no write
-
-            d.setDamage(w.damage());
-            piece.setItemMeta(d);
-            eq.setItem(w.slot(), piece, true);                           // silent: no re-equip clatter
-        }
+    private static double releaseRadius(double amount) {
+        double t = Math.min(Math.max(0.0, amount), RESERVOIR_FULL) / RESERVOIR_FULL;
+        return RELEASE_RADIUS_BASE + (RELEASE_RADIUS_MAX - RELEASE_RADIUS_BASE) * Math.sqrt(t);
     }
 
     // ---- Onrush: the rush you don't see coming --------------------------------------
@@ -871,8 +837,12 @@ public final class MimicryWeapon implements Weapon {
      * it is not — a wielder who sheathes the blade must stop costing ticks immediately.
      *
      * <p>Note the pool itself is <em>not</em> dropped here: sheathing the weapon is not "out of combat", and
-     * only {@link #RESERVOIR_DECAY_MS} without a fresh wound empties it. The bar is scaled by
-     * {@link #HUD_SCALE} and saturates; the number next to it never does.
+     * only {@link #RESERVOIR_DECAY_MS} without a fresh wound empties it.
+     *
+     * <p><b>The bar is scaled to {@link #RESERVOIR_FULL} rather than to some larger display number, and that
+     * is the whole tell.</b> It saturates exactly when the damage and the reach do, so a full bar reads "this
+     * is as hard as it will ever hit" — while the honest, unclamped count beside it goes on climbing to say
+     * the blade will nonetheless keep getting bigger. The gauge teaches the split; no tooltip has to.
      */
     @Override
     public boolean onTick(Player player, long tick) {
@@ -891,7 +861,7 @@ public final class MimicryWeapon implements Weapon {
 
         Component label = plain("Nothing There  " + (long) Math.round(amount))
                 .append(plain("  ")).append(onrush);
-        player.sendActionBar(EgoHud.gauge(RUST, amount / HUD_SCALE, label));
+        player.sendActionBar(EgoHud.gauge(RUST, amount / RESERVOIR_FULL, label));
         return true;
     }
 
@@ -1019,13 +989,29 @@ public final class MimicryWeapon implements Weapon {
     }
 
     /**
-     * How far the cleave reaches, given what is in the pool. <b>Unbounded on purpose</b> — a wielder who has
-     * banked four figures gets an arc that leaves the render distance, which is the whole point of the
-     * rework. Growth is {@code sqrt} so the early pool is felt immediately and an absurd one still lands
-     * somewhere drawable: 40 pooled reads 6 blocks, 1,000 reads 18, 10,000 reads 50, 100,000 reads 153.
+     * How far the cleave is <b>drawn</b>, given what is in the pool — not how far it cuts, which is
+     * {@link #releaseRadius}. <b>Unbounded on purpose:</b> a wielder who has banked four figures gets an arc
+     * that leaves the render distance, and it is exactly as lethal as the one that banked
+     * {@link #RESERVOIR_FULL}. Growth is {@code sqrt} so the early pool is felt immediately and an absurd one
+     * still lands somewhere drawable: 40 pooled reads 6 blocks, 1,000 reads 18, 10,000 reads 50, 100,000
+     * reads 153.
+     *
+     * <p><b>Never let a damage or scan number read from this.</b> It is safe to make more absurd only for as
+     * long as it feeds nothing but particles; the moment reach follows it, the cap above becomes decorative.
+     *
+     * <p>The floor against {@link #releaseRadius} is the honesty half of the bargain, and it is what makes
+     * the lie one-directional. The bare curve starts at {@link #SLASH_BASE_RADIUS} — <em>under</em> the five
+     * blocks the cleave has always cut — so a small pool used to draw a blade shorter than its own reach and
+     * kill people who could see they were clear of it. Held to at least the true reach, the arc is honest
+     * across the whole range where this weapon is still growing teeth, and only begins to over-claim at
+     * {@link #RESERVOIR_FULL} — the exact moment power saturates and the cut becomes theatre. From there it
+     * exaggerates freely, which is the ask. The floor costs nothing at the ceiling and a handful of points
+     * below it: {@link #slashPoints} still bottoms out at {@link #SLASH_POINTS_MIN} and still tops out at
+     * {@link #SLASH_POINTS_MAX}.
      */
     private static double slashRadius(double amount) {
-        return SLASH_BASE_RADIUS * (1.0 + Math.sqrt(Math.max(0.0, amount) / SLASH_REF));
+        return Math.max(SLASH_BASE_RADIUS * (1.0 + Math.sqrt(Math.max(0.0, amount) / SLASH_REF)),
+                releaseRadius(amount));
     }
 
     /** How wide the blade is drawn. Clamped, and {@link #SLASH_THICK_MAX} says why. */
@@ -1103,9 +1089,13 @@ public final class MimicryWeapon implements Weapon {
 
     /**
      * Nothing There: the blade going up and coming down, drawn to the size of everything the wielder has
-     * been made to swallow. Nothing here clamps the pool — the reach and the width both read straight off it
-     * — and nothing here scans, spawns, or damages either; it is one arc and one impact, and the count it
-     * spends is capped by {@link #slashPoints} no matter how absurd the number is.
+     * been made to swallow.
+     *
+     * <p><b>This is the uncapped half of the weapon, and it is uncapped precisely because it is inert.</b>
+     * Nothing in here scans, spawns, or damages; it is one arc and one impact. The {@code amount} it is
+     * handed is the raw pool, never the clamped release, so the picture goes on growing long after
+     * {@link #RELEASE_CAP} and {@link #RELEASE_RADIUS_MAX} have stopped moving — which is the entire ask.
+     * The cost of that is bounded by {@link #slashPoints} no matter how absurd the number gets.
      *
      * <p>The blow itself has already landed by the time the blade finishes falling. That is deliberate: the
      * alternative is holding the damage for {@link #DOWNSWING_REVEAL} ticks, which means re-validating every
@@ -1310,15 +1300,21 @@ public final class MimicryWeapon implements Weapon {
                             "at most once every 5 seconds."),
                     new EgoLore.Ability("[Passive] The reservoir",
                             "Damage dealt TO you pools in the",
-                            "blade. There is no ceiling on it.",
-                            "The pool empties after 5 minutes",
-                            "without a fresh wound."),
+                            "blade, and the pool itself has no",
+                            "ceiling. The gauge reads full at",
+                            "120 — the point past which it can",
+                            "buy no more. The pool empties",
+                            "after 5 minutes without a wound."),
                     new EgoLore.Ability("[Shift + Right-click] Nothing There",
                             "Bring the blade down. Everything",
-                            "within 5 blocks takes half of the",
-                            "pooled total, then the pool is",
-                            "spent. The more it swallowed, the",
-                            "bigger the blade that falls."),
+                            "nearby takes half the pooled total,",
+                            "up to 60, then the pool is spent.",
+                            "Reach grows with the pool, 5 to 8",
+                            "blocks, and stops at a full gauge.",
+                            "The blade you swing does not: the",
+                            "more it swallowed, the more absurd",
+                            "the cut looks. It just won't cut",
+                            "any deeper."),
                     new EgoLore.Ability("[Right-click] Onrush",
                             "Rush the foe you last struck and",
                             "finish it: player <25%, mob <50%,",
