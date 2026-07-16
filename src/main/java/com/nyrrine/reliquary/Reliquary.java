@@ -63,6 +63,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
     private RelicTracker tracker;
     private ExtractionCommand extraction;
     private com.nyrrine.reliquary.extraction.Stations stations;
+    private com.nyrrine.reliquary.distortion.Distortion distortion;
 
     @Override
     public void onEnable() {
@@ -138,6 +139,10 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
             cogito.setTabCompleter(this);
         }
 
+        // A beautiful voice — /abeautifulvoice + /carmen.
+        this.distortion = new com.nyrrine.reliquary.distortion.Distortion(this);
+        distortion.enable();
+
         getLogger().info("Reliquary opens. Its relics stir.");
     }
 
@@ -146,6 +151,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         if (weapons != null) weapons.disable();
         if (stations != null) stations.save();
         if (extraction != null) extraction.disable(); // return seated vials + reap any live Well carousel
+        if (distortion != null) distortion.disable(); // hand back any face the voice is still wearing
     }
 
     public WeaponManager weapons() {
