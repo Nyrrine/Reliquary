@@ -22,6 +22,7 @@ import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -80,13 +81,11 @@ import java.util.concurrent.ThreadLocalRandom;
  * swing stamps hurt-immunity on the victim, which would swallow every follow-up cut, so each sub-hit
  * clears {@code setNoDamageTicks(0)} first — without it a "ten-hit combo" lands exactly once.
  *
- * <h2>Observing the counter without an onDamaged hook</h2>
- * The {@link Weapon} interface has no "I was struck" hook and the manager only dispatches
- * {@link #onHit} when the wielder is the <em>damager</em>, so Persecution watches from {@link #onTick}
- * instead: while the stance is open it samples the wielder's health each tick, and a drop is the strike
- * signal. Attribution then comes from {@link Player#getLastDamageCause()} — the real damager, not a
- * guess at whoever stood nearest — so no per-tick entity scan is needed at all. See the caveats on
- * {@link #watchForStrike}.
+ * <h2>How the counter hears the blow</h2>
+ * Persecution answers from {@link #onDamaged}, which hands it the strike itself — so the defendant is
+ * read off the blow rather than guessed at from whoever stood nearest, and no per-tick entity scan is
+ * needed at all. The stance answers a <em>strike</em>, not a wound: a blow a shield turns aside still
+ * gets a verdict.
  *
  * <p>Every scale display is non-persistent, tagged {@link #SCALES_TAG}, and reaped on unequip / quit /
  * disable (plus a world sweep) so no orphan is ever left behind. Player roots are best-effort — see
@@ -187,9 +186,6 @@ public final class JustitiaWeapon implements Weapon {
 
     /** How far behind the striker the bearer appears, and the shorter fallbacks if that spot is walled. */
     private static final double[] COUNTER_BEHIND_DISTANCES = {1.6, 1.1, 0.6};
-
-    /** Health drop (in half-hearts) that counts as a real strike rather than float noise. */
-    private static final double HEALTH_EPSILON = 0.01;
 
     // ---- the scales: geometry ------------------------------------------------------
 
@@ -417,47 +413,37 @@ public final class JustitiaWeapon implements Weapon {
 
         w.scales = new Scales(player);
         w.stanceEndsAt = now + PERSECUTION_WINDOW_MS;
-        w.lastHealth = player.getHealth(); // the baseline the strike-watch samples against
         EgoDurability.wearMainHand(player);
         summonFx(player);
     }
 
     /**
-     * Watch for the wielder being struck while the stance is open. There is no onDamaged hook and the
-     * manager only dispatches onHit when the wielder is the <em>damager</em>, so the strike signal is a
-     * drop in the wielder's health between samples; attribution then comes from
-     * {@link Player#getLastDamageCause()}, which names the actual damager rather than guessing at
-     * whoever happened to stand nearest. No entity scan is needed at all.
+     * Someone struck the bearer. If the scales are hanging, that is a case, and the stance answers it.
      *
-     * <p>Known limits of driving it this way, all of them deliberate: sampling is 2-tick granular, so
-     * the counter answers up to 100ms after the blow; damage fully soaked by absorption or a raised
-     * shield never moves health and so never answers; and damage that is not an entity's doing (fall,
-     * poison, fire) correctly does not answer, but does consume the sample.
-     *
-     * @return true if the counter fired (and painted its own feedback)
+     * <p>The blow is judged, not its result: a strike turned aside by a shield still answers, because
+     * Persecution is a reply to being <em>struck</em>, not to losing health — a defendant who swings and
+     * is merely blocked has still swung. Damage that is nobody's doing (a fall, poison, fire) is not a
+     * case at all; {@link #resolveStriker} returns null and the scales keep hanging, waiting for someone
+     * to actually raise a hand.
      */
-    private boolean watchForStrike(Player player, Wielder w, long now) {
-        double hp = player.getHealth();
-        if (hp >= w.lastHealth - HEALTH_EPSILON) {
-            w.lastHealth = hp; // no strike; track healing too so the baseline never drifts high
-            return false;
-        }
-        w.lastHealth = hp;
+    @Override
+    public void onDamaged(Player victim, EntityDamageEvent event) {
+        Wielder w = wielders.get(victim.getUniqueId());
+        if (w == null || !w.stanceOpen()) return; // no scales hanging — nothing to answer
 
-        LivingEntity striker = resolveStriker(player);
-        if (striker == null) return false; // struck by the world, not a defendant — the stance holds
+        LivingEntity striker = resolveStriker(victim, event);
+        if (striker == null) return; // struck by the world, not a defendant — the stance holds
 
-        fireCounter(player, w, striker, now);
-        return true;
+        fireCounter(victim, w, striker, System.currentTimeMillis());
     }
 
     /**
-     * Who struck the wielder, per the last damage cause: the damager itself, or a projectile's shooter.
-     * Null if the blow was not a living entity's, was the wielder's own, or came from outside the
-     * scales' {@link #COUNTER_RANGE jurisdiction}.
+     * Who struck the bearer, read straight off the blow: the damager itself, or a projectile's shooter.
+     * Null if the blow was not a living entity's, was the bearer's own, or came from outside the scales'
+     * {@link #COUNTER_RANGE jurisdiction}.
      */
-    private LivingEntity resolveStriker(Player player) {
-        if (!(player.getLastDamageCause() instanceof EntityDamageByEntityEvent e)) return null;
+    private LivingEntity resolveStriker(Player player, EntityDamageEvent event) {
+        if (!(event instanceof EntityDamageByEntityEvent e)) return null;
 
         Entity damager = e.getDamager();
         if (damager instanceof Projectile proj && proj.getShooter() instanceof LivingEntity shooter) {
@@ -613,8 +599,6 @@ public final class JustitiaWeapon implements Weapon {
             if (now >= w.stanceEndsAt) {
                 closeStance(w, now, true); // lapsed unanswered — the rest is still spent, so it can't be spammed
                 lapseFx(player);
-            } else if (watchForStrike(player, w, now)) {
-                return true; // the counter fired and painted its own feedback
             }
         }
 
@@ -711,9 +695,6 @@ public final class JustitiaWeapon implements Weapon {
         Scales scales;
         /** Epoch-millis when the open stance settles. */
         long stanceEndsAt = 0L;
-        /** The wielder's health at the last stance sample — a drop is the strike signal. */
-        double lastHealth = 0.0;
-
         boolean stanceOpen() {
             return scales != null;
         }

@@ -22,6 +22,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -147,7 +148,6 @@ public final class HarmonyWeapon implements Weapon {
     private static final int    HUM_PERIOD_TICKS = 6;     // Obsession's idle drone cadence
     private static final int    CHORD_ROOT_NOTE  = 6;     // note-block note index the chord starts on
     private static final int    CHORD_STEP       = 2;     // semitones the chord climbs per stack of Rhythm
-    private static final double HEALTH_EPSILON   = 0.01;  // ignore float noise when watching for a health drop
 
     // ---- palette -------------------------------------------------------------------
     // Grey machine and rust-red blood. The tooltip takes the two spec colours verbatim; the action bar and
@@ -180,15 +180,13 @@ public final class HarmonyWeapon implements Weapon {
 
     /**
      * One wielder's performance. {@code lastNote} and {@code lastCombat} are epoch millis with {@code 0}
-     * meaning "never"; {@code lastHealth} is the health seen on the previous weapon tick, {@code -1} when
-     * there is no baseline yet.
+     * meaning "never".
      */
     private static final class Performance {
         int     rhythm     = 0;
         boolean obsession  = false;
         long    lastNote   = 0L;
         long    lastCombat = 0L;
-        double  lastHealth = -1.0;
     }
 
     private Performance performance(Player player) {
@@ -198,6 +196,21 @@ public final class HarmonyWeapon implements Weapon {
     /** The wielder is performing — refresh the clock the out-of-combat decay reads. */
     private static void markCombat(Performance perf) {
         perf.lastCombat = System.currentTimeMillis();
+    }
+
+    /**
+     * Anything that hurts the wielder is an audience: a mob's teeth, a player's blade, a fall, a fire. The
+     * machine only asks whether the performance is still live, so every cause counts and the settled amount
+     * is irrelevant — a strike turned aside by a shield still means someone is out there swinging, and the
+     * music should not stop because the wielder blocked well.
+     *
+     * <p>Only damage the wielder truly suffers arrives here, so Obsession's toll — paid with
+     * {@code setHealth}, which never enters the damage chain — can't be mistaken for an audience. The
+     * machine bleeding you is not a fight.
+     */
+    @Override
+    public void onDamaged(Player victim, EntityDamageEvent event) {
+        markCombat(performance(victim));
     }
 
     /** Milliseconds left on a cooldown whose last use was {@code last} ({@code 0} = never used). */
@@ -435,7 +448,6 @@ public final class HarmonyWeapon implements Weapon {
 
         double next = Math.max(OBSESSION_HP_FLOOR, health - health * OBSESSION_HP_COST);
         player.setHealth(next);
-        perf.lastHealth = next;   // the toll is self-inflicted — don't let the tick read it as "took damage"
         perf.obsession = true;
         EgoDurability.wearMainHand(player); // an ability use, not a vanilla swing
         obsessionFx(player);
@@ -470,28 +482,15 @@ public final class HarmonyWeapon implements Weapon {
      * <p>Returns {@code false} the instant Harmony is not in the main hand — a wielder who put it away must
      * stop being ticked, or they are ticked forever. Nothing is lost by disengaging: Rhythm and the stance
      * live on the wall clock, so a wielder who sheathes the machine for two minutes and draws it again is
-     * decayed correctly on their first tick back.
-     *
-     * <p>This is also where "took damage" is noticed. There is no per-weapon damage-taken hook on the
-     * interface, so the wielder's health is watched between ticks and any drop counts as combat — which is
-     * the honest reading of "recently took damage", and catches a mob's teeth, a fall and a fire alike.
+     * decayed correctly on their first tick back. Damage taken is noticed by {@link #onDamaged} and needs
+     * nothing from here.
      */
     @Override
     public boolean onTick(Player player, long tick) {
-        UUID id = player.getUniqueId();
-        if (!matches(player.getInventory().getItemInMainHand())) {
-            Performance stowed = performances.get(id);
-            if (stowed != null) stowed.lastHealth = -1.0; // drop the stale baseline; re-take it on redraw
-            return false;                                  // machine set down — stop ticking this player
-        }
+        if (!matches(player.getInventory().getItemInMainHand())) return false; // set down — stop ticking
 
         Performance perf = performance(player);
         long now = System.currentTimeMillis();
-
-        // Took damage? Any drop since the last tick means the wielder is in a fight.
-        double health = player.getHealth();
-        if (perf.lastHealth >= 0.0 && health < perf.lastHealth - HEALTH_EPSILON) markCombat(perf);
-        perf.lastHealth = health;
 
         // Out of combat for over a minute — the audience leaves and the machine forgets.
         if (perf.rhythm > 0 && perf.lastCombat != 0L && now - perf.lastCombat > COMBAT_TIMEOUT_MS) {

@@ -17,6 +17,7 @@ import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -40,8 +41,8 @@ import java.util.concurrent.ThreadLocalRandom;
  * <p><b>[Passive] Om Nom Nom.</b> Every {@value #DIGEST_EVERY}rd instance of damage the wielder takes is
  * swallowed rather than simply suffered: {@value #DIGEST_HEAL_PERCENT}% of that instance's damage is
  * returned as health {@link #DIGEST_DELAY_TICKS ticks} later (three seconds — the lantern chews slowly).
- * The tally is per-wielder and counted in {@link #onTick} by watching the wielder's health fall; see
- * {@link #sampleDamageTaken} for exactly what that does and does not catch.
+ * The tally is per-wielder and fed by {@link #onDamaged}, which counts every cause the wielder suffers
+ * while the Lantern is drawn; see it for the two blows that don't count.
  *
  * <p><b>[Left Click] I Shall Nibble Thee!</b> Ordinary slow strikes ride the vanilla swing untouched, but
  * every {@value #NIBBLE_EVERY}th landed strike is a real bite: the teeth close, and the wielder is healed
@@ -57,8 +58,8 @@ import java.util.concurrent.ThreadLocalRandom;
  * alternative — only the slam is cut back. See {@link #onHit} for the arithmetic.
  *
  * <p>Nothing here spawns an entity and nothing edits the world, so there are no orphans to sweep. The only
- * state is per-wielder (health baseline, digest tally, nibble tally) plus the short-lived digest tasks,
- * all dropped in {@link #onQuit} and {@link #onDisable}.
+ * state is per-wielder (digest tally, nibble tally) plus the short-lived digest tasks, all dropped in
+ * {@link #onQuit} and {@link #onDisable}.
  */
 public final class LanternWeapon implements Weapon {
 
@@ -81,12 +82,6 @@ public final class LanternWeapon implements Weapon {
     /** Om Nom Nom: the lantern digests slowly — the heal lands three seconds after the blow. */
     private static final long DIGEST_DELAY_TICKS = 60L;
 
-    /**
-     * Health drops smaller than this are treated as noise, not a hit. Guards against a floating-point
-     * wobble in {@link #sampleDamageTaken} being counted as an instance of damage taken.
-     */
-    private static final double DAMAGE_EPSILON = 0.01;
-
     /** I Shall Nibble Thee!: every Nth landed strike is the bite that heals. */
     private static final int NIBBLE_EVERY = 5;
 
@@ -107,13 +102,6 @@ public final class LanternWeapon implements Weapon {
     private static final long CUE_MS = 1_200L;
 
     // ---- per-wielder state ------------------------------------------------------------
-
-    /**
-     * Last sampled health per wielder, the baseline {@link #sampleDamageTaken} compares against. Dropped
-     * the moment the Lantern leaves the main hand, so damage taken while it is sheathed is never counted
-     * as a swallowed instance when it is drawn again.
-     */
-    private final Map<UUID, Double> lastHealth = new ConcurrentHashMap<>();
 
     /** Instances of damage taken since the last digest, per wielder. Rolls over at {@link #DIGEST_EVERY}. */
     private final Map<UUID, Integer> damageTally = new ConcurrentHashMap<>();
@@ -202,19 +190,14 @@ public final class LanternWeapon implements Weapon {
     // ---- [Passive] Om Nom Nom -----------------------------------------------------------
 
     /**
-     * Watches the wielder's health while the Lantern is in the main hand, and drives the lure glow and the
-     * nibble pips. Returns false — disengaging this player from the tick loop — the instant the Lantern is
-     * not in the main hand, which is also when the health baseline is dropped.
+     * Drives the lure glow and the nibble pips. Returns false — disengaging this player from the tick loop
+     * — the instant the Lantern is not in the main hand. Om Nom Nom does its own counting through
+     * {@link #onDamaged} and needs nothing from here.
      */
     @Override
     public boolean onTick(Player player, long tick) {
         UUID id = player.getUniqueId();
-        if (!matches(player.getInventory().getItemInMainHand())) {
-            lastHealth.remove(id); // sheathed — the next draw re-baselines rather than reading a stale drop
-            return false;
-        }
-
-        sampleDamageTaken(player, id);
+        if (!matches(player.getInventory().getItemInMainHand())) return false;
 
         // A fresh cue outranks the readout for a moment; otherwise show progress toward the bite:
         // [Nibble ◆ ◆ ◇ ◇ ◇] — 0..4, resetting the moment the teeth close.
@@ -231,31 +214,23 @@ public final class LanternWeapon implements Weapon {
     }
 
     /**
-     * Om Nom Nom's eyes and ears. The {@link Weapon} interface has no on-damaged hook, so an instance of
-     * damage taken is inferred by sampling the wielder's health each dispatch and treating a fall as a hit.
+     * Om Nom Nom's eyes and ears: one instance of damage taken, from any cause the wielder suffers while
+     * the Lantern is in the main hand — a strike, a fall, fire, poison. The lantern isn't fussy.
      *
-     * <p>This is an approximation, and honestly so:
-     * <ul>
-     *   <li>It only sees damage taken while the Lantern is actually in the main hand — sheathe it and the
-     *       passive stops counting, which at least reads as "the lantern must be out to eat".</li>
-     *   <li>Health lost to something that is not a hit (another plugin calling {@code setHealth}, a max-health
-     *       modifier being pulled) reads as an instance of damage taken.</li>
-     *   <li>Sampling runs every 2 server ticks, so two hits inside that window merge into one instance. In
-     *       practice vanilla invulnerability frames (10 ticks) keep real hits far enough apart.</li>
-     *   <li>A killing blow is deliberately not counted ({@code hp <= 0}) — there is nothing left to digest.</li>
-     * </ul>
-     * Healing (including this weapon's own) only ever raises health, so it can never be misread as a hit.
+     * <p>Two blows are turned away at the door. A <b>fully blocked or absorbed</b> strike arrives here with
+     * a final damage of 0: the wielder was struck but took nothing, and there is nothing to swallow — it
+     * must not burn a place in the tally, or a shield would starve the passive while appearing to feed it.
+     * A <b>killing blow</b> is likewise not counted; nothing is left to digest, and the mouthful would land
+     * three seconds into a corpse. Damage is still pending at this point in the chain, so the blow is fatal
+     * exactly when it meets or exceeds the health the wielder is still standing on.
      */
-    private void sampleDamageTaken(Player player, UUID id) {
-        double hp = player.getHealth();
-        if (hp <= 0.0) return; // dead or dying — don't count the killing blow, and don't baseline off it
+    @Override
+    public void onDamaged(Player victim, EntityDamageEvent event) {
+        double taken = event.getFinalDamage();
+        if (taken <= 0.0) return;                  // struck, but nothing got through — a shield, or absorption
+        if (taken >= victim.getHealth()) return;   // the last blow; there is no after in which to chew it
 
-        Double prev = lastHealth.put(id, hp);
-        if (prev == null) return;                    // first sample since drawing it — baseline only
-        double lost = prev - hp;
-        if (lost <= DAMAGE_EPSILON) return;          // healed, unchanged, or float noise
-
-        swallow(player, id, lost);
+        swallow(victim, victim.getUniqueId(), taken);
     }
 
     /**
@@ -335,7 +310,6 @@ public final class LanternWeapon implements Weapon {
     /** Drop everything we hold for this wielder, including any mouthful still going down. */
     @Override
     public void onQuit(UUID id) {
-        lastHealth.remove(id);
         damageTally.remove(id);
         nibbleTally.remove(id);
         cues.remove(id);
@@ -353,7 +327,6 @@ public final class LanternWeapon implements Weapon {
     public void onDisable() {
         for (Digest digest : digesting) digest.cancel();
         digesting.clear();
-        lastHealth.clear();
         damageTally.clear();
         nibbleTally.clear();
         cues.clear();
