@@ -25,6 +25,10 @@ import java.util.UUID;
  *
  * <p>The item is deliberately inert. No abilities, no attributes, no ticking: right-click to read it, and
  * that is the whole of its mechanism.
+ *
+ * <p><b>The Weaver is anonymous.</b> Nothing on this paper names who issued it, and nothing anywhere else
+ * does either. A prescript arrives from the Index, not from a person — which is rather the point of an
+ * institution that issues summonses.
  */
 public final class PrescriptPaper {
 
@@ -50,7 +54,7 @@ public final class PrescriptPaper {
      * matching Arayashiki's fallback: a pack-less player sees ordinary paper instead of a missing model, and
      * real paper is untouched.
      */
-    public static ItemStack create(Prescript p, UUID target, String targetName, String issuerName) {
+    public static ItemStack create(Prescript p, UUID target, String targetName) {
         ItemStack item = new ItemStack(Material.PAPER, 1);
         ItemMeta meta = item.getItemMeta();
 
@@ -63,8 +67,8 @@ public final class PrescriptPaper {
         for (String l : wrap(p.text(), WRAP)) lore.add(line(l, INK)); // the instruction, in full
         lore.add(Component.empty());
         if (p.claimed()) lore.add(line("Claimed — awaiting judgement", CLAIM));
-        lore.add(line("Issued by " + issuerName, FAINT));
-        lore.add(line(dated(p.issued()), FAINT));
+        lore.add(line(dated(p.issued()), FAINT)); // the date, and no hand behind it
+
         lore.add(line("Right-click to read.", FAINT));
         meta.lore(lore);
 
@@ -134,12 +138,11 @@ public final class PrescriptPaper {
     }
 
     /** The prescript rendered for chat — used by the read path and by {@code /prescript}. */
-    public static List<Component> read(Prescript p, String issuerName) {
+    public static List<Component> read(Prescript p) {
         List<Component> out = new ArrayList<>();
         out.add(line("Prescript", SEAL));
         for (String l : wrap(p.text(), 54)) out.add(line("  " + l, INK)); // chat is wider than a tooltip
-        String age = ago(p.outstandingSeconds());
-        out.add(line("  Issued by " + issuerName + " · " + age, FAINT));
+        out.add(line("  Issued " + ago(p.outstandingSeconds()), FAINT));
         if (p.claimed()) out.add(line("  Claimed — awaiting a Weaver's judgement.", CLAIM));
         return out;
     }

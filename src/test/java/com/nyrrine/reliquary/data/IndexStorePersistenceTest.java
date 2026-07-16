@@ -65,14 +65,14 @@ class IndexStorePersistenceTest {
         return new IndexStore(live);
     }
 
-    private Prescript drawn(String text, long issued) {
-        return new Prescript(UUID.randomUUID(), text, "kelp_vicinity", weaver, issued, false);
+    private Prescript written(String text, long issued) {
+        return new Prescript(UUID.randomUUID(), text, weaver, issued, false);
     }
 
     @Test
     void aPrescriptSurvivesARealRestart() {
         // Three levels deep through a real snapshot and a real file — the thing neither half's tests reach.
-        Prescript p = drawn("Eat 16 dried kelp in the vicinity of a player", 1752681600L);
+        Prescript p = written("Eat 16 dried kelp in the vicinity of a player", 1752681600L);
         index().issue(player, p);
 
         IndexStore after = restart();
@@ -82,7 +82,6 @@ class IndexStorePersistenceTest {
         Prescript back = active.get(0);
         assertEquals(p.id(), back.id());
         assertEquals("Eat 16 dried kelp in the vicinity of a player", back.text());
-        assertEquals("kelp_vicinity", back.poolId());
         assertEquals(weaver, back.issuer());
         assertEquals(1752681600L, back.issued());
         assertFalse(back.claimed());
@@ -90,7 +89,7 @@ class IndexStorePersistenceTest {
 
     @Test
     void aRulingSurvivesARealRestart() {
-        Prescript p = drawn("Ring a bell 10 times within earshot of a player", 100);
+        Prescript p = written("Ring a bell 10 times within earshot of a player", 100);
         index().issue(player, p);
         assertTrue(index().rule(player, p.id(), true));
 
@@ -105,7 +104,7 @@ class IndexStorePersistenceTest {
     void aWithdrawalSurvivesARealRestart() {
         // Deleting a nested child is set(key, null) — worth proving it stays deleted through a real file,
         // rather than reappearing because the removal never reached the snapshot.
-        Prescript p = drawn("Throw 3 eggs at the same player", 100);
+        Prescript p = written("Throw 3 eggs at the same player", 100);
         index().issue(player, p);
         assertTrue(index().withdraw(player, p.id()));
 
@@ -118,7 +117,7 @@ class IndexStorePersistenceTest {
 
     @Test
     void aClaimSurvivesARealRestart() {
-        Prescript p = drawn("Ride a pig past a player without acknowledging them", 100);
+        Prescript p = written("Ride a pig past a player without acknowledging them", 100);
         index().issue(player, p);
         assertTrue(index().claim(player, p.id()));
 
@@ -131,8 +130,8 @@ class IndexStorePersistenceTest {
     @Test
     void severalPrescriptsSurviveTogetherAndKeepTheirOrder() {
         IndexStore store = index();
-        Prescript older = drawn("older", 100);
-        Prescript newer = drawn("newer", 300);
+        Prescript older = written("older", 100);
+        Prescript newer = written("newer", 300);
         store.issue(player, newer);
         store.issue(player, older);
 
@@ -172,7 +171,7 @@ class IndexStorePersistenceTest {
         live.get(player).touch();
 
         IndexStore store = index();
-        Prescript p = drawn("Feed 64 items into a composter", 100);
+        Prescript p = written("Feed 64 items into a composter", 100);
         store.issue(player, p);
         store.rule(player, p.id(), true);
 
@@ -187,7 +186,7 @@ class IndexStorePersistenceTest {
     void aTallyIsNotLostWhenTheServerStopsWithoutADebounce() {
         // The realistic crash-shaped case: a ruling lands and the server goes down before the ~1s window
         // elapses. close() must flush it — this is the increment the whole system exists to remember.
-        Prescript p = drawn("Break 64 dirt with a diamond shovel", 100);
+        Prescript p = written("Break 64 dirt with a diamond shovel", 100);
         index().issue(player, p);
         scheduler.fire();
         index().rule(player, p.id(), false);

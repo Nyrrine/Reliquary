@@ -5,36 +5,38 @@ import org.bukkit.configuration.ConfigurationSection;
 import java.util.UUID;
 
 /**
- * One issued prescript — the instruction itself, and who it came from.
+ * One issued prescript — a Weaver's instruction, and nothing more than it needs to be.
+ *
+ * <p>Every prescript is written by hand. There is no pool and no drawing: the Index is a Weaver, a sentence,
+ * and a tally.
  *
  * <p>This record is the <b>authority</b>; the paper item a recipient carries is only a receipt stamped with
  * {@link #id()}. Papers burn, drop and duplicate, so nothing that matters may live on them: a prescript
  * survives its paper, and {@code /prescript} works with an empty inventory.
  *
- * <p>Persisted inside the recipient's own {@code prescript:} section of the shared player store. Its shape is
- * deliberately small — text, provenance, and a claim flag. Whether it was <i>accomplished</i> is not recorded
- * here: that is a Weaver's ruling, and the moment it lands the prescript leaves the active list and becomes a
- * number in the tally.
+ * <p>Persisted inside the recipient's own {@code prescript:} section of the shared player store. Whether it
+ * was <i>accomplished</i> is not recorded here: that is a Weaver's ruling, and the moment it lands the
+ * prescript leaves the active list and becomes a number in the tally.
  */
 public record Prescript(
         /** Identity of this issuance. Stamped onto the paper so a receipt can find its record. */
         UUID id,
-        /** The instruction, verbatim as the recipient must read it. Custom text or a pool entry's line. */
+        /** The instruction, verbatim as the recipient must read it. */
         String text,
-        /** The pool entry this was drawn from, or {@code null} when a Weaver wrote it by hand. */
-        String poolId,
-        /** The Weaver who issued it. */
+        /**
+         * The Weaver who issued it — <b>recorded, never shown</b>.
+         *
+         * <p>A Weaver is anonymous: the name appears on no paper and in no message, so nothing reads this
+         * back. It is kept as provenance in a file whose whole point is that an admin can open and edit it by
+         * hand — anonymity to players does not require the record itself to forget. Dropping it would be the
+         * only irreversible part of this system, so it stays until someone asks for it not to.
+         */
         UUID issuer,
         /** Epoch seconds at issuance — {@code /prescript} reports how long it has stood outstanding. */
         long issued,
         /** Whether the recipient has raised their hand and said they've done it. */
         boolean claimed
 ) {
-
-    /** Whether a Weaver wrote this one by hand rather than drawing it. */
-    public boolean isCustom() {
-        return poolId == null;
-    }
 
     /** Seconds this prescript has stood outstanding, as of now. */
     public long outstandingSeconds() {
@@ -50,7 +52,6 @@ public record Prescript(
     public void write(ConfigurationSection to) {
         ConfigurationSection s = to.createSection(id.toString());
         s.set("text", text);
-        s.set("pool_id", poolId); // null for custom — YAML simply omits it
         s.set("issuer", issuer.toString());
         s.set("issued", issued);
         if (claimed) s.set("claimed", true); // absent means false; keeps the common case out of the file
@@ -68,10 +69,11 @@ public record Prescript(
             String text = from.getString("text");
             String issuer = from.getString("issuer");
             if (text == null || text.isBlank() || issuer == null) return null;
+            // A pool_id here would be from a prescript drawn before the pool was removed. It is simply not
+            // read: the key is inert, and a prescript that was once drawn is now just a prescript.
             return new Prescript(
                     UUID.fromString(from.getName()),
                     text,
-                    from.getString("pool_id"),
                     UUID.fromString(issuer),
                     from.getLong("issued"),
                     from.getBoolean("claimed", false));
