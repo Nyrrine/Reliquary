@@ -6,6 +6,7 @@ import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
@@ -19,6 +20,7 @@ import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -37,30 +39,57 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Sword With Sharpened Tears — a RAPIER-class E.G.O Equipment built for swift, piercing thrusts. Not a
+ * Sword With Sharpened Tears — a RAPIER-class E.G.O Equipment, and the roster's one <b>summoner</b>. Not a
  * greatsword: everything about it is puncture and agility, never a heavy cleave.
  *
- * <p>The vanilla IRON_SWORD swing lands its normal (piercing) damage, uncancelled — a rapier a novice
- * can still fence with. The character lives in a wheeling formation of four spectral <b>rapier
- * companions</b> that hover behind the wielder while the weapon is held, following like companion
- * wolves ({@link #onTick}). They are lightweight {@link ItemDisplay} entities — a floating sword each —
- * tagged {@link #RAPIER_TAG}, non-persistent, and reliably reaped on unequip / quit / disable so no
- * orphan ever litters the world.
+ * <p>The vanilla IRON_SWORD swing lands its normal (piercing) damage, uncancelled — a rapier a novice can
+ * still fence with. The character lives in the four spectral <b>rapier companions</b> that hover in a curved
+ * fan behind the wielder while the weapon is held ({@link #onTick}): a knight's retinue, grief given edges.
+ * They are lightweight {@link ItemDisplay} entities — a floating sword each — tagged {@link #RAPIER_TAG},
+ * non-persistent, and reliably reaped on unequip / quit / disable so no orphan ever litters the world.
+ *
+ * <h2>The one decision the kit asks</h2>
+ * Every rapier is either <b>in the fan</b> or <b>sent</b>, and the two are worth completely different things:
  *
  * <ul>
- *   <li><b>Double tag</b> ({@link #onHit}) — land a melee hit and one <em>available</em> rapier darts
- *       from behind you to the struck body and strikes ALONGSIDE you: a piercing bonus hit, leaving a
- *       light-blue tear trail as it flies. A sent rapier then goes on a per-sword cooldown
- *       ({@link #RAPIER_COOLDOWN_MS}). With no rapier available, the blow is just the normal hit.</li>
- *   <li><b>Recharge</b> ({@link #onInteract}, shift + right-click) — expended rapiers fly back to the
- *       wielder and re-form the four-strong ring; but a recalled sword still can't strike until its own
- *       cooldown has elapsed.</li>
+ *   <li><b>Rapier Formation</b> ({@link #onTick}) — the fan itself. Blades resting here are the wielder's
+ *       escorts and the ammunition for the Impale.</li>
+ *   <li><b>Double Tag</b> ({@link #onHit}) — land a melee hit and one blade <em>from the fan</em> darts out
+ *       to stab the same body alongside you ({@link #STAB_DAMAGE}) and glide back. Only blades in the fan
+ *       answer; a blade away on escort duty is busy. This is what holding rapiers back buys.</li>
+ *   <li><b>Send Rapier</b> ({@link #onInteract}, right-click) — the aim. One blade leaves the fan for the
+ *       foe under your crosshair and <em>duels it there on its own</em> — wheeling in and puncturing once a
+ *       second — until its mark falls, it is called back, or the mark outruns {@link #LEASH}. Press again to
+ *       send the next. This is what spending rapiers buys: pressure on a body you never touch.</li>
+ *   <li><b>Converging Impale</b> ({@link #onInteract}, shift + right-click) — the signature. Every blade
+ *       <em>still in the fan</em> lifts, cages the mark from four sides, and drives in on the same tick for
+ *       {@link #IMPALE_DAMAGE} apiece. A full fan is the whole {@value #RAPIER_COUNT}; a fan you emptied
+ *       into duels is not. Once per {@link #IMPALE_COOLDOWN_MS}.</li>
+ *   <li><b>Recharge</b> ({@link #onSwapHands}, F) — calls every sent rapier home. Free and instant to press,
+ *       but the glide back is slow and each blade still serves its {@link #BLADE_REST_MS} on arrival, so it
+ *       is a real setup step rather than an undo button.</li>
  * </ul>
  *
- * <p>The bonus strikes are non-vanilla hits, so each wears the main-hand a mild point
- * ({@link EgoDurability#wearMainHand(Player)}); normal thrusts wear via the vanilla swing. A re-entrancy
- * fence ({@link #reentry}) guards the rapier's {@code victim.damage(...)} so it never recurses into a
- * second double-tag. The weapon is no longer unbreakable.
+ * <p>So the loop is a summoner's, not a proc's: <em>deploy → let the retinue work → call them home → execute
+ * with a full fan</em>, on the Impale's 45s rhythm. Holding blades back and spending them are both correct;
+ * they buy different things, and the fan tells you at a glance which you chose.
+ *
+ * <h2>The fences that keep it honest</h2>
+ * A rapier's strike re-deals damage through {@code victim.damage(..., owner)}, which re-enters
+ * {@link #onHit} — so every one runs inside the {@link #reentry} fence, or a stab would double-tag itself
+ * recursively. Conversely a body's hurt-immunity would swallow the strike: the wielder's own melee stamps
+ * i-frames the instant before a Double Tag lands, and the Impale asks {@value #RAPIER_COUNT} blades to hurt
+ * one body in a <em>single</em> tick. Both clear {@code setNoDamageTicks(0)} first ({@link #stab},
+ * {@link #impaleAll}); without it the tag lands only when the dart happens to arrive late, and three of the
+ * Impale's four instances vanish with no error at all. Both restore the victim's velocity afterward — a
+ * rapier punctures, it does not shove; the vanilla swing owns the knockback.
+ *
+ * <h2>Cost</h2>
+ * Sending a blade and committing the Impale are non-vanilla uses, so they wear the main hand
+ * ({@link EgoDurability#wearMainHand}); the Double Tag's stab wears its mild point as it always did. A
+ * duelling blade's own stabs do not wear — the sortie was already paid for, and the whole point of a summon
+ * is that it works while you do not. Normal thrusts wear via the vanilla swing. The weapon is not
+ * unbreakable and its meta is set exactly once, in {@link #createItem()}.
  */
 public final class SwordOfTearsWeapon implements Weapon {
 
@@ -72,19 +101,44 @@ public final class SwordOfTearsWeapon implements Weapon {
     /** Wielder -> their live rapier formation. Present only while the weapon is held. */
     private final Map<UUID, Formation> formations = new HashMap<>();
 
-    /** Wielders currently in the middle of dealing a rapier's bonus hit — re-entrancy fence for {@link #onHit}. */
+    /**
+     * Wielders currently inside a rapier's own {@code victim.damage(...)} — the re-entrancy fence for
+     * {@link #onHit}. Keyed by the WIELDER, never the victim: a victim-keyed map would leak a key per mob
+     * forever (mobs never fire {@link #onQuit}). Entries are added and removed in the same try/finally, so
+     * the set is empty between strikes.
+     */
     private final Set<UUID> reentry = new HashSet<>();
 
     // ---- tuning (Nyrrine will tune) -----------------------------------------------
     // Placeholders, kept together and clearly named so they're trivial to find and retune later.
-    private static final int  RAPIER_COUNT         = 4;      // how many rapiers wheel behind the wielder
-    private static final long RAPIER_COOLDOWN_MS   = 4000L;  // per-sword cooldown after it darts out (~4s placeholder)
-    private static final double RAPIER_DAMAGE      = 2.0;    // primary piercing stab a rapier lands (nerfed 3.0 -> 2.0: a small assist)
-    private static final double RAPIER_CHIP_DAMAGE = 0.5;    // tiny follow-up per ricochet slash during the brief engagement
-    private static final long RECHARGE_COOLDOWN_MS = 45000L; // shift-RC replenish is gated to once per 45s
+    //
+    // Damage maths, per instance (the ceiling for ONE instance is a Sharpness-V netherite sword, ~11):
+    //   melee thrust  7.0 base (EgoModels.SWORD_OF_TEARS), ~10.0 with Sharpness V   -> under the ceiling
+    //   rapier stab   2.0 flat, no enchant scaling (a custom damage call)           -> far under
+    //   impale blade  5.5 flat                                                      -> far under
+    // Worst-case burst: a full fan's Impale is 4 x 5.5 = 22.0 in one tick, once per 45s — deliberately the
+    // same figure the roster's other big single commit lands, and it costs the whole fan to have ready.
+    private static final int    RAPIER_COUNT       = 4;      // HARD CAP on the retinue — 4 displays per wielder, no more
+    private static final long   BLADE_REST_MS      = 4000L;  // a blade rests this long after landing back in the fan
+    private static final double STAB_DAMAGE        = 2.0;    // one rapier's puncture — Double Tag and duel stab alike
+    private static final double IMPALE_DAMAGE      = 5.5;    // per committed blade on the Converging Impale
+    private static final long   IMPALE_COOLDOWN_MS = 45000L; // the formation-wide commit gate (the old 45s, re-homed)
+    private static final double COMMAND_RANGE      = 24.0;   // how far a command reaches for a mark
+    private static final double LEASH              = 32.0;   // a duelling blade gives up past this from its wielder
+    private static final double LEASH_SQ           = LEASH * LEASH;
 
     /** Scoreboard tag stamped on every rapier display, for a belt-and-braces world sweep on shutdown. */
     private static final String RAPIER_TAG = "reliquary_sword_of_tears_rapier";
+
+    /** What a single rapier is doing right now. Exactly one of these, always. */
+    private enum BladeState {
+        /** Hovering in the fan behind the wielder. Driven by the formation's 2-tick loop. */
+        FAN,
+        /** Sent: duelling its mark on its own. Also driven by the formation's 2-tick loop — no task of its own. */
+        DUEL,
+        /** A short 1-tick animation owns it (a dart, the Impale, a glide home). The loops leave it alone. */
+        FLIGHT
+    }
 
     public SwordOfTearsWeapon(Reliquary plugin) {
         this.plugin = plugin;
@@ -117,13 +171,14 @@ public final class SwordOfTearsWeapon implements Weapon {
         return item;
     }
 
-    // ---- follow: the rapier formation, only while held ----------------------------
+    // ---- the fan, and the retinue, only while held ---------------------------------
 
     /**
-     * Called every 2 server ticks while the player is an active wielder. Spawns the four-rapier
-     * formation the moment the rapier is drawn, drives its follow/hover motion, and — the instant the
-     * blade leaves the main hand — reaps the formation and returns {@code false} so ticking stops and no
-     * entity is left behind.
+     * Called every 2 server ticks while the player is an active wielder. Spawns the fan the moment the rapier
+     * is drawn, then drives BOTH the hovering blades and the duelling ones from this one call — a sent blade
+     * deliberately owns no task of its own, so the retinue's whole steady-state cost is this loop, which the
+     * manager already runs at O(wielders). The instant the blade leaves the main hand the formation is reaped
+     * and {@code false} stops the ticking, so no entity is left behind.
      */
     @Override
     public boolean onTick(Player player, long tick) {
@@ -138,96 +193,198 @@ public final class SwordOfTearsWeapon implements Weapon {
         return true;
     }
 
-    // ---- double tag: a rapier darts out alongside the strike -----------------------
+    // ---- double tag: a blade from the fan strikes alongside you --------------------
 
     /**
-     * A melee thrust landed. Vanilla piercing damage is left untouched; if an available rapier is
-     * charged, one darts from behind to strike the same body alongside you (a piercing bonus hit with a
-     * tear trail). If our own rapier hit re-enters this dispatch, the fence drops it.
+     * A melee thrust landed. Vanilla piercing damage is left untouched; if a rapier is resting in the fan,
+     * one darts out to stab the same body alongside you and glide home. Blades away on escort duty do not
+     * answer — that is the point of sending them. If our own rapier's hit re-enters this dispatch, the fence
+     * drops it.
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
         if (reentry.contains(attacker.getUniqueId())) return; // our rapier's own damage re-entered — ignore
 
         Formation f = formations.computeIfAbsent(attacker.getUniqueId(), k -> new Formation(this, attacker));
-        if (f.launchStrike(attacker, victim)) {
-            attacker.sendActionBar(EgoHud.pips("Rapiers", STAR_HUD, f.readyCount(), RAPIER_COUNT));
-        }
+        if (f.doubleTag(attacker, victim)) attacker.sendActionBar(hud(f));
     }
+
+    // ---- command: aim the retinue ---------------------------------------------------
 
     /**
-     * The rapier's PRIMARY stab (the fast lunge landing). Fenced so the vanilla damage event it fires
-     * can't recurse into another double-tag; a mild main-hand wear follows (a non-vanilla hit), then a
-     * rich light-blue puncture burst on the struck body.
-     */
-    void dealRapierStrike(Player owner, LivingEntity victim) {
-        if (!damageFenced(owner, victim, RAPIER_DAMAGE)) return;
-        EgoDurability.wearMainHand(owner); // non-vanilla piercing hit -> a mild point of wear (once, on the stab)
-        strikeFx(victim);
-    }
-
-    /** A tiny ricochet chip during the brief engagement flurry. Fenced; no extra wear (the stab already wore). */
-    void dealRapierChip(Player owner, LivingEntity victim) {
-        if (damageFenced(owner, victim, RAPIER_CHIP_DAMAGE)) chipFx(victim);
-    }
-
-    /** Deal {@code dmg} from {@code owner} to {@code victim} inside the re-entrancy fence. */
-    private boolean damageFenced(Player owner, LivingEntity victim, double dmg) {
-        if (victim.isDead() || !victim.isValid()) return false;
-        UUID oid = owner.getUniqueId();
-        reentry.add(oid);
-        try {
-            victim.damage(dmg, owner);
-        } finally {
-            reentry.remove(oid);
-        }
-        return true;
-    }
-
-    /** A lush light-blue puncture burst where a rapier lands its primary stab. */
-    private void strikeFx(LivingEntity victim) {
-        World w = victim.getWorld();
-        Location c = victim.getLocation().add(0, victim.getHeight() * 0.6, 0);
-        w.spawnParticle(Particle.DUST_COLOR_TRANSITION, c, 18, 0.30, 0.40, 0.30, 0, TEAR_SHIMMER);
-        w.spawnParticle(Particle.FALLING_WATER, c, 8, 0.25, 0.35, 0.25, 0);
-        w.spawnParticle(Particle.CRIT, c, 12, 0.25, 0.35, 0.25, 0.15);
-        w.spawnParticle(Particle.ENCHANTED_HIT, c, 8, 0.20, 0.30, 0.20, 0.10);
-        w.spawnParticle(Particle.END_ROD, c, 7, 0.10, 0.12, 0.10, 0.04); // white sparkle bloom
-        w.playSound(c, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.6f, 1.6f);
-        w.playSound(c, Sound.ITEM_TRIDENT_HIT, 0.5f, 1.8f);
-    }
-
-    /** A small pale-blue chip flourish where a ricochet slash grazes the body. */
-    private void chipFx(LivingEntity victim) {
-        World w = victim.getWorld();
-        Location c = victim.getLocation().add(0, victim.getHeight() * 0.55, 0);
-        w.spawnParticle(Particle.DUST, c, 6, 0.20, 0.30, 0.20, 0, TEAR_FINE);
-        w.spawnParticle(Particle.ENCHANTED_HIT, c, 4, 0.15, 0.25, 0.15, 0.05);
-        w.spawnParticle(Particle.END_ROD, c, 2, 0.05, 0.05, 0.05, 0.02);
-        w.playSound(c, Sound.ENTITY_PLAYER_ATTACK_WEAK, 0.4f, 1.9f);
-    }
-
-    // ---- recharge: shift + right-click reforms the ring ---------------------------
-
-    /**
-     * Shift + right-click recharges: every expended rapier flies back to the wielder and re-forms the
-     * ring. Cooldowns are left untouched, so a recalled sword still can't strike until its own cooldown
-     * has elapsed. Plain right-click does nothing.
+     * Right-click sends ONE rapier to duel the foe under the crosshair; shift + right-click commits every
+     * blade still in the fan to the Converging Impale. Both need a mark — this weapon is aimed, never
+     * waited on.
      */
     @Override
     public void onInteract(Player player, boolean sneaking) {
-        if (!sneaking) return;
+        Formation f = formations.computeIfAbsent(player.getUniqueId(), k -> new Formation(this, player));
+        LivingEntity mark = acquireTarget(player);
+        if (mark == null) {
+            player.sendActionBar(EgoHud.status("No one for the rapiers to answer.", FAINT_HUD));
+            player.playSound(player.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_HIT, 0.4f, 0.7f);
+            return;
+        }
+
+        if (sneaking) {
+            int committed = f.impale(player, mark);
+            if (committed > 0) {
+                EgoDurability.wearMainHand(player, 2); // the whole fan commits — a heavier, non-vanilla use
+                player.sendActionBar(hud(f));
+            } else if (committed < 0) {
+                player.sendActionBar(EgoHud.cooldown("Impale", f.impaleRemaining(), FAINT_HUD));
+            } else {
+                player.sendActionBar(EgoHud.status("No rapiers left in the fan.", FAINT_HUD));
+            }
+            return;
+        }
+
+        if (f.sendOne(player, mark)) {
+            EgoDurability.wearMainHand(player); // a non-vanilla sortie -> a mild point of wear, once, at dispatch
+            player.sendActionBar(hud(f));
+        } else {
+            player.sendActionBar(EgoHud.status("No rapier ready to send.", FAINT_HUD));
+        }
+    }
+
+    /**
+     * Recharge (F): every sent rapier breaks off and glides home. Free to press — the cost is the slow flight
+     * back and the rest each blade still owes on arrival, exactly as the old replenish left cooldowns alone.
+     * This is the setup step before an Impale, not an undo button.
+     */
+    @Override
+    public void onSwapHands(Player player, PlayerSwapHandItemsEvent event) {
+        // Dispatched to every relic regardless of what's held — narrow to our own wielders first.
+        if (!matches(player.getInventory().getItemInMainHand())) return;
         Formation f = formations.get(player.getUniqueId());
         if (f == null) return;
-        int recharged = f.recharge(player);
-        if (recharged > 0) {
-            player.sendActionBar(EgoHud.pips("Rapiers", STAR_HUD, f.readyCount(), RAPIER_COUNT));
-        } else if (recharged < 0) {
-            // gated by the 45s replenish cooldown — show whole-second remaining
-            player.sendActionBar(EgoHud.cooldown("Recharge", f.rechargeRemaining(), FAINT_HUD));
+        event.setCancelled(true); // F commands the retinue; it doesn't shuffle the hands
+
+        if (f.recallAll(player) > 0) {
+            World w = player.getWorld();
+            w.playSound(player.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.8f, 1.4f);
+            w.playSound(player.getLocation(), Sound.ITEM_TRIDENT_RETURN, 0.5f, 1.6f);
+            player.sendActionBar(hud(f));
         } else {
             player.sendActionBar(EgoHud.status("The rapiers already circle you.", FAINT_HUD));
         }
+    }
+
+    /**
+     * The living body under the crosshair within {@link #COMMAND_RANGE}, else the nearest one roughly ahead.
+     * This is the weapon's ONLY entity scan, and it runs once per command press — never per tick and never
+     * per blade. A sent rapier is handed its mark here and holds the reference for the whole duel, so the
+     * retinue re-seeks nothing.
+     */
+    private LivingEntity acquireTarget(Player player) {
+        Entity looked = player.getTargetEntity((int) COMMAND_RANGE);
+        if (looked instanceof LivingEntity le && !le.getUniqueId().equals(player.getUniqueId()) && !le.isDead()) {
+            return le;
+        }
+        Location eye = player.getEyeLocation();
+        Vector dir = eye.getDirection().normalize();
+        LivingEntity best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (Entity e : player.getNearbyEntities(COMMAND_RANGE, COMMAND_RANGE, COMMAND_RANGE)) {
+            if (e.getUniqueId().equals(player.getUniqueId()) || !(e instanceof LivingEntity le) || le.isDead()) continue;
+            Vector to = le.getLocation().add(0, le.getHeight() * 0.5, 0).toVector().subtract(eye.toVector());
+            double dist = to.length();
+            if (dist < 0.01 || dist > COMMAND_RANGE) continue;
+            if (to.multiply(1.0 / dist).dot(dir) < 0.5) continue; // off to the side / behind
+            if (dist < bestDist) { bestDist = dist; best = le; }
+        }
+        return best;
+    }
+
+    /** The action-bar readout: how much of the fan is still yours to spend. */
+    private static Component hud(Formation f) {
+        return EgoHud.pips("Rapiers", STAR_HUD, f.fanCount(), RAPIER_COUNT);
+    }
+
+    // ---- damage: the two fenced strike paths ---------------------------------------
+
+    /**
+     * One rapier's puncture — the Double Tag's stab and every duelling blade's stab both land here.
+     *
+     * <p>Two hazards, both handled. The damage re-enters {@link #onHit}, so the {@link #reentry} fence holds
+     * for the call. And the body's hurt-immunity would eat the strike outright: a Double Tag lands a handful
+     * of ticks after the wielder's own melee — well inside the 10-tick window — and two duelling blades can
+     * align on the same body in the same tick. Without {@code setNoDamageTicks(0)} those strikes are dropped
+     * with no error, no log line, and no damage. Velocity is restored after: a rapier punctures, and the
+     * vanilla swing already did the shoving.
+     */
+    void stab(Player owner, LivingEntity victim) {
+        if (owner == null || victim.isDead() || !victim.isValid()) return;
+        UUID oid = owner.getUniqueId();
+        Vector preVel = victim.getVelocity();
+        reentry.add(oid);
+        try {
+            victim.setNoDamageTicks(0); // or this stab lands inside the melee's i-frames and is silently swallowed
+            victim.damage(STAB_DAMAGE, owner);
+        } finally {
+            reentry.remove(oid);
+            victim.setVelocity(preVel); // a puncture, not a shove
+        }
+        stabFx(victim);
+    }
+
+    /**
+     * The Converging Impale's landing: {@code blades} instances of {@link #IMPALE_DAMAGE} on ONE body, in ONE
+     * tick.
+     *
+     * <p>This is precisely the case i-frames destroy. A body may only be hurt once per 10 ticks, so without
+     * stripping them between each call the first blade lands and the other three are swallowed in silence —
+     * a 22-damage execution that quietly deals 5.5. Each instance therefore clears
+     * {@code setNoDamageTicks(0)} of its own, and the loop bails the moment the victim dies so a corpse never
+     * takes the rest. One velocity capture spans all four: the cage pins the body, it does not punt it.
+     */
+    void impaleAll(Player owner, LivingEntity victim, int blades) {
+        if (owner == null || victim.isDead() || !victim.isValid()) return;
+        UUID oid = owner.getUniqueId();
+        Vector preVel = victim.getVelocity();
+        int landed = 0;
+        reentry.add(oid);
+        try {
+            for (int k = 0; k < blades; k++) {
+                if (victim.isDead() || !victim.isValid()) break; // it fell partway through the cage
+                victim.setNoDamageTicks(0); // WITHOUT THIS ONLY THE FIRST BLADE LANDS
+                victim.damage(IMPALE_DAMAGE, owner);
+                landed++;
+            }
+        } finally {
+            reentry.remove(oid);
+            victim.setVelocity(preVel); // the cage pins; it doesn't launch
+        }
+        impaleFx(victim, landed);
+    }
+
+    // ---- vfx ------------------------------------------------------------------------
+
+    /** A light-blue puncture burst where a rapier lands a stab. Deliberately lean — four blades fire it a second. */
+    private void stabFx(LivingEntity victim) {
+        World w = victim.getWorld();
+        Location c = victim.getLocation().add(0, victim.getHeight() * 0.6, 0);
+        w.spawnParticle(Particle.DUST_COLOR_TRANSITION, c, 5, 0.22, 0.30, 0.22, 0, TEAR_SHIMMER, true);
+        w.spawnParticle(Particle.CRIT, c, 4, 0.20, 0.28, 0.20, 0.12);
+        w.spawnParticle(Particle.ENCHANTED_HIT, c, 3, 0.16, 0.24, 0.16, 0.08);
+        w.spawnParticle(Particle.FALLING_WATER, c, 2, 0.18, 0.26, 0.18, 0);
+        w.playSound(c, Sound.ITEM_TRIDENT_HIT, 0.4f, 1.85f); // one sound only — this can fire 4x a second
+    }
+
+    /** The Impale's landing: the fan's whole grief driven home at once. Once per 45s, so it may be lavish. */
+    private void impaleFx(LivingEntity victim, int blades) {
+        World w = victim.getWorld();
+        Location c = victim.getLocation().add(0, victim.getHeight() * 0.6, 0);
+        w.spawnParticle(Particle.DUST_COLOR_TRANSITION, c, 34, 0.45, 0.55, 0.45, 0, TEAR_SHIMMER, true);
+        w.spawnParticle(Particle.DUST, c, 20, 0.55, 0.65, 0.55, 0, TEAR_FINE, true);
+        w.spawnParticle(Particle.CRIT, c, 22, 0.40, 0.50, 0.40, 0.28);
+        w.spawnParticle(Particle.ENCHANTED_HIT, c, 14, 0.35, 0.45, 0.35, 0.15);
+        w.spawnParticle(Particle.FALLING_WATER, c, 10, 0.35, 0.45, 0.35, 0);
+        w.spawnParticle(Particle.END_ROD, c, 10, 0.14, 0.16, 0.14, 0.05);
+        w.spawnParticle(Particle.SWEEP_ATTACK, c, blades, 0.30, 0.30, 0.30, 0);
+        w.playSound(c, Sound.ITEM_TRIDENT_THUNDER, 0.85f, 1.5f);
+        w.playSound(c, Sound.ITEM_TRIDENT_HIT, 0.9f, 0.8f);
+        w.playSound(c, Sound.ENTITY_PLAYER_ATTACK_CRIT, 0.8f, 0.8f);
     }
 
     // ---- lifecycle: never orphan an entity ----------------------------------------
@@ -236,12 +393,14 @@ public final class SwordOfTearsWeapon implements Weapon {
     public void onQuit(UUID id) {
         Formation f = formations.remove(id);
         if (f != null) f.dispose();
+        reentry.remove(id); // belt-and-braces: the try/finally already clears it
     }
 
     @Override
     public void onDisable() {
         for (Formation f : formations.values()) f.dispose();
         formations.clear();
+        reentry.clear();
         sweepOrphans(); // belt-and-braces: reap any stray tagged rapier anywhere in the world
     }
 
@@ -260,48 +419,80 @@ public final class SwordOfTearsWeapon implements Weapon {
         for (Map.Entry<UUID, Formation> e : formations.entrySet()) {
             Player p = plugin.getServer().getPlayer(e.getKey());
             String who = p != null ? p.getName() : e.getKey().toString().substring(0, 8);
-            out.add("sword_of_tears  " + e.getValue().readyCount() + "/" + RAPIER_COUNT + " rapiers ready  (" + who + ")");
+            Formation f = e.getValue();
+            out.add("sword_of_tears  " + f.fanCount() + " in fan / " + f.sentCount() + " sent"
+                    + " of " + RAPIER_COUNT + "  (" + who + ")");
         }
         return out;
     }
 
-    // ---- the formation: four hovering rapier companions ---------------------------
+    // ---- the formation: four rapier companions and where they are ------------------
 
     /**
-     * A wielder's ring of four rapier {@link ItemDisplay} companions and their per-sword state. Each
-     * blade is either <b>formed</b> (hovering in the ring behind the wielder) or expended (sent out and
-     * awaiting a recharge), and carries its own cooldown clock. {@code busy} means a short flight
-     * animation currently owns the blade, so the follow loop leaves it alone.
+     * A wielder's four rapier {@link ItemDisplay} companions and their per-blade state. Each is
+     * {@link BladeState#FAN} (hovering behind the wielder), {@link BladeState#DUEL} (sent, fighting its mark),
+     * or {@link BladeState#FLIGHT} (a brief animation owns it).
+     *
+     * <p><b>Where the work happens.</b> FAN and DUEL blades are both stepped from {@link #tick}, which the
+     * manager already calls once per wielder per 2 ticks — so a retinue of four fighting for a minute costs
+     * one loop, not four tasks. Only the short, snappy motions get a 1-tick {@link BukkitRunnable} of their
+     * own: the dart (~24 ticks), the Impale (~30 ticks), the glide home (≤{@value #RETURN_TICKS} ticks). Every
+     * one of them is bounded and ends by handing the blade back to a steady state.
      */
     private static final class Formation {
 
         // Formation geometry — a curved fan that WRAPS around behind the wielder (not a rigid line).
-        private static final double FORM_RADIUS  = 1.90;   // orbit radius of the fan behind the wielder
-        private static final double FORM_HEIGHT  = 1.25;   // hover height
-        private static final double FORM_ARC_DEG = 62.0;   // half-span of the arc; blades wrap toward the flanks
-        private static final double FORM_ARC_LIFT = 0.18;  // the outer blades ride a touch higher -> a curved fan
+        private static final double FORM_RADIUS   = 1.90;   // orbit radius of the fan behind the wielder
+        private static final double FORM_HEIGHT   = 1.25;   // hover height
+        private static final double FORM_ARC_DEG  = 62.0;   // half-span of the arc; blades wrap toward the flanks
+        private static final double FORM_ARC_LIFT = 0.18;   // the outer blades ride a touch higher -> a curved fan
 
-        // Flight feel. All in blocks / blocks-per-tick. SLOW glide-in + SLOW recall, but a FAST stab.
+        // Dart feel (Double Tag + the opening of a sortie). Blocks / blocks-per-tick. SLOW tip-leading
+        // glide-in, then a FAST stab — the contrast is the whole read.
         private static final int    APPROACH_TICKS    = 16;   // cap on the slow homing glide-in
-        private static final double APPROACH_SPEED    = 0.55; // slow homing travel from formation toward the target
+        private static final double APPROACH_SPEED    = 0.55; // slow homing travel from the fan toward the mark
         private static final double APPROACH_STANDOFF = 2.20; // glide to here, then commit to the lunge
         private static final double STRIKE_SPEED      = 3.20; // the quick stab into the body
         private static final int    STRIKE_TICKS      = 6;    // safety cap on the lunge
-        private static final int    ENGAGE_TICKS      = 14;   // brief visible ricochet/slash engagement after the stab
-        private static final int    ENGAGE_HIT_PERIOD = 5;    // land a tiny chip every N ticks of the engagement
-        private static final double ENGAGE_RADIUS     = 1.25; // how wide the ricochet slashes arc around the body
-        private static final int    RETURN_TICKS      = 16;   // slow recall cap
-        private static final double RETURN_SPEED      = 0.60; // slow recall glide
+
+        // The slow recall glide. Speed is unchanged from the old formation's gentle drift; the tick cap is
+        // generous now because a return is a real journey (up to the leash) rather than a hop off the wielder,
+        // and a blade snapping the last 20 blocks would throw away the best part of the animation.
+        private static final double RETURN_SPEED = 0.60;
+        private static final int    RETURN_TICKS = 60;   // 0.60 * 60 = 36 blocks > LEASH, so it never snaps
+
+        // The duel: a sent blade wheeling its mark, winding inward, puncturing. Stepped at the formation's
+        // 2-tick cadence, so these are in FORMATION steps, not server ticks.
+        private static final int    DUEL_STEPS_PER_STAB = 10;   // 10 steps * 2 ticks = one stab a second, per blade
+        private static final double DUEL_RADIUS         = 1.45; // how wide it wheels before winding in
+        private static final double DUEL_ORBIT_SPEED    = 0.55; // radians per step
+        private static final double DUEL_BOB            = 0.45; // vertical sway of the wheel
+
+        // The Converging Impale: gather into a cage, then drive in together.
+        private static final int    IMPALE_GATHER_TICKS   = 14;   // the blades rise and ring the mark
+        private static final double IMPALE_GATHER_SPEED   = 1.60; // brisk — they have distance to cover
+        private static final double IMPALE_STANDOFF       = 2.70; // radius of the cage
+        private static final int    IMPALE_CONVERGE_TICKS = 5;    // the committed drive inward
+        private static final double IMPALE_CONVERGE_SPEED = 3.40;
+        private static final int    IMPALE_HOLD_TICKS     = 12;   // they stand in the wound, weeping, then leave
 
         private final SwordOfTearsWeapon weapon;
         private final Reliquary plugin;
         private final UUID ownerId;
 
-        private final ItemDisplay[] blades = new ItemDisplay[RAPIER_COUNT];
-        private final boolean[] formed     = new boolean[RAPIER_COUNT];
-        private final boolean[] busy       = new boolean[RAPIER_COUNT];
-        private final long[] cooldownUntil = new long[RAPIER_COUNT];
-        private long rechargeReadyAt = 0L; // formation-wide 45s replenish gate
+        private final ItemDisplay[] blades  = new ItemDisplay[RAPIER_COUNT];
+        private final BladeState[] state    = new BladeState[RAPIER_COUNT];
+        /**
+         * The mark a sent blade is duelling. A bounded, per-wielder array of at most
+         * {@value SwordOfTearsWeapon#RAPIER_COUNT} references — never a victim-keyed map, which would leak a
+         * key per mob forever. Every exit path (mark dead/invalid/out of world/past the leash, recall,
+         * dispose) nulls the slot.
+         */
+        private final LivingEntity[] marks  = new LivingEntity[RAPIER_COUNT];
+        /** A duelling blade's own step counter — drives both its wheel and its once-a-second stab cadence. */
+        private final int[] duelT           = new int[RAPIER_COUNT];
+        private final long[] restUntil      = new long[RAPIER_COUNT];
+        private long impaleReadyAt = 0L;
         private boolean alive = true;
 
         Formation(SwordOfTearsWeapon weapon, Player owner) {
@@ -311,7 +502,7 @@ public final class SwordOfTearsWeapon implements Weapon {
             Location spawn = owner.getLocation().add(0, FORM_HEIGHT, 0);
             for (int i = 0; i < RAPIER_COUNT; i++) {
                 blades[i] = spawnBlade(owner.getWorld(), spawn);
-                formed[i] = true;
+                state[i] = BladeState.FAN;
             }
         }
 
@@ -330,48 +521,56 @@ public final class SwordOfTearsWeapon implements Weapon {
                 d.setBrightness(new Display.Brightness(13, 15));
                 d.setPersistent(false);            // a crash can never leave these on disk
                 d.setInterpolationDuration(3);
-                d.setTeleportDuration(3);          // smooth the follow/glide between ticks (snapped shorter for the stab)
+                d.setTeleportDuration(3);          // smooth the follow/glide between ticks (snapped shorter for a stab)
                 d.setTransformation(hoverTransform());
                 d.addScoreboardTag(RAPIER_TAG);
             });
         }
 
-        // ---- follow ---------------------------------------------------------------
+        // ---- the one loop ---------------------------------------------------------
 
-        /** Wheel the formed blades into their hovering ring behind the wielder; leave expended ones hidden. */
+        /**
+         * Step every blade once. Hovering blades wheel into the fan; sent blades fight. This is the retinue's
+         * entire steady-state cost — no entity scan, no per-blade task, and every particle here is throttled.
+         */
         void tick(Player owner, long tick) {
             if (!alive) return;
             for (int i = 0; i < RAPIER_COUNT; i++) {
                 ItemDisplay b = blades[i];
                 if (b == null || b.isDead() || !b.isValid()) {
-                    if (formed[i] && !busy[i]) { // it should be visible — respawn it
-                        b = spawnBlade(owner.getWorld(), owner.getLocation().add(0, FORM_HEIGHT, 0));
-                        blades[i] = b;
-                    } else {
-                        continue;
-                    }
+                    if (state[i] == BladeState.FLIGHT) continue; // its animation owns the slot; let it finish
+                    b = spawnBlade(owner.getWorld(), owner.getLocation().add(0, FORM_HEIGHT, 0));
+                    blades[i] = b;
+                    state[i] = BladeState.FAN;                   // a blade that lost its entity comes home
+                    marks[i] = null;
                 }
-                if (busy[i]) continue;      // a flight animation owns this blade
-                if (!formed[i]) continue;   // expended — parked hidden until recharge
-                if (b.getTeleportDuration() != 3) b.setTeleportDuration(3); // restore the smooth hover cadence
-                b.setTransformation(hoverTransform());
-                Location slot = slotFor(owner, i, tick);
-                b.teleport(slot);
-                if ((tick % 18) == 0) { // an occasional tear weeping from the hovering blade + a faint sparkle
-                    Location w = b.getLocation().add(0, -0.2, 0);
-                    b.getWorld().spawnParticle(Particle.FALLING_WATER, w, 1, 0.03, 0.03, 0.03, 0);
-                    b.getWorld().spawnParticle(Particle.DUST_COLOR_TRANSITION, w, 1, 0.05, 0.05, 0.05, 0, TEAR_SHIMMER);
-                    if (((tick / 18 + i) % 3) == 0) {
-                        b.getWorld().spawnParticle(Particle.END_ROD, b.getLocation(), 1, 0.02, 0.02, 0.02, 0.003);
-                    }
+                switch (state[i]) {
+                    case FAN -> hoverStep(owner, b, i, tick);
+                    case DUEL -> duelStep(owner, b, i);
+                    case FLIGHT -> { /* a short animation owns this blade */ }
+                }
+            }
+        }
+
+        /** A blade at rest in the fan: wheeling into its slot, weeping the occasional tear. */
+        private void hoverStep(Player owner, ItemDisplay b, int i, long tick) {
+            if (b.getTeleportDuration() != 3) b.setTeleportDuration(3); // restore the smooth hover cadence
+            b.setTransformation(hoverTransform());
+            b.teleport(slotFor(owner, i, tick));
+            if ((tick % 18) == 0) { // an occasional tear weeping from the hovering blade + a faint sparkle
+                Location w = b.getLocation().add(0, -0.2, 0);
+                b.getWorld().spawnParticle(Particle.FALLING_WATER, w, 1, 0.03, 0.03, 0.03, 0);
+                b.getWorld().spawnParticle(Particle.DUST_COLOR_TRANSITION, w, 1, 0.05, 0.05, 0.05, 0, TEAR_SHIMMER);
+                if (((tick / 18 + i) % 3) == 0) {
+                    b.getWorld().spawnParticle(Particle.END_ROD, b.getLocation(), 1, 0.02, 0.02, 0.02, 0.003);
                 }
             }
         }
 
         /**
-         * The hovering slot for blade {@code i}: placed on a curved fan that WRAPS around behind the
-         * wielder (an arc/orbit, not a rigid lateral line), at hover height, gently bobbing. The end
-         * blades ride a touch higher and angle outward so the fan reads as wrapping the body.
+         * The hovering slot for blade {@code i}: placed on a curved fan that WRAPS around behind the wielder
+         * (an arc/orbit, not a rigid lateral line), at hover height, gently bobbing. The end blades ride a
+         * touch higher and angle outward so the fan reads as wrapping the body.
          */
         private Location slotFor(Player owner, int i, long tick) {
             Location base = owner.getLocation();
@@ -394,209 +593,404 @@ public final class SwordOfTearsWeapon implements Weapon {
             return slot;
         }
 
-        // ---- the strike dart ------------------------------------------------------
+        // ---- the duel: a sent blade fighting on its own ---------------------------
 
         /**
-         * Send the first available rapier (formed, idle, off cooldown) darting to the victim to strike
-         * alongside the wielder, trailing tears. Returns true if one was sent; false if none was ready.
+         * One step of a sent blade's duel. It wheels its mark and winds steadily inward, and on every
+         * {@value #DUEL_STEPS_PER_STAB}th step it drives in and punctures — one stab a second, per blade,
+         * whether or not the wielder is even looking. When the mark falls, leaves the world, or outruns the
+         * leash, the blade breaks off and reports back rather than hunting a new one: a rapier answers the
+         * order it was given.
+         *
+         * <p>No scan of any kind runs here — the mark was handed to the blade at dispatch and is held for the
+         * duel's life. The only per-step checks are validity and one distance compare.
          */
-        boolean launchStrike(Player owner, LivingEntity victim) {
-            if (!alive) return false;
-            long now = System.currentTimeMillis();
-            int idx = -1;
-            for (int i = 0; i < RAPIER_COUNT; i++) {
-                if (formed[i] && !busy[i] && now >= cooldownUntil[i]) { idx = i; break; }
+        private void duelStep(Player owner, ItemDisplay b, int i) {
+            LivingEntity mark = marks[i];
+            if (mark == null || mark.isDead() || !mark.isValid()
+                    || !mark.getWorld().equals(owner.getWorld())
+                    || mark.getLocation().distanceSquared(owner.getLocation()) > LEASH_SQ) {
+                marks[i] = null;
+                beginReturn(owner, i); // the mark fell, fled, or unloaded — the blade comes home
+                return;
             }
-            if (idx < 0) return false;
 
-            final int i = idx;
+            int t = duelT[i]++;
+            int phase = t % DUEL_STEPS_PER_STAB;
+            Location center = mark.getLocation().add(0, mark.getHeight() * 0.6, 0);
+
+            if (phase == 0) { // ---- the lunge: drive in and puncture ----
+                b.setTeleportDuration(1);
+                Vector in = center.toVector().subtract(b.getLocation().toVector());
+                b.setTransformation(pointing(in.lengthSquared() < 1.0e-4 ? new Vector(0, -1, 0) : in.normalize()));
+                Location at = center.clone();
+                at.setYaw(0f);
+                at.setPitch(0f);
+                b.teleport(at);
+                weapon.stab(owner, mark); // fenced, i-frames cleared, knockback undone
+                return;
+            }
+
+            // ---- wheel the body, winding inward toward the next lunge ----
+            b.setTeleportDuration(2); // interpolate across the 2-tick gap so the wheel glides, not snaps
+            double frac = (DUEL_STEPS_PER_STAB - phase) / (double) DUEL_STEPS_PER_STAB; // 0.9 just after a stab -> 0.1 just before
+            double rr = DUEL_RADIUS * (0.30 + 0.70 * frac);
+            double ang = t * DUEL_ORBIT_SPEED + (Math.PI * 2 * i) / RAPIER_COUNT; // blades share a mark without overlapping
+            Location pt = center.clone().add(Math.cos(ang) * rr, Math.sin(t * 0.42) * DUEL_BOB, Math.sin(ang) * rr);
+            Vector in = center.toVector().subtract(pt.toVector());
+            b.setTransformation(pointing(in.lengthSquared() < 1.0e-4 ? new Vector(0, -1, 0) : in.normalize()));
+            pt.setYaw(0f);
+            pt.setPitch(0f);
+            b.teleport(pt);
+            if ((phase & 1) == 0) duelTrail(pt); // half-rate: a duel can run as long as the wielder allows
+        }
+
+        // ---- commands -------------------------------------------------------------
+
+        /** Land a Double Tag: one blade from the fan stabs the struck body and glides back. */
+        boolean doubleTag(Player owner, LivingEntity victim) {
+            if (!alive || victim.isDead() || !victim.isValid()) return false;
+            int i = firstReady();
+            if (i < 0) return false;
+            launchDart(owner, i, victim, false); // strike and come home
+            return true;
+        }
+
+        /** Send one ready blade to duel {@code mark} until it falls or is called back. */
+        boolean sendOne(Player owner, LivingEntity mark) {
+            if (!alive || mark.isDead() || !mark.isValid()) return false;
+            int i = firstReady();
+            if (i < 0) return false;
+            launchDart(owner, i, mark, true); // strike and STAY
+            return true;
+        }
+
+        /**
+         * A blade leaves the fan for {@code mark}: the slow tip-leading glide-in, then the fast stab. What
+         * happens after the stab is the whole difference between the kit's two orders — {@code stay} hands the
+         * blade to the duel loop; otherwise it glides home. One flight, two endings.
+         */
+        private void launchDart(Player owner, final int i, final LivingEntity mark, final boolean stay) {
             final ItemDisplay b = blades[i];
-            if (b == null || !b.isValid()) { formed[i] = false; return false; }
-            busy[i] = true;
+            if (b == null || !b.isValid()) return;
+            state[i] = BladeState.FLIGHT;
             b.setTeleportDuration(3); // smooth the slow glide-in
-            owner.getWorld().playSound(owner.getLocation(), Sound.ITEM_TRIDENT_THROW, 0.6f, 1.7f);
+            owner.getWorld().playSound(owner.getLocation(), Sound.ITEM_TRIDENT_THROW, 0.6f, stay ? 1.5f : 1.7f);
 
             new BukkitRunnable() {
-                // phase 0 = APPROACH (slow homing glide-in), 1 = STRIKE (fast stab), 2 = ENGAGE (ricochet flurry)
-                int phase = 0;
+                int phase = 0; // 0 = APPROACH (slow tip-leading glide-in), 1 = STRIKE (fast stab)
                 int t = 0;
+
                 @Override
                 public void run() {
                     Player p = plugin.getServer().getPlayer(ownerId);
                     if (!alive || b.isDead() || !b.isValid() || p == null || !p.isOnline()
-                            || victim.isDead() || !victim.isValid()) {
-                        expend(i, b, p); // abort cleanly: mark spent + on cooldown, hide
+                            || mark.isDead() || !mark.isValid() || !mark.getWorld().equals(b.getWorld())) {
+                        abortToFan(p, i, b); // abort cleanly — the blade always ends up somewhere legal
                         cancel();
                         return;
                     }
-                    Location center = victim.getLocation().add(0, victim.getHeight() * 0.6, 0);
+                    Location center = mark.getLocation().add(0, mark.getHeight() * 0.6, 0);
                     Location cur = b.getLocation();
+                    Vector to = center.toVector().subtract(cur.toVector());
+                    double dist = to.length();
+                    Vector dir = dist < 1.0e-4 ? new Vector(0, 0, 1) : to.clone().normalize();
+                    b.setTransformation(pointing(dir)); // tip lances forward at the mark
+                    trailTear(cur);
 
-                    if (phase == 0) {                        // ---- APPROACH: slow, tip-leading glide-in ----
-                        Vector to = center.toVector().subtract(cur.toVector());
-                        double dist = to.length();
-                        Vector dir = dist < 1.0e-4 ? new Vector(0, 0, 1) : to.clone().normalize();
-                        b.setTransformation(pointing(dir));  // tip lances forward at the target
-                        trailTear(cur);
+                    if (phase == 0) { // ---- APPROACH: slow, tip-leading glide-in ----
                         if (dist <= APPROACH_STANDOFF || t >= APPROACH_TICKS) {
-                            phase = 1; t = 0;
-                            b.setTeleportDuration(1);         // snap the cadence for the quick stab
+                            phase = 1;
+                            t = 0;
+                            b.setTeleportDuration(1); // snap the cadence for the quick stab
                             return;
                         }
-                        Location next = cur.clone().add(dir.multiply(Math.min(dist, APPROACH_SPEED)));
-                        next.setYaw(cur.getYaw());
-                        next.setPitch(cur.getPitch());
-                        b.teleport(next);
+                        step(b, cur, dir, Math.min(dist, APPROACH_SPEED));
                         t++;
                         return;
                     }
 
-                    if (phase == 1) {                        // ---- STRIKE: fast lunge into the body ----
-                        Vector to = center.toVector().subtract(cur.toVector());
-                        double dist = to.length();
-                        Vector dir = dist < 1.0e-4 ? new Vector(0, 0, 1) : to.clone().normalize();
-                        b.setTransformation(pointing(dir));
-                        trailTear(cur);
-                        if (dist <= 1.0 || t >= STRIKE_TICKS) {
-                            b.teleport(center);
-                            weapon.dealRapierStrike(p, victim); // fenced primary damage + wear + burst
-                            phase = 2; t = 0;
-                            return;
-                        }
-                        Location next = cur.clone().add(dir.multiply(Math.min(dist, STRIKE_SPEED)));
-                        next.setYaw(cur.getYaw());
-                        next.setPitch(cur.getPitch());
-                        b.teleport(next);
+                    // ---- STRIKE: the fast lunge into the body ----
+                    if (dist > 1.0 && t < STRIKE_TICKS) {
+                        step(b, cur, dir, Math.min(dist, STRIKE_SPEED));
                         t++;
                         return;
                     }
+                    b.teleport(center);
+                    weapon.stab(p, mark); // fenced primary damage + wear was paid at dispatch
 
-                    // ---- ENGAGE: ricochet/slash from the air for a little while, chipping small damage ----
-                    if (t >= ENGAGE_TICKS) {
-                        expend(i, b, p);
-                        cancel();
-                        return;
+                    if (stay && !mark.isDead() && mark.isValid()) { // take up the post: the duel loop owns it now
+                        marks[i] = mark;
+                        duelT[i] = 1;
+                        state[i] = BladeState.DUEL;
+                        b.setTeleportDuration(2);
+                        b.getWorld().playSound(center, Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.5f, 1.9f);
+                    } else {
+                        abortToFan(p, i, b);
                     }
-                    double ang = t * 1.35 + i;                       // wheel around the body
-                    double rr = ENGAGE_RADIUS * (0.55 + 0.45 * Math.sin(t * 0.9));
-                    Location slashPt = center.clone().add(
-                            Math.cos(ang) * rr, Math.sin(t * 0.7) * 0.5, Math.sin(ang) * rr);
-                    Vector inward = center.toVector().subtract(slashPt.toVector());
-                    b.setTransformation(pointing(inward.lengthSquared() < 1.0e-4 ? new Vector(0, -1, 0) : inward.normalize()));
-                    Location cut = slashPt.clone();
-                    cut.setYaw(cur.getYaw());
-                    cut.setPitch(cur.getPitch());
-                    b.teleport(cut);
-                    slashTrail(slashPt);
-                    if (t > 0 && (t % ENGAGE_HIT_PERIOD) == 0) {
-                        weapon.dealRapierChip(p, victim);           // tiny follow-up during the engagement
-                    }
-                    t++;
+                    cancel();
+                }
+
+                /** Advance the blade {@code by} blocks along {@code dir}, keeping its pose. */
+                private void step(ItemDisplay blade, Location cur, Vector dir, double by) {
+                    Location next = cur.clone().add(dir.clone().multiply(by));
+                    next.setYaw(cur.getYaw());
+                    next.setPitch(cur.getPitch());
+                    blade.teleport(next);
                 }
             }.runTaskTimer(plugin, 0L, 1L);
-            return true;
         }
-
-        /** Retire a sent blade: spent (out of the ring), on cooldown, hidden and tucked back at the wielder. */
-        private void expend(int i, ItemDisplay b, Player owner) {
-            if (!alive) return;
-            formed[i] = false;
-            busy[i] = false;
-            cooldownUntil[i] = System.currentTimeMillis() + RAPIER_COOLDOWN_MS;
-            if (b != null && b.isValid()) {
-                b.setViewRange(0f); // stop rendering it while it's expended
-                if (owner != null) b.teleport(owner.getLocation().add(0, FORM_HEIGHT, 0));
-            }
-        }
-
-        // ---- recharge -------------------------------------------------------------
 
         /**
-         * Fly every expended rapier back to the wielder and re-form the ring, gated to once per 45s.
-         * Returns how many were recalled ({@code >0}); {@code 0} if nothing was expended; {@code -1} if
-         * the 45s replenish cooldown is still running.
+         * The Converging Impale. Every blade STILL IN THE FAN commits — a fan you emptied into duels has less
+         * to give, which is the price of having spent it. Returns how many committed, {@code 0} if the fan was
+         * empty, {@code -1} if the 45s gate is still running.
+         *
+         * <p>A resting blade still counts: the Impale is the formation committing as one, not four individual
+         * sorties, so it reads off {@link BladeState#FAN} rather than {@link #firstReady()}.
          */
-        int recharge(Player owner) {
-            if (!alive) return 0;
-            int expended = 0;
-            for (int i = 0; i < RAPIER_COUNT; i++) {
-                if (!formed[i] && !busy[i]) expended++;
-            }
-            if (expended == 0) return 0;                              // the ring is already full
+        int impale(Player owner, LivingEntity mark) {
+            if (!alive || mark.isDead() || !mark.isValid()) return 0;
             long now = System.currentTimeMillis();
-            if (now < rechargeReadyAt) return -1;                     // gated by the 45s replenish cooldown
+            List<Integer> commit = new ArrayList<>(RAPIER_COUNT);
+            for (int i = 0; i < RAPIER_COUNT; i++) if (state[i] == BladeState.FAN) commit.add(i);
+            if (commit.isEmpty()) return 0;                 // nothing in the fan to commit
+            if (now < impaleReadyAt) return -1;             // still on the 45s gate
+            impaleReadyAt = now + IMPALE_COOLDOWN_MS;
+            runImpale(owner, mark, commit);
+            return commit.size();
+        }
+
+        /** Whole milliseconds left on the Impale's 45s gate (0 if ready). */
+        long impaleRemaining() {
+            return Math.max(0L, impaleReadyAt - System.currentTimeMillis());
+        }
+
+        /**
+         * The signature, driven by ONE task for the whole formation rather than one per blade — which is both
+         * cheaper and the only way to guarantee what the move is about: every blade landing on the SAME tick.
+         */
+        private void runImpale(Player owner, final LivingEntity mark, List<Integer> commit) {
+            final int n = commit.size();
+            final int[] idx = new int[n];
+            for (int k = 0; k < n; k++) {
+                idx[k] = commit.get(k);
+                state[idx[k]] = BladeState.FLIGHT;
+                ItemDisplay b = blades[idx[k]];
+                if (b != null && b.isValid()) b.setTeleportDuration(2);
+            }
+            Location cast = owner.getLocation();
+            owner.getWorld().playSound(cast, Sound.ITEM_TRIDENT_THROW, 0.9f, 0.6f);
+            owner.getWorld().playSound(cast, Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.9f, 0.7f);
+
+            new BukkitRunnable() {
+                int phase = 0; // 0 = GATHER (cage the mark), 1 = CONVERGE (drive in together), 2 = HOLD
+                int t = 0;
+
+                @Override
+                public void run() {
+                    Player p = plugin.getServer().getPlayer(ownerId);
+                    if (!alive || p == null || !p.isOnline() || mark.isDead() || !mark.isValid()) {
+                        for (int i : idx) abortToFan(p, i, blades[i]);
+                        cancel();
+                        return;
+                    }
+                    Location center = mark.getLocation().add(0, mark.getHeight() * 0.6, 0);
+                    World w = center.getWorld();
+
+                    if (phase == 0) { // ---- GATHER: the fan lifts and rings the mark, tips inward ----
+                        for (int k = 0; k < n; k++) fly(idx[k], center, cageSlot(center, k, n, t), IMPALE_GATHER_SPEED, (t & 1) == 0);
+                        if (++t >= IMPALE_GATHER_TICKS) {
+                            phase = 1;
+                            t = 0;
+                            for (int i : idx) {
+                                ItemDisplay b = blades[i];
+                                if (b != null && b.isValid()) b.setTeleportDuration(1);
+                            }
+                            w.playSound(center, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.9f, 0.65f);
+                            w.playSound(center, Sound.ITEM_TRIDENT_RIPTIDE_1, 0.7f, 0.6f);
+                        }
+                        return;
+                    }
+
+                    if (phase == 1) { // ---- CONVERGE: every blade drives in on the same tick ----
+                        // Each drives to its OWN seat in the body, tip aimed at the mark's centre — four
+                        // converging thrusts, not four blades stacked on one pixel.
+                        for (int k = 0; k < n; k++) {
+                            fly(idx[k], center, center.clone().add(woundOffset(k, n)), IMPALE_CONVERGE_SPEED, true);
+                        }
+                        if (++t >= IMPALE_CONVERGE_TICKS) {
+                            for (int k = 0; k < n; k++) { // seat every tip in the body before a single point lands
+                                ItemDisplay b = blades[idx[k]];
+                                if (b == null || !b.isValid()) continue;
+                                Location seat = center.clone().add(woundOffset(k, n));
+                                seat.setYaw(0f);
+                                seat.setPitch(0f);
+                                b.teleport(seat);
+                            }
+                            weapon.impaleAll(p, mark, n); // n instances, ONE tick, i-frames cleared between each
+                            phase = 2;
+                            t = 0;
+                        }
+                        return;
+                    }
+
+                    // ---- HOLD: the blades stand in the wound, weeping, then withdraw ----
+                    for (int k = 0; k < n; k++) {
+                        ItemDisplay b = blades[idx[k]];
+                        if (b == null || !b.isValid()) continue;
+                        Location seat = center.clone().add(woundOffset(k, n));
+                        seat.setYaw(0f);
+                        seat.setPitch(0f);
+                        b.teleport(seat);
+                        if ((t & 1) == 0) {
+                            w.spawnParticle(Particle.FALLING_WATER, seat, 1, 0.05, 0.05, 0.05, 0);
+                            w.spawnParticle(Particle.DUST_COLOR_TRANSITION, seat, 1, 0.06, 0.06, 0.06, 0, TEAR_SHIMMER);
+                        }
+                    }
+                    if (++t >= IMPALE_HOLD_TICKS) {
+                        for (int i : idx) abortToFan(p, i, blades[i]);
+                        cancel();
+                    }
+                }
+
+                /** Move blade {@code i} toward {@code want}, tip aimed at {@code center}, optionally trailing. */
+                private void fly(int i, Location center, Location want, double speed, boolean trail) {
+                    ItemDisplay b = blades[i];
+                    if (b == null || !b.isValid()) return;
+                    Location cur = b.getLocation();
+                    Vector to = want.toVector().subtract(cur.toVector());
+                    double d = to.length();
+                    Location next = d <= speed ? want.clone() : cur.clone().add(to.multiply(speed / d));
+                    Vector in = center.toVector().subtract(next.toVector());
+                    b.setTransformation(pointing(in.lengthSquared() < 1.0e-4 ? new Vector(0, -1, 0) : in.normalize()));
+                    next.setYaw(0f);
+                    next.setPitch(0f);
+                    b.teleport(next);
+                    if (trail) trailTear(cur);
+                }
+            }.runTaskTimer(plugin, 0L, 1L);
+        }
+
+        /** A point on the cage around the mark: evenly spaced, alternately high and low, wheeling slowly. */
+        private static Location cageSlot(Location center, int k, int n, int t) {
+            double ang = (Math.PI * 2 * k) / n + t * 0.05;
+            double lift = ((k & 1) == 0 ? 0.80 : -0.60);
+            return center.clone().add(Math.cos(ang) * IMPALE_STANDOFF, lift, Math.sin(ang) * IMPALE_STANDOFF);
+        }
+
+        /** A small per-blade offset so four tips seated in one body read as four wounds, not one flicker. */
+        private static Vector woundOffset(int k, int n) {
+            double ang = (Math.PI * 2 * k) / n;
+            return new Vector(Math.cos(ang) * 0.22, ((k & 1) == 0 ? 0.14 : -0.14), Math.sin(ang) * 0.22);
+        }
+
+        /** Fold every sent rapier home. Returns how many broke off. */
+        int recallAll(Player owner) {
+            if (!alive) return 0;
             int n = 0;
             for (int i = 0; i < RAPIER_COUNT; i++) {
-                if (!formed[i] && !busy[i]) { animateReturn(owner, i); n++; }
-            }
-            if (n > 0) {
-                rechargeReadyAt = now + RECHARGE_COOLDOWN_MS;         // start the 45s replenish gate
-                World w = owner.getWorld();
-                w.playSound(owner.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.8f, 1.4f);
-                w.playSound(owner.getLocation(), Sound.ITEM_TRIDENT_RETURN, 0.5f, 1.6f);
+                if (state[i] == BladeState.DUEL) { beginReturn(owner, i); n++; }
             }
             return n;
         }
 
-        /** Whole milliseconds left on the 45s replenish gate (0 if ready). */
-        long rechargeRemaining() {
-            return Math.max(0L, rechargeReadyAt - System.currentTimeMillis());
+        // ---- coming home ----------------------------------------------------------
+
+        /** End a flight the safest way available: glide home if the wielder is there, else just land. */
+        private void abortToFan(Player owner, int i, ItemDisplay b) {
+            if (!alive) return;
+            if (owner == null || !owner.isOnline()) { landInFan(i, b); return; }
+            beginReturn(owner, i);
         }
 
-        /** One recalled blade: re-appear at the wielder, then glide into its ring slot (cooldown untouched). */
-        private void animateReturn(Player owner, final int i) {
+        /**
+         * The slow recall glide — the blade drifts back to its slot in the fan rather than blinking there.
+         * It is the same gentle drift the old formation recalled with, given room to cover a real distance.
+         */
+        private void beginReturn(Player owner, final int i) {
             ItemDisplay b = blades[i];
-            if (b == null || !b.isValid()) {
-                b = spawnBlade(owner.getWorld(), owner.getEyeLocation());
-                blades[i] = b;
-            }
+            marks[i] = null;
+            duelT[i] = 0;
+            if (b == null || !b.isValid()) { landInFan(i, null); return; }
+            state[i] = BladeState.FLIGHT;
             final ItemDisplay blade = b;
-            busy[i] = true;
-            blade.setViewRange(1.0f);            // visible again as it flies home
-            blade.setTeleportDuration(3);        // smooth the slow recall glide
-            blade.teleport(owner.getEyeLocation());
+            blade.setTeleportDuration(3); // smooth the slow recall glide
 
             new BukkitRunnable() {
                 int t = 0;
+
                 @Override
                 public void run() {
                     Player p = plugin.getServer().getPlayer(ownerId);
                     if (!alive || blade.isDead() || !blade.isValid() || p == null || !p.isOnline()) {
-                        if (alive) { formed[i] = true; busy[i] = false; }
+                        landInFan(i, blade);
                         cancel();
                         return;
                     }
                     Location slot = slotFor(p, i, t);
-                    if (t >= RETURN_TICKS) {
-                        blade.setTransformation(hoverTransform());
+                    Location cur = blade.getLocation();
+                    blade.setTransformation(hoverTransform());
+                    // Out of time, in the wrong world, or close enough: settle into the slot and be done.
+                    if (t >= RETURN_TICKS || !cur.getWorld().equals(slot.getWorld())) {
                         blade.teleport(slot);
-                        formed[i] = true;
-                        busy[i] = false;
+                        landInFan(i, blade);
                         cancel();
                         return;
                     }
-                    Location cur = blade.getLocation();
                     Vector to = slot.toVector().subtract(cur.toVector());
                     double d = to.length();
-                    blade.setTransformation(hoverTransform());
-                    Location next = d <= RETURN_SPEED ? slot : cur.clone().add(to.multiply(RETURN_SPEED / d));
+                    if (d <= RETURN_SPEED) {
+                        blade.teleport(slot);
+                        landInFan(i, blade);
+                        cancel();
+                        return;
+                    }
+                    Location next = cur.clone().add(to.multiply(RETURN_SPEED / d));
                     next.setYaw(slot.getYaw());
                     next.setPitch(0f);
                     blade.teleport(next);
-                    trailTear(cur);
+                    if ((t & 1) == 0) trailTear(cur);
                     t++;
                 }
             }.runTaskTimer(plugin, 0L, 1L);
         }
 
-        // ---- shared -----------------------------------------------------------------
+        /** The blade is back in the fan and owes its rest. The one place a blade becomes spendable again. */
+        private void landInFan(int i, ItemDisplay b) {
+            if (!alive) return;
+            state[i] = BladeState.FAN;
+            marks[i] = null;
+            duelT[i] = 0;
+            restUntil[i] = System.currentTimeMillis() + BLADE_REST_MS;
+            if (b != null && b.isValid()) b.setTeleportDuration(3);
+        }
 
-        int readyCount() {
+        // ---- bookkeeping ----------------------------------------------------------
+
+        /** The first blade resting in the fan and off its rest, or -1. */
+        private int firstReady() {
+            long now = System.currentTimeMillis();
+            for (int i = 0; i < RAPIER_COUNT; i++) {
+                if (state[i] == BladeState.FAN && now >= restUntil[i]) return i;
+            }
+            return -1;
+        }
+
+        /** How many blades are in the fan and ready to spend — what the action bar shows. */
+        int fanCount() {
             long now = System.currentTimeMillis();
             int n = 0;
             for (int i = 0; i < RAPIER_COUNT; i++) {
-                if (formed[i] && !busy[i] && now >= cooldownUntil[i]) n++;
+                if (state[i] == BladeState.FAN && now >= restUntil[i]) n++;
             }
+            return n;
+        }
+
+        /** How many blades are out duelling. */
+        int sentCount() {
+            int n = 0;
+            for (int i = 0; i < RAPIER_COUNT; i++) if (state[i] == BladeState.DUEL) n++;
             return n;
         }
 
@@ -605,10 +999,13 @@ public final class SwordOfTearsWeapon implements Weapon {
             alive = false;
             for (int i = 0; i < RAPIER_COUNT; i++) {
                 if (blades[i] != null) { blades[i].remove(); blades[i] = null; }
+                marks[i] = null; // never hold a victim reference past the formation's life
             }
         }
 
-        /** A light-blue tear trail (shimmering dust + dripping water + a faint white glint) marking a flying rapier's path. */
+        // ---- vfx ------------------------------------------------------------------
+
+        /** A light-blue tear trail marking a flying rapier's path. Flights are short; this may be full-fat. */
         private static void trailTear(Location at) {
             World w = at.getWorld();
             w.spawnParticle(Particle.DUST_COLOR_TRANSITION, at, 2, 0.06, 0.06, 0.06, 0, TEAR_SHIMMER);
@@ -616,12 +1013,11 @@ public final class SwordOfTearsWeapon implements Weapon {
             w.spawnParticle(Particle.END_ROD, at, 1, 0.01, 0.01, 0.01, 0.004); // faint white sparkle
         }
 
-        /** A brighter arc trail for the ricochet/slash engagement flurry. */
-        private static void slashTrail(Location at) {
+        /** The duel's wheeling trail. Leaner than {@link #trailTear} — a duel has no time limit at all. */
+        private static void duelTrail(Location at) {
             World w = at.getWorld();
-            w.spawnParticle(Particle.DUST, at, 3, 0.12, 0.12, 0.12, 0, TEAR_FINE);
-            w.spawnParticle(Particle.CRIT, at, 2, 0.08, 0.08, 0.08, 0.05);
-            w.spawnParticle(Particle.END_ROD, at, 1, 0.02, 0.02, 0.02, 0.01);
+            w.spawnParticle(Particle.DUST, at, 2, 0.10, 0.10, 0.10, 0, TEAR_FINE);
+            w.spawnParticle(Particle.END_ROD, at, 1, 0.02, 0.02, 0.02, 0.006);
         }
 
         /** Rapier hanging tip-down, at rest. */
@@ -632,9 +1028,9 @@ public final class SwordOfTearsWeapon implements Weapon {
         }
 
         /**
-         * Rapier flattened tip-leading along {@code dir} — a lance/thrust pose (NOT held like a slash),
-         * so it visibly points forward at the target during its dart. Stretched a touch along the blade
-         * axis to read as a committed thrust.
+         * Rapier flattened tip-leading along {@code dir} — a lance/thrust pose (NOT held like a slash), so it
+         * visibly points forward at the target during its dart. Stretched a touch along the blade axis to read
+         * as a committed thrust.
          */
         private static Transformation pointing(Vector dir) {
             return new Transformation(new Vector3f(),
@@ -661,9 +1057,9 @@ public final class SwordOfTearsWeapon implements Weapon {
     private static final Particle.DustOptions TEAR_FINE = new Particle.DustOptions(TEAR, 0.5f);
     private static final Particle.DustTransition TEAR_SHIMMER = new Particle.DustTransition(TEAR, TEAR_PALE, 0.85f);
 
-    // The moveset is written from the code, not from the old how-to block: the ability names below are
-    // placeholders except "Double Tag" and "Recharge", which the class docs and the action bar already
-    // name. The chivalry line keeps the dim italic the old block gave it, in the helper's quote slot.
+    // The moveset is written from the code. The ability names are placeholders: "Rapier Formation",
+    // "Double Tag" and "Recharge" are kept because the code and the action bar already name them and each
+    // still does what it always did; the two new orders are named for what they plainly do.
     private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
             "Sword With Sharpened Tears",
             "The Knight of Despair",
@@ -677,14 +1073,29 @@ public final class SwordOfTearsWeapon implements Weapon {
             List.of(
                     new EgoLore.Ability("[Passive] Rapier Formation",
                             "Four rapiers wheel in a curved fan",
-                            "behind you while the sword is held."),
+                            "behind you while the sword is held.",
+                            "A rapier back in the fan rests 4s",
+                            "before it can be spent again."),
                     new EgoLore.Ability("[Left Click] Double Tag",
-                            "Landing a hit darts one ready rapier",
-                            "in to stab for 2, then ricochet around",
-                            "the body for 0.5 a slash. The sent",
-                            "rapier is spent, and rests 4 seconds."),
-                    new EgoLore.Ability("[Shift + Right-click] Recharge",
-                            "Calls every spent rapier back into the",
-                            "fan. Once per 45 seconds.")
+                            "Landing a hit darts one rapier out of",
+                            "the fan to stab the same body for 2,",
+                            "then glide home. Only rapiers in the",
+                            "fan answer — sent ones are busy."),
+                    new EgoLore.Ability("[Right Click] Send Rapier",
+                            "Sends one rapier to the foe you look",
+                            "at, up to 24 blocks. It duels there on",
+                            "its own — wheeling in to puncture for 2",
+                            "a second — until the mark falls, flees",
+                            "32 blocks, or you call it back. Press",
+                            "again to send the next."),
+                    new EgoLore.Ability("[Shift + Right-click] Converging Impale",
+                            "Every rapier still in the fan cages the",
+                            "foe you look at and drives in at once,",
+                            "5.5 a blade — 22 with all four, less",
+                            "with a fan you spent. Once per 45s."),
+                    new EgoLore.Ability("[Swap Hands] Recharge",
+                            "Calls every sent rapier back into the",
+                            "fan. Free, but the glide home is slow",
+                            "and each still owes its 4s rest.")
             ));
 }

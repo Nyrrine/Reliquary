@@ -28,8 +28,10 @@ import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -74,6 +76,14 @@ public final class SolitudeWeapon implements Weapon {
 
     /** Wielder -> their cylinder. The only per-player state this weapon keeps. */
     private final Map<UUID, Cyl> cylinders = new HashMap<>();
+
+    /**
+     * Bodies currently taking one of our own rounds. The manager dispatches {@link #onHit} for any hit
+     * whose damager is a player holding this weapon, which every bullet is — so this fence tells a shot
+     * apart from a swing. Held only across the single {@code damage()} call, in a try/finally, so it is
+     * empty between rounds and can never accumulate a dead mob's id.
+     */
+    private final Set<UUID> shooting = new HashSet<>();
 
     // ---- tuning: a patient, rusty six-shooter ----------------------------------------
 
@@ -152,9 +162,15 @@ public final class SolitudeWeapon implements Weapon {
      * would otherwise land a vanilla blow as well — and the blow, arriving first, stamps hurt-immunity that
      * swallows the round. The gun appears to stop working at exactly the range where it matters most.
      * Cancelling costs nothing: Solitude is a {@code ranged} model with no melee damage of its own.
+     *
+     * <p><b>The fence is not optional.</b> The manager dispatches this for <em>any</em> hit whose damager is
+     * a player holding this weapon — and a bullet is precisely that. Every round we fire comes straight back
+     * through here, so without {@link #shooting} the cancel would eat the shot it was meant to protect and
+     * the revolver would deal nothing whatsoever.
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        if (shooting.contains(victim.getUniqueId())) return; // our own round, not a swing
         event.setCancelled(true);
     }
 
@@ -353,7 +369,16 @@ public final class SolitudeWeapon implements Weapon {
             // The burst's rounds land 2 ticks apart — inside the victim's i-frames, which would swallow
             // every one after the first. Clear them so all six actually register.
             le.setNoDamageTicks(0);
-            le.damage(damage, player);
+            // The round's own damage comes back to us: the manager dispatches every hit whose damager is
+            // a player holding this weapon, and that is exactly what a bullet is. Without this fence
+            // onHit — which exists to stop the revolver being swung as a club — would cancel the shot the
+            // trigger just fired, and the gun would deal nothing at all.
+            shooting.add(le.getUniqueId());
+            try {
+                le.damage(damage, player);
+            } finally {
+                shooting.remove(le.getUniqueId());
+            }
             le.setVelocity(velocity);   // a void in the soul, not a wound — it never shoves them
             voidBloom(world, end);
         } else {

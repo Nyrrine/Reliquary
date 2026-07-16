@@ -71,6 +71,21 @@ import java.util.concurrent.ThreadLocalRandom;
  *       every petal doing it.</li>
  * </ul>
  *
+ * <h2>The cadence, and why the first shot is not eaten</h2>
+ * Left-click is the trigger, and the first click of a burst fires <b>synchronously, on the swing</b>:
+ * {@link #onSwing} calls {@link #fireBlossom} directly, the {@value #BLOSSOM_CADENCE_MS}ms gate is checked
+ * <em>before</em> the arrow is loosed rather than after, and {@link Bloom#lastBlossom} starts at {@code 0}
+ * so that gate is wide open on the first click of a life. There is no pre-roll, no draw, no charge-up and
+ * no scheduled delay anywhere on the path from click to arrow. The cadence is a delay <b>between</b>
+ * shots, never before the first one.
+ *
+ * <p>What used to <em>read</em> as a delay before the first shot was {@link #onHit}: clicking a body in
+ * arm's reach landed a vanilla melee blow as well as loosing the arrow, and the blow — arriving first —
+ * stamped ten ticks of hurt-immunity on the target that swallowed the arrow's damage outright. The first
+ * shot at a close target therefore did nothing at all and the weapon only appeared to "start" from the
+ * second. {@link #onHit} cancels that blow, and a cancelled damage event never stamps the i-frames, so
+ * the arrow lands. Nothing is given up: this is a {@code ranged} model with no melee damage of its own.
+ *
  * <p><b>Non-grief by construction.</b> [Magnificent End] "explodes upon contact", but nothing here ever
  * touches the world: the blast is a hand-rolled radius sweep ({@link Bolt#detonate}), never
  * {@code World.createExplosion}. No blocks are broken, no fire is lit, and the flowers it sprouts are
@@ -78,10 +93,12 @@ import java.util.concurrent.ThreadLocalRandom;
  * {@code victim.damage(...)} so other plugins can cancel it.
  *
  * <p><b>Lifecycle.</b> This weapon spawns <b>no entities at all</b> — each arrow is a lightweight
- * {@link Bolt} runnable drawing particles along its own flight, the same trick Laetitia uses. There is
+ * {@link Bolt} runnable drawing particles along its own flight, the same trick Laetitia uses, and
+ * [Magnificent End]'s bloom is a {@link BloomShow} runnable drawing particles where it went off. There is
  * therefore nothing that can orphan into the world and nothing to sweep; the only cleanup is cancelling
- * the in-flight bolts ({@link #inFlight}) on disable. Per-player state is one UUID-keyed {@link Bloom}
- * map, dropped on quit. {@link #onTick} bails the moment the crossbow leaves the main hand.
+ * the in-flight bolts ({@link #inFlight}) and the open blooms ({@link #shows}) on disable. Per-player
+ * state is one UUID-keyed {@link Bloom} map, dropped on quit. {@link #onTick} bails the moment the
+ * crossbow leaves the main hand.
  */
 public final class FaintAromaWeapon implements Weapon {
 
@@ -93,6 +110,27 @@ public final class FaintAromaWeapon implements Weapon {
 
     /** Every arrow currently in flight, so {@link #onDisable} can cancel the lot. No entities involved. */
     private final Set<Bolt> inFlight = new HashSet<>();
+
+    /** Every [Magnificent End] bloom currently open, so {@link #onDisable} can cancel those too. */
+    private final Set<BloomShow> shows = new HashSet<>();
+
+    /**
+     * Victims currently taking one of this weapon's own arrow or blast hits — the re-entrancy fence, and
+     * the reason {@link #onHit} does not cancel the weapon into uselessness.
+     *
+     * <p>{@link #onHit} cancels the wielder's melee blow. But a {@link Bolt}'s
+     * {@code victim.damage(amount, caster)} raises an {@code EntityDamageByEntityEvent} whose damager is
+     * that same caster, still holding this same crossbow — and {@code WeaponManager} dispatches that event
+     * back into {@link #onHit} with no cause filter of any kind. Without this fence every arrow cancels
+     * itself and the weapon deals <b>zero damage</b>, silently, while its flowers, petals, heal and
+     * Weakness all keep working: the failure is invisible to everything except a health bar.
+     *
+     * <p>Every weapon on this roster that both hooks {@code onHit} and calls {@code damage()} carries the
+     * same fence — Harmony's {@code ticking}, Wrist Cutter's, Justitia's {@code comboing}, Mimicry's
+     * {@code striking}. Entries live only for the duration of a single damage call, inside a try/finally,
+     * so this set is empty between hits and cannot retain a dead mob's UUID.
+     */
+    private final Set<UUID> ticking = new HashSet<>();
 
     // ---- [Passive] Unwithering Flower ----------------------------------------------
 
@@ -117,7 +155,10 @@ public final class FaintAromaWeapon implements Weapon {
 
     /**
      * Arrow strikes needed to fill the aroma charge. Every ninth strike the scent finally catches and
-     * lays its Weakness — the meter then empties and starts gathering again.
+     * lays its Weakness — the meter then empties and starts gathering again. <b>The ninth arrow that
+     * lands is the weakness shot</b>, which is the confirmed-correct reading: the counter increments
+     * first and triggers on reaching nine, so the arrow that carries the scent is the ninth itself and
+     * not the tenth. The bar therefore reads 8/9 when the next arrow will catch.
      *
      * <p>The count is the <b>wielder's</b>, not any one victim's, and it runs across every opponent they
      * hit: this is a charge meter like Logging's or Regret's, not a per-target debuff timer. Blossoming
@@ -135,7 +176,13 @@ public final class FaintAromaWeapon implements Weapon {
 
     // ---- [Left Click] Blossoming Fragrance -----------------------------------------
 
-    /** The spec's cadence: one lavender arrow every 1.5 seconds. */
+    /**
+     * The spec's cadence: one lavender arrow every 1.5 seconds.
+     *
+     * <p>Checked <b>before</b> the shot, against a {@link Bloom#lastBlossom} that starts at {@code 0} — so
+     * this is a floor on the gap <em>between</em> arrows and never a wait in front of the first one. See
+     * the class docs.
+     */
     private static final long BLOSSOM_CADENCE_MS = 1_500L;
 
     /** Per arrow, before petals. Modest on purpose — at a 1.5s cadence this is a steady poke, not burst. */
@@ -152,7 +199,8 @@ public final class FaintAromaWeapon implements Weapon {
      * Deliberately <b>shorter</b> than {@link #BLOSSOM_CADENCE_MS}: a single tap therefore looses exactly
      * one arrow (the window lapses long before the next is due), while a held left-click — whose swings
      * keep re-arming it — sustains the 1.5s stream. The window exists because holding left-click in air
-     * does not reliably repeat ARM_SWING, so onSwing alone can never sustain fire.
+     * does not reliably repeat ARM_SWING, so onSwing alone can never sustain fire. It is <b>not</b> a gate
+     * on the first shot: onSwing fires the arrow itself and only arms this for the ones after it.
      */
     private static final long HOLD_WINDOW_MS = 800L;
 
@@ -207,6 +255,35 @@ public final class FaintAromaWeapon implements Weapon {
     /** About 47 blocks of reach. */
     private static final int MAGNIFICENT_END_LIFE_TICKS = 18;
 
+    // ---- [Shift+Right-Click] Magnificent End: the bloom itself -----------------------
+    // This is the payoff for banking thirty petals and it spends every one of them, so it is allowed to
+    // be a show. It is NOT allowed to be a show by brute force: the whole thing is built out of lifetime
+    // and shape rather than raw counts, and every layer of it has a fixed per-tick ceiling that does not
+    // grow with the blast radius. See BloomShow for the arithmetic.
+
+    /** How long the bloom stays open: 24 ticks, 1.2s. The old version was one frame of 263 particles. */
+    private static final int MAG_SHOW_TICKS = 24;
+
+    /**
+     * Points on the sweeping shockwave ring, per tick. A <b>hard</b> ceiling rather than a density: the
+     * ring is drawn with this many motes whether its radius is 0.6 blocks or the full 4.5, so the cost of
+     * the widest frame is identical to the cost of the narrowest.
+     */
+    private static final int MAG_RING_POINTS = 24;
+
+    /** The petals that open out of the bud, and the motes drawn along each one: 30 a tick, capped. */
+    private static final int MAG_PETALS = 6;
+    private static final int MAG_PETAL_MOTES = 5;
+
+    /** How high the bud stands before its petals lie over. */
+    private static final double MAG_PETAL_HEIGHT = 2.4;
+
+    /** The petals are done opening this far into the show; after it, only the ring and the falling flowers. */
+    private static final double MAG_PETAL_PHASE = 0.5;
+
+    /** Fragrance haze at the epicentre — one packet a tick, thinning from this to 2 as the bloom settles. */
+    private static final int MAG_HAZE_MAX = 10;
+
     // ---- flight ---------------------------------------------------------------------
 
     /** Sub-step per movement slice — the anti-tunnel granularity, well under a block. */
@@ -246,6 +323,14 @@ public final class FaintAromaWeapon implements Weapon {
      */
     private static final Particle.DustTransition BLOOM_FADE =
             new Particle.DustTransition(C_LAVENDER, C_CYAN, 1.1f);
+
+    // The bloom's own palette. Same colours, drawn large: size is the one way to make a show read bigger
+    // that costs nothing at all — it is a float in a packet that was being sent anyway. Client clamps
+    // DustOptions size at 4.0, so these sit well inside it.
+    private static final Particle.DustOptions MAG_PETAL_DUST = new Particle.DustOptions(C_PETAL, 1.8f);
+    private static final Particle.DustOptions MAG_CYAN_DUST  = new Particle.DustOptions(C_CYAN, 1.6f);
+    private static final Particle.DustTransition MAG_FADE =
+            new Particle.DustTransition(C_LAVENDER, C_CYAN, 2.2f);
 
     /**
      * Vivid flowers sprout where the dull arrowhead lands. These are {@link Particle#ITEM} data — thrown
@@ -300,16 +385,49 @@ public final class FaintAromaWeapon implements Weapon {
         }
     }
 
+    // ---- damage ---------------------------------------------------------------------
+
+    /**
+     * Land one of this weapon's own hits on a body: fenced against {@link #onHit} re-entry, and routed
+     * through {@code damage()} so protection plugins can still cancel it.
+     *
+     * <p>The fence is not optional and it is not defensive programming — see {@link #ticking}. Without it
+     * the {@code damage()} call below comes straight back into {@link #onHit}, which cancels it, and the
+     * arrow deals nothing.
+     *
+     * <p>Deliberately does <b>not</b> clear the victim's hurt-immunity. Blossoming Fragrance is 30 ticks
+     * between arrows and can never collide with its own i-frames, and [Magnificent End]'s impact and blast
+     * are held apart on purpose (see {@link Bolt#detonate}) rather than being made to stack.
+     */
+    private void deal(LivingEntity victim, double amount, Player caster) {
+        if (victim.isDead() || !victim.isValid()) return;
+        UUID vid = victim.getUniqueId();
+        if (ticking.contains(vid)) return; // already inside this victim's damage call — never re-enter
+
+        ticking.add(vid);
+        try {
+            victim.damage(amount, caster);
+        } finally {
+            ticking.remove(vid);
+        }
+    }
+
     // ---- [Left Click] Blossoming Fragrance ------------------------------------------
 
     /**
      * The arrowhead is dull and it is not for hitting people with. Left-click is the trigger, so loosing
      * an arrow at a body within arm's reach would otherwise land a vanilla blow too — and the blow,
-     * arriving first, stamps hurt-immunity that swallows the arrow. Cancelling costs nothing: Faint Aroma
-     * is a {@code ranged} model with no melee damage of its own.
+     * arriving first, stamps hurt-immunity that swallows the arrow. That is the whole of the "the first
+     * shot gets eaten" symptom, and cancelling the blow is the whole of the fix: a cancelled damage event
+     * never stamps the i-frames in the first place. Cancelling costs nothing — Faint Aroma is a
+     * {@code ranged} model with no melee damage of its own.
+     *
+     * <p>Our own arrows and blasts re-enter this method through the manager's dispatch and are dropped by
+     * the {@link #ticking} fence; without that check this hook would cancel the weapon's entire offence.
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        if (ticking.contains(victim.getUniqueId())) return; // our own arrow or blast — not a melee blow
         event.setCancelled(true);
     }
 
@@ -317,6 +435,9 @@ public final class FaintAromaWeapon implements Weapon {
      * Left-click looses a Blossoming Fragrance arrow, subject to the {@value #BLOSSOM_CADENCE_MS}ms
      * cadence, and arms the hold window so {@link #onTick} can sustain the stream (see
      * {@link #HOLD_WINDOW_MS} for why the window is needed at all).
+     *
+     * <p>The arrow leaves from inside this method, on the swing, in the same tick as the click. Nothing
+     * is scheduled and nothing is waited on.
      */
     @Override
     public void onSwing(Player player) {
@@ -475,6 +596,10 @@ public final class FaintAromaWeapon implements Weapon {
      * Gather the scent by one strike and, on every {@value #AROMA_CHARGE_STRIKES}th, let it catch on the
      * body that took the arrow — {@link #applyFaintAroma}, then the meter empties and begins again.
      *
+     * <p>The increment happens first, so the trigger lands on the <b>ninth</b> arrow itself: the count
+     * reaches nine, the scent catches on the body holding that ninth arrow, and only then does the meter
+     * empty. Confirmed correct; do not re-index it.
+     *
      * <p>The charge belongs to the wielder and carries across targets, so a skirmisher who spreads their
      * arrows around still earns the scent; it simply lands on whoever happens to take the ninth.
      */
@@ -624,7 +749,7 @@ public final class FaintAromaWeapon implements Weapon {
                 breakGuard(blocker);
             }
 
-            victim.damage(shot.damage * multiplier, caster); // routed through damage() so it stays cancellable
+            deal(victim, shot.damage * multiplier, caster); // fenced, and still cancellable by other plugins
             flowerBurst(at);
 
             if (shot == Shot.MAGNIFICENT) {
@@ -650,7 +775,8 @@ public final class FaintAromaWeapon implements Weapon {
          * {@code World.createExplosion}: it breaks no blocks, lights no fire, and makes no permanent edit
          * of any kind. Every living body inside {@link #MAGNIFICENT_END_RADIUS} takes a linear-falloff
          * share of {@link #MAGNIFICENT_END_BLAST}, scaled by the petals that bought the shot, and every
-         * point of it goes through {@code damage()} so it stays cancellable.
+         * point of it goes through {@code damage()} so it stays cancellable. The show it puts on
+         * ({@link #explodeFx}) is particles and sound and nothing else.
          *
          * <p>{@code directHit} — the body the arrow physically struck, or null on a wall hit — is
          * <b>exempt</b>. It has already eaten the far larger {@link #MAGNIFICENT_END_IMPACT}, and vanilla
@@ -673,7 +799,7 @@ public final class FaintAromaWeapon implements Weapon {
                 if (dmg <= 0.0) continue;
 
                 if (le instanceof Player blocker && blocker.isBlocking()) breakGuard(blocker);
-                le.damage(dmg, caster);
+                deal(le, dmg, caster);
             }
         }
 
@@ -760,38 +886,152 @@ public final class FaintAromaWeapon implements Weapon {
     }
 
     /**
-     * [Magnificent End] opening: a flower the size of a house. A ring of petals sweeps outward at the
-     * blast radius, the whole thing washed lavender-to-cyan, and it rings rather than booms — beautiful,
-     * right up until you read the damage number.
+     * [Magnificent End] opening: the instant of contact, and then the bloom.
+     *
+     * <p>This is the flash and the core burst only — one tick of it. Everything after is handed to a
+     * {@link BloomShow}, which is where the actual show lives.
+     *
+     * <p>{@link Particle#FLASH} takes a {@link Color} on 26.1.2 — not a DustOptions, and not null. Handing
+     * it the wrong data class is a runtime crash rather than a compile error.
+     *
+     * <p>EXPLOSION_EMITTER and EXPLOSION are the vanilla <b>particles</b>, not an explosion: nothing here
+     * calls {@code createExplosion}, so no block is broken and no fire is lit.
      */
     private void explodeFx(Location at) {
         World world = at.getWorld();
-        ThreadLocalRandom rng = ThreadLocalRandom.current();
 
         world.spawnParticle(Particle.EXPLOSION_EMITTER, at, 1, 0, 0, 0, 0, null, FORCE_PARTICLES);
         world.spawnParticle(Particle.EXPLOSION, at, 6, 0.8, 0.8, 0.8, 0, null, FORCE_PARTICLES);
-        world.spawnParticle(Particle.DUST_COLOR_TRANSITION, at, 60, 1.2, 1.2, 1.2, 0,
-                BLOOM_FADE, FORCE_PARTICLES);
+        world.spawnParticle(Particle.FLASH, at, 1, 0.0, 0.0, 0.0, 0.0, C_PETAL, FORCE_PARTICLES);
 
-        // The petals of the bloom: a ring thrown out to the true blast radius, so the AoE reads honestly.
-        final int petals = 28;
-        for (int i = 0; i < petals; i++) {
-            double ang = (Math.PI * 2.0 * i) / petals;
-            for (double d = 0.8; d <= MAGNIFICENT_END_RADIUS; d += 0.9) {
-                Location p = at.clone().add(Math.cos(ang) * d, 0.15 + d * 0.12, Math.sin(ang) * d);
-                world.spawnParticle(Particle.DUST, p, 1, 0.05, 0.05, 0.05, 0,
-                        (i & 1) == 0 ? PETAL_DUST : CYAN_DUST, FORCE_PARTICLES);
-            }
-            ItemStack flower = FLOWERS[rng.nextInt(FLOWERS.length)];
-            Location rim = at.clone().add(Math.cos(ang) * MAGNIFICENT_END_RADIUS, 0.4,
-                    Math.sin(ang) * MAGNIFICENT_END_RADIUS);
-            world.spawnParticle(Particle.ITEM, rim, 2, 0.2, 0.2, 0.2, 0.08, flower, FORCE_PARTICLES);
+        BloomShow show = new BloomShow(at);
+        shows.add(show);
+        show.runTaskTimer(plugin, 0L, 1L);
+    }
+
+    /**
+     * [Magnificent End]'s bloom: a flower the size of a house, opening over {@value #MAG_SHOW_TICKS} ticks.
+     *
+     * <p>A bud of six petals stands straight up out of the impact, lies over as it opens, and settles into
+     * a full flower while a ring of pollen sweeps outward to the true blast radius and cut flowers drift
+     * down through it — the whole thing washed lavender-to-cyan, ringing rather than booming.
+     *
+     * <p><b>The show is bought with time and shape, not with counts.</b> The old bloom spent ~263 particles
+     * across ~175 packets in a <b>single tick</b>; this one peaks at ~76 particles across ~60 packets on
+     * its loudest tick and averages ~41 packets a tick, because every layer has a fixed ceiling:
+     * {@value #MAG_RING_POINTS} ring motes a tick (the ring never densifies as it widens — that is the
+     * whole trick), {@value #MAG_PETALS} x {@value #MAG_PETAL_MOTES} = 30 petal motes a tick and only for
+     * the first half, one haze packet a tick, and two flower packets every third tick. Whole show: ~1,130
+     * particles over 1.2s. It is the payoff for ~45s of accrual and can only fire at exactly
+     * {@value #PETAL_CAP} petals, so its frequency is self-limiting in a way its peak must not rely on.
+     *
+     * <p>Purely cosmetic. The damage was all dealt by {@link Bolt#detonate} before this ever started, and
+     * this class touches no block and spawns no entity.
+     */
+    private final class BloomShow extends BukkitRunnable {
+
+        private final World world;
+        private final Location at;
+        private int age = 0;
+        private boolean done = false;
+
+        BloomShow(Location at) {
+            this.world = at.getWorld();
+            this.at = at.clone();
         }
 
-        world.playSound(at, Sound.ENTITY_GENERIC_EXPLODE, 1.2f, 1.4f);   // pitched up: floral, not military
-        world.playSound(at, Sound.BLOCK_AMETHYST_BLOCK_CHIME, 1.0f, 0.7f);
-        world.playSound(at, Sound.BLOCK_NOTE_BLOCK_BELL, 0.9f, 0.6f);
-        world.playSound(at, Sound.ENTITY_PLAYER_ATTACK_CRIT, 0.8f, 0.6f);
+        @Override
+        public void run() {
+            if (age >= MAG_SHOW_TICKS) { stop(); return; }
+
+            double t = age / (double) MAG_SHOW_TICKS;
+            double ease = 1.0 - Math.pow(1.0 - t, 3.0);            // snaps open, then settles
+            double r = 0.6 + (MAGNIFICENT_END_RADIUS - 0.6) * ease;
+
+            ring(r);
+            if (t < MAG_PETAL_PHASE) petals(r, Math.min(1.0, ease * 1.6));
+            haze();
+            if (age % 3 == 0) fall(r);
+            chime();
+
+            age++;
+        }
+
+        /**
+         * The pollen shockwave: a ring sweeping out to the true blast radius, so the AoE reads honestly on
+         * screen. Fixed point count — a wider ring is a sparser ring, never a dearer one.
+         */
+        private void ring(double r) {
+            double spin = age * 0.09; // the bloom turns as it opens
+            for (int i = 0; i < MAG_RING_POINTS; i++) {
+                double a = (Math.PI * 2.0 * i) / MAG_RING_POINTS + spin;
+                Location p = at.clone().add(Math.cos(a) * r, 0.15 + r * 0.10, Math.sin(a) * r);
+                world.spawnParticle(Particle.DUST, p, 1, 0.06, 0.06, 0.06, 0,
+                        (i & 1) == 0 ? MAG_PETAL_DUST : MAG_CYAN_DUST, FORCE_PARTICLES);
+            }
+        }
+
+        /**
+         * The petals themselves. At {@code open = 0} they stand straight up out of the impact as a closed
+         * bud; as it climbs they lie over and out, arcing up mid-petal and dipping at the tip, until at
+         * {@code open = 1} they are a flower laid flat to the blast radius.
+         */
+        private void petals(double r, double open) {
+            double spin = age * 0.09;
+            for (int a = 0; a < MAG_PETALS; a++) {
+                double ang = (Math.PI * 2.0 * a) / MAG_PETALS + spin;
+                for (int j = 1; j <= MAG_PETAL_MOTES; j++) {
+                    double u = j / (double) MAG_PETAL_MOTES;                 // 0..1 out along the petal
+                    double reach = r * u * open;                             // how far it has laid over
+                    double lift = (1.0 - open) * u * MAG_PETAL_HEIGHT        // still stood up, as a bud
+                            + Math.sin(u * Math.PI) * 0.9 * open;            // arced over, once open
+                    Location p = at.clone().add(Math.cos(ang) * reach, 0.2 + lift, Math.sin(ang) * reach);
+                    world.spawnParticle(Particle.DUST_COLOR_TRANSITION, p, 1, 0.05, 0.05, 0.05, 0,
+                            MAG_FADE, FORCE_PARTICLES);
+                }
+            }
+        }
+
+        /** The fragrance hanging at the heart of it, thinning as the bloom settles. One packet a tick. */
+        private void haze() {
+            int n = Math.max(2, MAG_HAZE_MAX - age / 2);
+            world.spawnParticle(Particle.DUST_COLOR_TRANSITION, at, n, 0.6, 0.5, 0.6, 0,
+                    MAG_FADE, FORCE_PARTICLES);
+        }
+
+        /** Cut flowers drifting down through the bloom. Two packets, every third tick, and no more. */
+        private void fall(double r) {
+            ThreadLocalRandom rng = ThreadLocalRandom.current();
+            for (int i = 0; i < 2; i++) {
+                double a = rng.nextDouble(Math.PI * 2.0);
+                double d = rng.nextDouble(0.5, Math.max(0.6, r));
+                Location p = at.clone().add(Math.cos(a) * d, 0.4 + rng.nextDouble(1.4), Math.sin(a) * d);
+                world.spawnParticle(Particle.ITEM, p, 2, 0.15, 0.15, 0.15, 0.05,
+                        FLOWERS[rng.nextInt(FLOWERS.length)], FORCE_PARTICLES);
+            }
+        }
+
+        /** It rings rather than booms — a chime climbing as the flower widens, so the ear hears it open. */
+        private void chime() {
+            if (age == 0) {
+                world.playSound(at, Sound.ENTITY_GENERIC_EXPLODE, 1.2f, 1.4f); // pitched up: floral, not military
+                world.playSound(at, Sound.BLOCK_AMETHYST_BLOCK_CHIME, 1.0f, 0.7f);
+                world.playSound(at, Sound.ENTITY_PLAYER_ATTACK_CRIT, 0.8f, 0.6f);
+                return;
+            }
+            if (age % 4 != 0) return;
+            float p = Math.min(2.0f, 0.7f + (age / (float) MAG_SHOW_TICKS) * 1.1f);
+            world.playSound(at, Sound.BLOCK_NOTE_BLOCK_BELL, 0.5f, p);
+            world.playSound(at, Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.35f, Math.max(0.5f, p * 0.8f));
+        }
+
+        /** End this bloom exactly once: untrack it, then cancel its task. Safe to call twice. */
+        private void stop() {
+            if (done) return;
+            done = true;
+            shows.remove(this);
+            cancel();
+        }
     }
 
     /**
@@ -831,7 +1071,8 @@ public final class FaintAromaWeapon implements Weapon {
      *
      * <p>While the swing-armed hold window is live, this drives the {@value #BLOSSOM_CADENCE_MS}ms
      * Blossoming Fragrance cadence; see {@link #HOLD_WINDOW_MS} for why the stream is driven from here
-     * rather than from onSwing.
+     * rather than from onSwing. The first arrow of a burst never comes from here — onSwing has already
+     * loosed it by the time this runs.
      */
     @Override
     public boolean onTick(Player player, long tick) {
@@ -851,6 +1092,10 @@ public final class FaintAromaWeapon implements Weapon {
      * bar is this roster's readout, so both live there: the petals gauge with the live +N% it is worth
      * and the unlock cue once [Magnificent End] is off the leash, then the aroma charge gathering
      * toward its next Weakness.
+     *
+     * <p>The aroma reads 0/9 through 8/9 and never 9/9 — that is correct, not an off-by-one: the ninth
+     * arrow triggers the scent and empties the meter in the same instant, so 8/9 means "the next one
+     * catches".
      */
     private void renderBar(Player player, Bloom bloom) {
         boolean bloomed = bloom.petals >= PETAL_CAP;
@@ -949,17 +1194,22 @@ public final class FaintAromaWeapon implements Weapon {
     @Override
     public void onQuit(UUID id) {
         blooms.remove(id); // petals, cadence gates and cooldowns all go with them
+        ticking.remove(id); // only ever set if the quitter was themselves struck by an arrow
         // In-flight arrows need no reaping here: each Bolt checks its caster is still online every tick
         // and stops itself. Nothing of this weapon exists in the world for them to leave behind.
     }
 
     @Override
     public void onDisable() {
-        // Cancel every arrow still in the air. Iterate a copy — stop() untracks as it goes.
+        // Cancel every arrow still in the air and every bloom still open. Iterate copies — stop()
+        // untracks as it goes.
         for (Bolt bolt : new ArrayList<>(inFlight)) bolt.stop();
         inFlight.clear();
+        for (BloomShow show : new ArrayList<>(shows)) show.stop();
+        shows.clear();
         blooms.clear();
-        // No entity sweep: this weapon spawns no entities at all. Its arrows are runnables drawing
-        // particles, so there is nothing that can survive a reload or litter the world.
+        ticking.clear();
+        // No entity sweep: this weapon spawns no entities at all. Its arrows and its blooms are runnables
+        // drawing particles, so there is nothing that can survive a reload or litter the world.
     }
 }

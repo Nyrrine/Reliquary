@@ -102,6 +102,14 @@ public final class HornetWeapon implements Weapon {
     /** Wielder -> their twin magazines, stance, strike tallies and reload clock. The only state this weapon keeps. */
     private final Map<UUID, Hive> hives = new HashMap<>();
 
+    /**
+     * Bodies currently taking one of our own rounds. The manager dispatches {@link #onHit} for any hit
+     * whose damager is a player holding this weapon, which every spore round and every pellet is — so this
+     * fence is what tells a shot apart from a swing. Held only across the single {@code damage()} call, in
+     * a try/finally, so it is empty between rounds and can never accumulate a dead mob's id.
+     */
+    private final Set<UUID> shooting = new HashSet<>();
+
     // ---- tuning: magazines & the shared reload ------------------------------------
     private static final int  SPORE_MAG    = 10;     // spore rounds per magazine (rifle)
     private static final int  BUCKSHOT_MAG = 6;      // buckshot rounds per magazine (shotgun)
@@ -278,9 +286,15 @@ public final class HornetWeapon implements Weapon {
      * <p>Cancelling the swing's damage settles it: the blow never lands, no i-frames are stamped, and the
      * round that {@link #onSwing} fires on the very same click is the only thing that touches them. Nothing
      * is lost — Hornet is a {@code ranged} model with no melee damage of its own to give up.
+     *
+     * <p><b>The fence is not optional.</b> The manager dispatches this for <em>any</em> hit whose damager is
+     * a player holding this weapon, and every round we fire is exactly that — so our own bullets arrive back
+     * here. Without {@link #shooting} the cancel would eat the shot it exists to protect, and the gun would
+     * deal nothing at all.
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        if (shooting.contains(victim.getUniqueId())) return; // our own round, not a swing
         event.setCancelled(true);
     }
 
@@ -384,7 +398,12 @@ public final class HornetWeapon implements Weapon {
         drawTracer(world, muzzle, end, SPORE_DUST, SPORE_FINE, 0.55);
 
         if (victim != null) {
-            victim.damage(RIFLE_DAMAGE, player);   // routed so other plugins can cancel
+            shooting.add(victim.getUniqueId());
+            try {
+                victim.damage(RIFLE_DAMAGE, player);   // routed so other plugins can cancel
+            } finally {
+                shooting.remove(victim.getUniqueId());
+            }
             sporeImpactFx(world, end);
         }
         return victim;
@@ -478,7 +497,12 @@ public final class HornetWeapon implements Weapon {
             // swallowed whole. A full point-blank blast landed 1.8 instead of 10.8, which read in play as
             // "buckshot does half a heart". The pellets aren't weak; they were never arriving.
             le.setNoDamageTicks(0);
-            le.damage(BUCKSHOT_PELLET_DAMAGE, player);   // routed so other plugins can cancel
+            shooting.add(le.getUniqueId());
+            try {
+                le.damage(BUCKSHOT_PELLET_DAMAGE, player);   // routed so other plugins can cancel
+            } finally {
+                shooting.remove(le.getUniqueId());
+            }
             buckImpactFx(world, at);
             bitten.add(le.getUniqueId());
             out.add(le);

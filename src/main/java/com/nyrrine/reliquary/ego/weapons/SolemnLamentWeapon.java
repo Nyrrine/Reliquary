@@ -78,6 +78,14 @@ public final class SolemnLamentWeapon implements Weapon {
     /** Wielder -> their twin magazines + reload timer. The only per-player state this weapon keeps. */
     private final Map<UUID, Mag> mags = new HashMap<>();
 
+    /**
+     * Bodies currently taking one of our own pellets. The manager dispatches {@link #onHit} for any hit
+     * whose damager is a player holding this weapon, which every pellet is — so this fence is what tells a
+     * shot apart from a swing. Held only across the single {@code damage()} call, in a try/finally, so it
+     * is empty between shots and can never accumulate a dead mob's id.
+     */
+    private final Set<UUID> shooting = new HashSet<>();
+
     /** Live "True…" meme image displays, tracked so none can ever leak. Removed on expiry/quit/disable. */
     private final Set<ItemDisplay> memeDisplays = new HashSet<>();
 
@@ -171,9 +179,15 @@ public final class SolemnLamentWeapon implements Weapon {
      * hurt-immunity that swallows the pellets. Mourners at close quarters found the gun simply stopped
      * working. Cancelling costs nothing: Solemn Lament is a {@code ranged} model with no melee damage of
      * its own.
+     *
+     * <p><b>The fence is not optional.</b> The manager dispatches this for <em>any</em> hit whose damager is
+     * a player holding this weapon, and every pellet is exactly that — so our own shot arrives back here.
+     * Without {@link #shooting} the cancel would eat the pellets it exists to protect, and the pistols would
+     * deal nothing at all.
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        if (shooting.contains(victim.getUniqueId())) return; // our own pellet, not a swing
         event.setCancelled(true);
     }
 
@@ -452,7 +466,12 @@ public final class SolemnLamentWeapon implements Weapon {
             // swallowed. A point-blank shot landed 3.8 of its 11.4 and had done since the day it was
             // written; the pellets were never weak, they were never arriving.
             le.setNoDamageTicks(0);
-            le.damage(PELLET_DAMAGE, player);
+            shooting.add(le.getUniqueId());
+            try {
+                le.damage(PELLET_DAMAGE, player);
+            } finally {
+                shooting.remove(le.getUniqueId());
+            }
             le.setVelocity(velocity);              // no knockback — the shot never moves the target
             impactFx(world, end, black);
         } else {

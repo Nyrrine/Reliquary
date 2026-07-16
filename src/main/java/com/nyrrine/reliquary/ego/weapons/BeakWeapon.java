@@ -233,6 +233,13 @@ public final class BeakWeapon implements Weapon {
     /** Deal the peck with zero knockback — capture the victim's velocity, damage, then restore it. */
     private void damageNoKnockback(LivingEntity victim, Player source) {
         Vector velocity = victim.getVelocity();
+        // The bird pecks faster than vanilla lets a body be hurt. A body may only take damage once every
+        // ten ticks, and a Multishot burst puts three pecks two ticks apart into whatever is in front of
+        // it — so the second and third died against the first one's hurt-immunity and Multishot bought
+        // the wielder nothing at all against a single target. Piercing had the same problem in miniature,
+        // since one pellet can punch through two bodies standing in a line. Each peck clears the window it
+        // is about to use; that is what makes it a burst rather than a rumour of one.
+        victim.setNoDamageTicks(0);
         victim.damage(DAMAGE, source);
         victim.setVelocity(velocity);
         peckSound(victim);
