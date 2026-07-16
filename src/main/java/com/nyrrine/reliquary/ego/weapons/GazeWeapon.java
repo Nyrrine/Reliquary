@@ -1,0 +1,569 @@
+package com.nyrrine.reliquary.ego.weapons;
+
+import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.Weapon;
+import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
+import com.nyrrine.reliquary.ego.EgoModels;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.TextColor;
+import org.bukkit.Color;
+import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
+import org.bukkit.World;
+import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.util.Vector;
+
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
+
+/**
+ * Gaze — Schadenfreude. A WAW-tier Lobotomy Corp E.G.O weapon: a blade carried by something that watches
+ * through a keyhole and is <em>delighted</em> by what it sees. It never blinks, so nothing gets behind
+ * you; it never looks away, so the longer you keep hurting things the happier it gets.
+ *
+ * <p><b>It is a poor sword and a superb one, depending entirely on what you have fed it.</b>
+ * {@link EgoModels#GAZE} is stamped at a feeble 2.4 atk / 1.6 spd, and <b>Constant Surveillance</b> lands
+ * every attack twice — but only the first cut carries your enchantments; the second is the bare blade
+ * (see {@link #BARE_CUT}). Bare, a swing is 4.8 against a netherite sword's 8, and it should feel like
+ * it. Sharpened, and only once Delight is full, it reaches 10.92 — level with the band, never past it.
+ * The doubling <em>is</em> the damage: nothing here adds flat bonus damage on top of the base, and
+ * nothing should be added later to "fix" the low number on the tooltip.
+ *
+ * <ul>
+ *   <li><b>[Passive] Schadenfreude</b> — every attack feeds the watcher a stack of <b>Delight</b>
+ *       ({@link #DAMAGE_PER_STACK} more damage each, capped at {@link #MAX_DELIGHT} = +40%). Go
+ *       {@link #DECAY_GRACE_MS} without landing a hit and it loses interest: stacks then <em>drain</em>
+ *       steadily, one per {@link #DECAY_INTERVAL_MS}, rather than vanishing all at once (see the decay
+ *       note below). Delight is per-wielder, never per-victim.</li>
+ *   <li><b>[Left Click] Constant Surveillance</b> — attacks hit 2 times. The vanilla swing is hit one
+ *       (scaled by Delight via {@code event.setDamage}); hit two is a scripted follow-up
+ *       {@link #FOLLOW_UP_DELAY_TICKS} ticks later carrying {@link #BARE_CUT} — the blade alone, lifted
+ *       by Delight but never by an enchantment. One stack per <em>attack</em>, not per hit — the
+ *       follow-up feeds nothing.</li>
+ *   <li><b>[Right Click] Fixed Stare</b> — for {@link #FIXED_STARE_MS} the watcher refuses to look away:
+ *       Delight cannot decay and builds at {@link #STARE_STACK_MULT}x. {@link #FIXED_STARE_COOLDOWN_MS}
+ *       cooldown, read on the action bar in whole seconds.</li>
+ * </ul>
+ *
+ * <p><b>Two mechanics carry this whole weapon and both are easy to get silently wrong:</b>
+ *
+ * <p><i>i-frames.</i> Vanilla stamps the victim with 20 ticks of hurt-immunity <em>before</em> the damage
+ * event fires, and a same-size follow-up inside that window is swallowed whole (the "multi-hit that only
+ * lands once"). {@link #strikeAgain} therefore zeroes {@code noDamageTicks} immediately before hit two —
+ * and, just as importantly, <em>puts them back</em> to where a single swing would have left them
+ * ({@link #VANILLA_HIT_IFRAMES} minus the follow-up's delay). Without that restore the follow-up's own
+ * fresh 20 ticks would outlast the wielder's 1.6-speed swing timer (12.5 ticks) and silently eat every
+ * other swing. The victim ends up exactly as protected as one ordinary hit would have left them.
+ *
+ * <p><i>Re-entrancy.</i> Hit two is dealt with {@code victim.damage(..., attacker)}, which is a melee hit
+ * and re-enters {@link #onHit} through the manager's dispatch. The {@link #reentry} fence (keyed by
+ * wielder, held only across the damage call) makes that re-entry a no-op — otherwise every swing doubles
+ * into a doubling into a doubling and the server locks up on the first mob.
+ *
+ * <p>Costs nothing when idle: no entities are ever spawned (the watcher is only ever particles and sound),
+ * state is a single per-wielder record plus at most a couple of two-tick follow-up tasks, decay is
+ * computed lazily from a timestamp rather than by a ticking task, and {@link #onTick} disengages the
+ * moment the sword leaves the main hand.
+ */
+public final class GazeWeapon implements Weapon {
+
+    private final Reliquary plugin;
+
+    /** PDC key marking an ItemStack as Gaze. */
+    private final NamespacedKey key;
+
+    // ---- Delight tuning -----------------------------------------------------------
+
+    /** Damage added per stack of Delight. 0.02 -> +2% each, +40% at the cap. */
+    private static final double DAMAGE_PER_STACK = 0.02;
+    /** Hard cap on Delight. 20 stacks -> +40%. */
+    private static final int MAX_DELIGHT = 20;
+
+    /**
+     * What hit two carries: the blade's own stamped damage ({@link EgoModels#GAZE}), with no enchantment
+     * on it. Delight still lifts it; Sharpness never does.
+     *
+     * <p>This is the load-bearing number of the whole weapon, so it is worth saying why. An enchantment
+     * adds a flat amount to <em>each</em> instance of damage, and Gaze deals two — so a follow-up that
+     * copied hit one would pay Sharpness V's +3 twice, and a swing at full Delight would reach 18 against
+     * a netherite sword's 11. Paying it once is what lets the base stay honest: bare, a swing is
+     * {@code 2 x 2.4 = 4.8}, feeble next to a netherite sword's 8, which is the point — the thing behind
+     * the keyhole is not much of a swordsman. Sharpened and fully delighted it reaches
+     * {@code 1.4 x (5.4 + 2.4) = 10.92}, level with the band and never past it. The weapon is weak in the
+     * hand and dangerous only once you have fed it.
+     */
+    private static final double BARE_CUT = EgoModels.GAZE.atk();
+    /** Stacks fed to the watcher by one attack. One per ATTACK — the follow-up hit feeds nothing. */
+    private static final int STACKS_PER_ATTACK = 1;
+
+    /** Go this long without LANDING a hit and the watcher starts losing interest. Spec: 3 seconds. */
+    private static final long DECAY_GRACE_MS = 3_000L;
+    /**
+     * Once the grace has lapsed, Delight drains one stack per this long — a steady bleed-off rather than
+     * an all-at-once wipe. A full 20 stacks takes 10s to drain, so a wielder who breaks off to reposition
+     * comes back with most of their Delight intact; the spec left the shape open and this is the kinder,
+     * more readable of the two (the gauge visibly slides instead of blinking to empty).
+     */
+    private static final long DECAY_INTERVAL_MS = 500L;
+
+    // ---- Constant Surveillance tuning ---------------------------------------------
+
+    /**
+     * How long after the vanilla swing hit two lands. Two ticks reads as a double-tap rather than one
+     * mushed hit, and must stay under ~2.5: hit two re-stamps the victim's i-frames, and the wielder's
+     * next swing at 1.6 attack speed arrives at ~12.5 ticks — see {@link #VANILLA_HIT_IFRAMES}.
+     */
+    private static final long FOLLOW_UP_DELAY_TICKS = 2L;
+    /**
+     * The hurt-immunity vanilla stamps on a struck entity. After the follow-up we restore the victim to
+     * this minus the follow-up's delay, i.e. exactly the i-frame curve a single swing would have left —
+     * the second hit must not buy the victim extra invulnerability against anyone.
+     */
+    private static final int VANILLA_HIT_IFRAMES = 20;
+
+    // ---- Fixed Stare tuning -------------------------------------------------------
+
+    /** The window during which the watcher refuses to blink: no decay, double stacking. Spec: 5 seconds. */
+    private static final long FIXED_STARE_MS = 5_000L;
+    /** Fixed Stare cooldown. Spec: 15 seconds. Displayed in whole seconds, never milliseconds. */
+    private static final long FIXED_STARE_COOLDOWN_MS = 15_000L;
+    /** Stack rate multiplier inside the Fixed Stare window — "builds twice as fast". */
+    private static final int STARE_STACK_MULT = 2;
+
+    // ---- state (O(wielders); no victim-keyed maps to leak) ------------------------
+
+    /** Wielder -> their watcher's state. Players only, so quit/disable prune it completely. */
+    private final Map<UUID, Delight> states = new HashMap<>();
+
+    /**
+     * Wielders whose follow-up hit is resolving right now. That {@code victim.damage} re-enters
+     * {@link #onHit}; while the id sits in here onHit is a no-op, so a swing can never double itself
+     * again or feed a second stack. Held only across the damage call, in a try/finally.
+     */
+    private final Set<UUID> reentry = new HashSet<>();
+
+    /** Follow-up strikes in flight (each lives {@link #FOLLOW_UP_DELAY_TICKS}); cancelled on disable. */
+    private final Set<FollowUp> followUps = new HashSet<>();
+
+    /**
+     * One wielder's watcher.
+     *
+     * <p>Decay is lazy: nothing ticks it down. {@link #decayAnchor} is the moment the watcher last had
+     * its appetite fed (a landed hit), and {@link #delight} works out how much has drained since on every
+     * read. That keeps the weapon free when sheathed and keeps stacks correct across a hotbar swap, with
+     * no task and no clock of our own.
+     */
+    private static final class Delight {
+        /** Current stacks, already drained up to the last {@link #delight} read. */
+        private int stacks;
+        /** Epoch-ms the decay grace is measured from — bumped on every landed attack. */
+        private long decayAnchor;
+        /** Epoch-ms the Fixed Stare window ends. Decay is frozen until then. */
+        private long stareUntil;
+        /** Epoch-ms Fixed Stare may be cast again. */
+        private long cooldownReadyAt;
+    }
+
+    public GazeWeapon(Reliquary plugin) {
+        this.plugin = plugin;
+        this.key = new NamespacedKey(plugin, "gaze");
+    }
+
+    @Override
+    public String id() {
+        return "gaze";
+    }
+
+    @Override
+    public boolean matches(ItemStack item) {
+        if (item == null || item.getType() != EgoModels.GAZE.material()) return false;
+        ItemMeta m = item.getItemMeta();
+        return m != null && m.getPersistentDataContainer().has(key, PersistentDataType.BYTE);
+    }
+
+    @Override
+    public ItemStack createItem() {
+        ItemStack item = new ItemStack(EgoModels.GAZE.material());
+        ItemMeta meta = item.getItemMeta();
+
+        TOOLTIP.applyTo(meta);
+        meta.setEnchantmentGlintOverride(false);
+        meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
+        EgoModels.stampWeapon(meta, EgoModels.GAZE);
+
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    // ---- the Delight ledger --------------------------------------------------------
+
+    /** This wielder's watcher, created on first sight of them. */
+    private Delight state(UUID id) {
+        return states.computeIfAbsent(id, k -> {
+            Delight d = new Delight();
+            d.decayAnchor = System.currentTimeMillis();
+            return d;
+        });
+    }
+
+    /**
+     * The wielder's Delight right now, draining anything the clock has taken since the last read.
+     *
+     * <p>Decay is measured from the later of {@link Delight#decayAnchor} (their last landed hit) and
+     * {@link Delight#stareUntil} (the end of a Fixed Stare) — which is what makes "cannot decay" during
+     * the stare fall out for free, with no task and no special-casing: while the window is open, the
+     * point decay would start from is still in the future.
+     *
+     * <p>The anchor is advanced by whole drained steps only, so the leftover fraction of an interval
+     * carries into the next read and the drain stays smooth instead of double-charging or stalling.
+     */
+    private int delight(Delight d, long now) {
+        long from = Math.max(d.decayAnchor, d.stareUntil);
+        if (now <= from) return d.stacks;               // inside the stare window — frozen
+
+        long idle = now - from;
+        if (idle <= DECAY_GRACE_MS) return d.stacks;    // still within the 3s grace — the watcher waits
+
+        long steps = (idle - DECAY_GRACE_MS) / DECAY_INTERVAL_MS;
+        if (steps <= 0) return d.stacks;
+
+        d.stacks = (int) Math.max(0L, d.stacks - steps);
+        d.decayAnchor = d.stacks == 0 ? now : from + steps * DECAY_INTERVAL_MS;
+        return d.stacks;
+    }
+
+    /** Feed the watcher this attack's stacks (double inside a Fixed Stare) and reset the decay grace. */
+    private void feed(Delight d, long now) {
+        int gain = now < d.stareUntil ? STACKS_PER_ATTACK * STARE_STACK_MULT : STACKS_PER_ATTACK;
+        d.stacks = Math.min(MAX_DELIGHT, d.stacks + gain);
+        d.decayAnchor = now; // a landed hit — the watcher is fed, the 3s grace restarts
+    }
+
+    // ---- [Left Click] Constant Surveillance -----------------------------------------
+
+    /**
+     * A melee hit landed. The vanilla swing is hit one — we only scale it by the wielder's Delight (the
+     * base 3.5 is intentionally half a sword; see the class docs) — and hit two is scheduled as an
+     * identical scripted strike a couple of ticks behind it. The attack then feeds the watcher one stack.
+     *
+     * <p>The multiplier is snapshotted <em>before</em> this attack's own stack lands, so both halves of a
+     * swing hit for the same number and a stack earned here pays out from the next attack on. Our own
+     * follow-up re-enters here through the manager's dispatch and is fenced out by {@link #reentry}: it
+     * neither doubles again nor feeds a stack.
+     */
+    @Override
+    public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        UUID aid = attacker.getUniqueId();
+        if (reentry.contains(aid)) return; // our own follow-up — never doubles or feeds from within
+
+        long now = System.currentTimeMillis();
+        Delight d = state(aid);
+
+        int stacks = delight(d, now);
+        double rate = 1.0 + stacks * DAMAGE_PER_STACK;
+        event.setDamage(event.getDamage() * rate);   // hit one — the vanilla swing, enchants and all
+
+        // Hit two is the watcher's own cut and knows nothing of your enchantments — it carries the bare
+        // blade, never what you laid on it. That asymmetry is the whole balance; see BARE_CUT.
+        scheduleFollowUp(attacker, victim, BARE_CUT * rate);
+
+        boolean wasCapped = stacks >= MAX_DELIGHT;
+        feed(d, now);
+        if (!wasCapped && d.stacks >= MAX_DELIGHT) delightedCue(attacker);
+
+        watchedFx(victim);
+        sendDelightBar(attacker, now);
+    }
+
+    /** Queue hit two. Kept in {@link #followUps} so a shutdown mid-flight can cancel it. */
+    private void scheduleFollowUp(Player attacker, LivingEntity victim, double damage) {
+        FollowUp strike = new FollowUp(attacker.getUniqueId(), victim, damage);
+        followUps.add(strike);
+        strike.runTaskLater(plugin, FOLLOW_UP_DELAY_TICKS);
+    }
+
+    /** Hit two of one attack: the same strike again, a breath later, from the thing behind the keyhole. */
+    private final class FollowUp extends BukkitRunnable {
+        private final UUID attackerId;
+        private final LivingEntity victim;
+        private final double damage;
+
+        private FollowUp(UUID attackerId, LivingEntity victim, double damage) {
+            this.attackerId = attackerId;
+            this.victim = victim;
+            this.damage = damage;
+        }
+
+        @Override
+        public void run() {
+            followUps.remove(this);
+            Player attacker = plugin.getServer().getPlayer(attackerId);
+            if (attacker == null || victim.isDead() || !victim.isValid()) return; // hit one already finished it
+            strikeAgain(attacker, victim, damage);
+        }
+    }
+
+    /**
+     * Land hit two.
+     *
+     * <p>Hit one left the victim stamped with {@link #VANILLA_HIT_IFRAMES} ticks of hurt-immunity, and an
+     * equal-size hit inside that window is swallowed entirely — so the i-frames are zeroed immediately
+     * before the strike. They are then restored to the curve a <em>single</em> swing would have left
+     * (20 minus the ticks we waited), which is the part that is easy to miss: leaving the follow-up's own
+     * fresh 20 ticks in place would run past the wielder's ~12.5-tick swing timer and silently swallow
+     * every other swing, and would hand the victim free invulnerability against everyone else too.
+     *
+     * <p>Knockback is undone: the swing already shoved them once, and Constant Surveillance is a second
+     * <em>cut</em>, not a second shove. Damage goes through {@code victim.damage(...)} so other plugins
+     * can still cancel it, inside the {@link #reentry} fence so it cannot recurse.
+     *
+     * <p>No durability is taken here on purpose. The follow-up is part of an ordinary melee swing, not an
+     * ability use, and vanilla already charged the swing its point of wear — charging again would wear
+     * Gaze at twice the rate of every other sword in the vault.
+     */
+    private void strikeAgain(Player attacker, LivingEntity victim, double damage) {
+        UUID aid = attacker.getUniqueId();
+
+        victim.setNoDamageTicks(0);            // or hit one's i-frames eat this strike whole
+        Vector preVel = victim.getVelocity();  // a second cut, not a second shove
+
+        reentry.add(aid); // fence: this damage re-enters onHit through the manager's dispatch
+        try {
+            if (!attacker.equals(victim)) {
+                victim.damage(damage, attacker);
+            } else {
+                victim.damage(damage);
+            }
+        } finally {
+            reentry.remove(aid);
+            victim.setVelocity(preVel);
+            // Leave the victim exactly as protected as one swing would have: the follow-up must not
+            // extend their invulnerability past the wielder's next swing (or anyone else's).
+            victim.setNoDamageTicks(Math.max(0, VANILLA_HIT_IFRAMES - (int) FOLLOW_UP_DELAY_TICKS));
+        }
+
+        secondCutFx(victim);
+    }
+
+    // ---- [Right Click] Fixed Stare --------------------------------------------------
+
+    /**
+     * Right-click: for {@link #FIXED_STARE_MS} the watcher fixes on you and will not look away — Delight
+     * cannot decay and every attack feeds it double. On cooldown this is a quiet no-op with the remaining
+     * wait in whole seconds. Opening the stare is an ability use, so it wears the main hand.
+     */
+    @Override
+    public void onInteract(Player player, boolean sneaking) {
+        if (!matches(player.getInventory().getItemInMainHand())) return;
+
+        long now = System.currentTimeMillis();
+        Delight d = state(player.getUniqueId());
+
+        if (now < d.cooldownReadyAt) {
+            player.sendActionBar(EgoHud.cooldown("Fixed Stare", d.cooldownReadyAt - now, FAINT_HUD));
+            player.playSound(player.getLocation(), Sound.BLOCK_WOODEN_TRAPDOOR_CLOSE, 0.35f, 0.6f);
+            return;
+        }
+
+        delight(d, now);                    // settle any pending drain before the window freezes it
+        d.stareUntil = now + FIXED_STARE_MS;
+        d.cooldownReadyAt = now + FIXED_STARE_COOLDOWN_MS;
+
+        EgoDurability.wearMainHand(player); // an ability use — vanilla swings wear on their own
+
+        openKeyholeFx(player);
+        sendDelightBar(player, now);
+    }
+
+    // ---- action bar -----------------------------------------------------------------
+
+    /**
+     * While Gaze is held, keep the Delight gauge and the Fixed Stare state on the action bar. Returns
+     * false the instant the sword leaves the main hand — anything else would tick this player forever.
+     * On the way out, a wielder whose watcher has nothing left to remember is forgotten entirely.
+     */
+    @Override
+    public boolean onTick(Player player, long tick) {
+        UUID id = player.getUniqueId();
+        long now = System.currentTimeMillis();
+
+        if (!matches(player.getInventory().getItemInMainHand())) {
+            Delight d = states.get(id);
+            if (d != null && delight(d, now) <= 0 && now >= d.stareUntil && now >= d.cooldownReadyAt) {
+                states.remove(id); // fully idle — don't hold a record for a sheathed sword
+            }
+            return false;
+        }
+
+        sendDelightBar(player, now);
+        return true;
+    }
+
+    /** {@code [▮▮▮▮▯▯▯▯▯▯]  Delight 8  +16%   Fixed Stare — ready} — stacks, bonus, and the stare state. */
+    private void sendDelightBar(Player player, long now) {
+        Delight d = states.get(player.getUniqueId());
+        if (d == null) return;
+
+        int stacks = delight(d, now);
+        int pct = (int) Math.round(stacks * DAMAGE_PER_STACK * 100.0);
+
+        Component stare;
+        if (now < d.stareUntil) {
+            stare = EgoHud.status("Watching — " + upSeconds(d.stareUntil - now) + "s", STARE_HUD);
+        } else if (now < d.cooldownReadyAt) {
+            stare = EgoHud.cooldown("Fixed Stare", d.cooldownReadyAt - now, FAINT_HUD);
+        } else {
+            stare = EgoHud.ready("Fixed Stare", FAINT_HUD);
+        }
+
+        Component label = EgoHud.status("Delight " + stacks + "  +" + pct + "%", DELIGHT_HUD)
+                .append(EgoHud.status("   ", FAINT_HUD))
+                .append(stare);
+        player.sendActionBar(EgoHud.gauge(DELIGHT_HUD, stacks / (double) MAX_DELIGHT, label));
+    }
+
+    /** Whole seconds, rounded up and never zero — the house rule for anything with a clock on it. */
+    private static long upSeconds(long ms) {
+        return Math.max(1L, (ms + 999L) / 1000L);
+    }
+
+    // ---- SFX / VFX ------------------------------------------------------------------
+    // Quiet and voyeuristic, never loud: a dark palette, low counts, and sounds that sit under the fight
+    // rather than on top of it. Every spawnParticle below is DUST (DustOptions), DUST_COLOR_TRANSITION
+    // (DustTransition), or a data-less particle — the data class is a runtime crash, not a compile error.
+
+    /** Hit one: a soft prickle of being looked at — dark motes gathering on the struck body. */
+    private void watchedFx(LivingEntity victim) {
+        World world = victim.getWorld();
+        Location body = victim.getLocation().add(0, victim.getHeight() * 0.6, 0);
+        world.spawnParticle(Particle.DUST, body, 6, 0.22, 0.28, 0.22, 0.0,
+                new Particle.DustOptions(KEYHOLE_DARK, 1.0f));
+        world.spawnParticle(Particle.SMOKE, body, 2, 0.15, 0.2, 0.15, 0.0);
+        world.playSound(body, Sound.ENTITY_PLAYER_ATTACK_WEAK, 0.35f, 0.7f + jitter());
+    }
+
+    /** Hit two: the watcher's own cut — a dry second strike and a pupil narrowing on the wound. */
+    private void secondCutFx(LivingEntity victim) {
+        World world = victim.getWorld();
+        Location body = victim.getLocation().add(0, victim.getHeight() * 0.6, 0);
+        world.spawnParticle(Particle.DUST_COLOR_TRANSITION, body, 8, 0.20, 0.26, 0.20, 0.0,
+                new Particle.DustTransition(IRIS_GREY, KEYHOLE_DARK, 1.1f));
+        world.spawnParticle(Particle.CRIT, body, 3, 0.18, 0.22, 0.18, 0.06);
+        world.playSound(body, Sound.ENTITY_PLAYER_ATTACK_STRONG, 0.45f, 0.62f + jitter());
+    }
+
+    /** Fixed Stare opens: a keyhole swinging wide, and something on the other side leaning in. */
+    private void openKeyholeFx(Player player) {
+        World world = player.getWorld();
+        Location eye = player.getEyeLocation();
+        world.playSound(eye, Sound.BLOCK_WOODEN_TRAPDOOR_OPEN, 0.45f, 0.55f);
+        world.playSound(eye, Sound.ENTITY_ENDERMAN_STARE, 0.4f, 0.6f);
+
+        // A slow dark ring closing around the wielder — the aperture of an eye, not a flash.
+        Location around = player.getLocation().add(0, 1.0, 0);
+        for (int i = 0; i < STARE_RING_POINTS; i++) {
+            double a = (Math.PI * 2.0 / STARE_RING_POINTS) * i;
+            Location p = around.clone().add(Math.cos(a) * STARE_RING_RADIUS, 0.0, Math.sin(a) * STARE_RING_RADIUS);
+            world.spawnParticle(Particle.DUST_COLOR_TRANSITION, p, 1, 0.02, 0.06, 0.02, 0.0,
+                    new Particle.DustTransition(IRIS_GREY, KEYHOLE_DARK, 1.2f));
+        }
+        world.spawnParticle(Particle.SMOKE, around, 6, 0.25, 0.35, 0.25, 0.005);
+    }
+
+    /** Delight hits the cap: the watcher is as happy as it gets. Quiet, low, and slightly wrong. */
+    private void delightedCue(Player player) {
+        World world = player.getWorld();
+        Location chest = player.getLocation().add(0, 1.0, 0);
+        world.playSound(chest, Sound.ENTITY_ENDERMAN_STARE, 0.35f, 0.5f);
+        world.spawnParticle(Particle.DUST, chest, 10, 0.28, 0.4, 0.28, 0.0,
+                new Particle.DustOptions(IRIS_GREY, 1.0f));
+    }
+
+    /** Points in the Fixed Stare ring, and its radius — a full aperture, drawn once, cheaply. */
+    private static final int STARE_RING_POINTS = 14;
+    private static final double STARE_RING_RADIUS = 1.1;
+
+    private static float jitter() {
+        return (ThreadLocalRandom.current().nextFloat() - 0.5f) * 0.12f;
+    }
+
+    // ---- lifecycle ------------------------------------------------------------------
+
+    @Override
+    public void onQuit(UUID id) {
+        // Wielder state only — Gaze keeps nothing keyed to a victim, so there is nothing here to leak.
+        states.remove(id);
+        reentry.remove(id);
+    }
+
+    @Override
+    public void onDisable() {
+        for (FollowUp strike : followUps) strike.cancel(); // hits still in flight never land after shutdown
+        followUps.clear();
+        states.clear();
+        reentry.clear();
+    }
+
+    // ---- lore -------------------------------------------------------------------------
+
+    // Gaze's colours are the keyhole and the dark behind it, and they were specified as #3A3636 and
+    // #242424 — near-black, which a tooltip's own near-black background swallows whole. Both are lifted
+    // here to the ash the action bar already reads in, so the item and its gauge speak with one voice.
+    // The hues and their order are untouched: the shadow still sits above the dark behind it, and the
+    // pair still reads as something watching from a place with no light in it.
+
+    /** Primary — the keyhole's shadow. Display name, "How to use:", ability headers. */
+    private static final TextColor PRIMARY = TextColor.color(0x9C9494);
+    /** Secondary — the dark behind it. The Abnormality title line. */
+    private static final TextColor SECONDARY = TextColor.color(0x6E6666);
+
+    // Action-bar palette, kept apart from the lore palette so tuning one never disturbs the other.
+    private static final TextColor DELIGHT_HUD = TextColor.color(0x9C9494); // the gauge + stack count
+    private static final TextColor STARE_HUD   = TextColor.color(0xD8D0D0); // the eye, open
+    private static final TextColor FAINT_HUD   = TextColor.color(0x6E6666); // cooldown / ready
+
+    // Particle colours (kept apart from both palettes so tuning one never disturbs the others).
+    private static final Color KEYHOLE_DARK = Color.fromRGB(0x3A, 0x36, 0x36); // the shadow in the keyhole
+    private static final Color IRIS_GREY    = Color.fromRGB(0x6E, 0x66, 0x66); // the wet glint of an eye
+
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Gaze",
+            "Schadenfreude",
+            PRIMARY,
+            SECONDARY,
+            List.of(
+                    "The gaze from the keyhole is fixed on",
+                    "its target without ever stopping. No",
+                    "one knows what it wanted to peep at",
+                    "so dearly. As long as this is",
+                    "equipped, ambush won't be a concern."
+            ),
+            List.of(
+                    new EgoLore.Ability("[Passive] Schadenfreude",
+                            "Attacking stacks Delight (+2% damage",
+                            "per stack, up to 20). Decays if you go",
+                            "3 seconds without landing a hit."),
+                    new EgoLore.Ability("[Left Click] Constant Surveillance",
+                            "Attacks hit 2 times. Each attack",
+                            "contributes a stack of Delight."),
+                    new EgoLore.Ability("[Right Click] Fixed Stare",
+                            "For 5 seconds, your Delight cannot",
+                            "decay and builds twice as fast.",
+                            "15 second cooldown.")
+            ));
+}

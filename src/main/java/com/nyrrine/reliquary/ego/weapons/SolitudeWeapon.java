@@ -1,0 +1,536 @@
+package com.nyrrine.reliquary.ego.weapons;
+
+import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.Weapon;
+import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
+import com.nyrrine.reliquary.ego.EgoModels;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.TextColor;
+import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Color;
+import org.bukkit.FluidCollisionMode;
+import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
+import org.bukkit.World;
+import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.RayTraceResult;
+import org.bukkit.util.Vector;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
+
+/**
+ * Solitude — "Old Lady" (Lobotomy Corp E.G.O Equipment, TETH).
+ *
+ * <p>A rusty six-shooter that was old before anyone thought to pick it up. It is not a fast gun and it
+ * was never meant to be one: the cylinder turns on its own patient schedule, one round every
+ * {@value #SHOT_INTERVAL_MS}ms, and there is nothing the wielder can do to hurry it. What it fires is
+ * not really a bullet. The round opens a <b>hole in the victim's soul rather than in their body</b> — no
+ * shove, no stagger, just a hollow report and a small dark bloom where a person used to be whole.
+ *
+ * <ul>
+ *   <li><b>Left-click (swing)</b> — <i>Bang. Bang.</i> Fire one chambered round straight down the aim
+ *       line (hitscan, range {@value #RANGE}) for {@value #SHOT_DAMAGE} damage with <b>zero knockback</b>
+ *       — the victim's velocity is captured and restored around the hit. The hammer then cycles for
+ *       {@value #SHOT_INTERVAL_MS}ms before the next round will answer. The cylinder holds {@value #MAG}.
+ *       An empty gun stays empty: it never auto-reloads, it only clicks.</li>
+ *   <li><b>Right-click</b> — <i>Stories that Never Cease.</i> Gated on a <b>dry cylinder</b>; with rounds
+ *       left the gun simply does not answer. The old woman talks and talks: {@value #STORY_SHOTS} hurried,
+ *       wide, {@value #STORY_DAMAGE}-damage rounds every {@value #STORY_GAP_TICKS} ticks, and when the
+ *       last one lands the cylinder is full again <b>instantly and for free</b> — that reload never pays
+ *       the {@value #RELOAD_MS}ms reload wait. {@value #STORY_COOLDOWN_MS}ms ability cooldown, timed from
+ *       the cast.</li>
+ *   <li><b>Shift+right-click</b> — <i>Reload.</i> Swing the cylinder out at any point and thumb six rounds
+ *       home over {@value #RELOAD_MS}ms. Firing is dead meanwhile; the trigger just clicks.</li>
+ * </ul>
+ *
+ * <p><b>State &amp; safety.</b> All state is one UUID-&gt;cylinder map, dropped on quit. Every timer in it
+ * is a wall-clock stamp, not a countdown, so a reload or the ability cooldown resolves correctly even
+ * while the gun is stowed and this weapon is not ticking — {@link #onTick} disengages the instant the
+ * revolver leaves the main hand and costs nothing until it comes back. Nothing is keyed by victim, so no
+ * map can grow with the mob population. It spawns no entities at all — every shot is a raytrace plus a
+ * short, capped particle draw — so there is nothing that can leak into the world and {@link #onDisable}
+ * only has to cancel the ability burst. No world edits: damage is routed through
+ * {@code victim.damage(...)} so other plugins can cancel it.
+ */
+public final class SolitudeWeapon implements Weapon {
+
+    private final Reliquary plugin;
+    private final NamespacedKey key;
+
+    /** Wielder -> their cylinder. The only per-player state this weapon keeps. */
+    private final Map<UUID, Cyl> cylinders = new HashMap<>();
+
+    // ---- tuning: a patient, rusty six-shooter ----------------------------------------
+
+    private static final int    MAG               = 6;      // chambers in the cylinder — a six-shooter
+    private static final long   SHOT_INTERVAL_MS  = 1500L;  // the hammer cycle between aimed rounds
+    private static final long   RELOAD_MS         = 5000L;  // the on-demand shift+RC reload
+    private static final double SHOT_DAMAGE       = 8.0;    // per aimed round — a netherite sword's hit, paid for by the 1.5s cycle
+    private static final double SHOT_SPREAD       = 0.012;  // a hair of scatter so an aimed shot isn't a laser
+    private static final double RANGE             = 30.0;   // hitscan reach, shared by both fire modes
+    private static final double RAY_SIZE          = 0.5;    // entity ray fatness (forgiving aim)
+    private static final double MUZZLE_FORWARD    = 0.7;    // how far down the aim line the muzzle sits
+
+    // Stories that Never Cease — she talks and talks, and the gun is full again by the end of it.
+    private static final String STORIES           = "Stories that Never Cease";
+    private static final int    STORY_SHOTS       = 6;      // rounds in the burst
+    private static final long   STORY_GAP_TICKS   = 2L;     // ticks between them — 6 rounds in ~0.5s
+    private static final double STORY_DAMAGE      = 3.0;    // deliberately low; the free instant reload is the real payload
+    private static final double STORY_SPREAD      = 0.06;   // hurried and unaimed — a much wider cone than a placed shot
+    private static final long   STORY_COOLDOWN_MS = 45000L; // ability cooldown, timed from the cast
+
+    // ---- palette --------------------------------------------------------------------
+
+    private static final TextColor PRIMARY   = TextColor.color(0xB9A5D4); // dusty lilac — the name, the HUD
+    private static final TextColor SECONDARY = TextColor.color(0x3A4A7A); // deep indigo — the Abnormality line
+    private static final TextColor FAINT     = TextColor.color(0x7A7484); // conditions / trailing cooldowns
+
+    private static final Color LILAC     = Color.fromRGB(0xB9, 0xA5, 0xD4); // the round leaving the barrel
+    private static final Color INDIGO    = Color.fromRGB(0x3A, 0x4A, 0x7A); // what it has become by the time it lands
+    private static final Color VOID_DARK = Color.fromRGB(0x14, 0x12, 0x1C); // the hole it leaves behind
+    private static final Color RUST      = Color.fromRGB(0x6B, 0x4A, 0x3A); // flakes off the barrel with every shot
+
+    /** The tracer fades lilac to indigo down its length — the shot goes cold on the way out. */
+    private static final Particle.DustTransition TRACER    = new Particle.DustTransition(LILAC, INDIGO, 0.8f);
+    private static final Particle.DustOptions    VOID_RING = new Particle.DustOptions(INDIGO, 1.0f);
+    private static final Particle.DustOptions    VOID_CORE = new Particle.DustOptions(VOID_DARK, 1.4f);
+    private static final Particle.DustOptions    RUST_FLAKE = new Particle.DustOptions(RUST, 0.7f);
+
+    /** Reload spinner frames — a cylinder turning, no milliseconds. */
+    private static final String[] SPIN = {"◐", "◓", "◑", "◒"};
+
+    /** The void bloom's ring: motes placed evenly on a small circle around the impact. */
+    private static final int    RING_MOTES  = 8;
+    private static final double RING_RADIUS = 0.55;
+
+    public SolitudeWeapon(Reliquary plugin) {
+        this.plugin = plugin;
+        this.key = new NamespacedKey(plugin, "solitude");
+    }
+
+    @Override
+    public String id() {
+        return "solitude";
+    }
+
+    /**
+     * A wielder's cylinder. Every timer here is an absolute wall-clock stamp rather than a countdown, so
+     * a reload and the ability cooldown both resolve on their own while the gun is stowed and this weapon
+     * isn't ticking — nothing has to be driven to completion.
+     */
+    private static final class Cyl {
+        int  rounds       = MAG;
+        long lastShot     = 0L;  // stamp of the last AIMED round — the hammer cycle gate
+        long reloadStart  = 0L;  // 0 = not reloading
+        long storiesReady = 0L;  // stamp the ability comes back up
+        BukkitTask burst  = null; // non-null while a Stories burst is running
+
+        boolean reloading() { return reloadStart != 0L; }
+    }
+
+    // ---- fire: Bang. Bang. ------------------------------------------------------------
+
+    @Override
+    public void onSwing(Player player) {
+        // LEFT-click pulls the trigger. Driven only by the main-hand revolver.
+        ItemStack main = player.getInventory().getItemInMainHand();
+        if (!matches(main)) return;
+
+        Cyl cyl = cylinders.computeIfAbsent(player.getUniqueId(), k -> new Cyl());
+        long now = System.currentTimeMillis();
+
+        if (cyl.burst != null) return;                       // the burst owns the trigger while it talks
+        if (cyl.reloading()) { dryClick(player); return; }   // mid-reload the trigger is dead
+        if (cyl.rounds <= 0) {                               // an empty gun stays empty — it never auto-reloads
+            dryClick(player);
+            renderBar(player, cyl, 0);
+            return;
+        }
+        // The hammer is still cycling. Silent — the action bar already reads "Hammer — Ns"; a click on
+        // every early pull would just be noise.
+        if (now - cyl.lastShot < SHOT_INTERVAL_MS) return;
+
+        cyl.lastShot = now;
+        cyl.rounds--;
+        loose(player, SHOT_DAMAGE, SHOT_SPREAD, true);
+        EgoDurability.wearMainHand(player); // mild — one point per aimed round
+        renderBar(player, cyl, 0);
+    }
+
+    // ---- Stories that Never Cease / Reload --------------------------------------------
+
+    @Override
+    public void onInteract(Player player, boolean sneaking) {
+        ItemStack main = player.getInventory().getItemInMainHand();
+        if (!matches(main)) return;
+
+        Cyl cyl = cylinders.computeIfAbsent(player.getUniqueId(), k -> new Cyl());
+        long now = System.currentTimeMillis();
+
+        if (sneaking) { manualReload(player, cyl, now); return; }
+
+        // Stories that Never Cease. It only ever answers a DRY cylinder — with rounds left it does nothing
+        // at all, by design. It is what the gun does when it has nothing left to say.
+        if (cyl.burst != null) return;                       // never stack a second burst
+        if (cyl.reloading()) { dryClick(player); return; }
+        if (cyl.rounds > 0) { dryClick(player); return; }    // the gate: rounds left, no story
+        if (now < cyl.storiesReady) {
+            dryClick(player);
+            player.sendActionBar(EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT));
+            return;
+        }
+        beginStories(player, cyl);
+    }
+
+    /**
+     * The burst: {@value #STORY_SHOTS} hurried rounds {@value #STORY_GAP_TICKS} ticks apart, then the free
+     * instant reload. The ability cooldown is stamped at the cast, not at the end, and the wear is one
+     * point for the whole ability rather than one per round.
+     *
+     * <p>If the wielder stows the gun or logs off mid-burst the runnable stops early but the free reload is
+     * still handed back ({@link #endStories}) — the cooldown has already been paid, so an interruption must
+     * never leave them holding a dead gun and a spent ability.
+     */
+    private void beginStories(Player player, Cyl cyl) {
+        UUID id = player.getUniqueId();
+        cyl.storiesReady = System.currentTimeMillis() + STORY_COOLDOWN_MS;
+        EgoDurability.wearMainHand(player); // one point for the ability, not one per round
+        storiesOpeningFx(player);
+
+        cyl.burst = new BukkitRunnable() {
+            int fired = 0;
+
+            @Override
+            public void run() {
+                Player p = plugin.getServer().getPlayer(id);
+                if (p == null || !matches(p.getInventory().getItemInMainHand())) {
+                    endStories(p, cyl);   // interrupted — the free reload is still owed
+                    cancel();
+                    return;
+                }
+                // Hurried rounds don't touch lastShot: the burst is its own cadence and must not leave the
+                // aimed hammer gate armed behind it.
+                loose(p, STORY_DAMAGE, STORY_SPREAD, false);
+                if (++fired >= STORY_SHOTS) {
+                    endStories(p, cyl);
+                    cancel();
+                }
+            }
+        }.runTaskTimer(plugin, 0L, STORY_GAP_TICKS);
+    }
+
+    /** The story ends and the cylinder is simply full again — instantly, and without paying the reload. */
+    private void endStories(Player player, Cyl cyl) {
+        cyl.burst = null;
+        cyl.rounds = MAG;
+        cyl.reloadStart = 0L;   // the free reload cancels any wait outright
+        if (player != null) {
+            reloadReadyFx(player);
+            renderBar(player, cyl, 0);
+        }
+    }
+
+    /** Shift+right-click: swing the cylinder out and thumb rounds home over {@value #RELOAD_MS}ms. */
+    private void manualReload(Player player, Cyl cyl, long now) {
+        if (cyl.reloading() || cyl.burst != null) return;
+        if (cyl.rounds >= MAG) { dryClick(player); return; } // already full — nothing to top up
+        cyl.reloadStart = now;
+        reloadStartFx(player);
+        renderBar(player, cyl, 0);
+    }
+
+    // ---- tick: reload finish + HUD ----------------------------------------------------
+
+    @Override
+    public boolean onTick(Player player, long tick) {
+        // The revolver left the main hand — disengage immediately. There is nothing to drive to completion:
+        // the reload and the ability cooldown are wall-clock stamps and resolve on their own.
+        if (!matches(player.getInventory().getItemInMainHand())) return false;
+
+        Cyl cyl = cylinders.computeIfAbsent(player.getUniqueId(), k -> new Cyl());
+
+        if (cyl.reloading() && System.currentTimeMillis() - cyl.reloadStart >= RELOAD_MS) {
+            cyl.rounds = MAG;
+            cyl.reloadStart = 0L;
+            reloadReadyFx(player);
+        }
+
+        renderBar(player, cyl, tick);
+        return true;
+    }
+
+    /**
+     * The held-weapon action bar: a filling reload gauge, or the live chamber count with at most ONE
+     * trailing status — the ability's state while the gun is dry (that is when it matters), otherwise the
+     * hammer cycle while it turns. Everything reads in whole seconds.
+     */
+    private void renderBar(Player player, Cyl cyl, long tick) {
+        if (cyl.reloading()) {
+            long elapsed = System.currentTimeMillis() - cyl.reloadStart;
+            double frac = Math.min(1.0, (double) elapsed / RELOAD_MS);
+            Component label = plain("Reloading ", PRIMARY)
+                    .append(plain(SPIN[(int) Math.floorMod(tick, SPIN.length)], FAINT));
+            player.sendActionBar(EgoHud.gauge(PRIMARY, frac, label));
+            return;
+        }
+
+        Component bar = EgoHud.ammo(PRIMARY, "Chambers", cyl.rounds, MAG);
+        long now = System.currentTimeMillis();
+        if (cyl.rounds <= 0) {
+            bar = bar.append(plain("  ", FAINT)).append(now < cyl.storiesReady
+                    ? EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT)
+                    : EgoHud.ready(STORIES, PRIMARY));
+        } else if (now - cyl.lastShot < SHOT_INTERVAL_MS) {
+            bar = bar.append(plain("  ", FAINT))
+                    .append(EgoHud.cooldown("Hammer", SHOT_INTERVAL_MS - (now - cyl.lastShot), FAINT));
+        }
+        player.sendActionBar(bar);
+    }
+
+    private static Component plain(String s, TextColor c) {
+        return Component.text(s, c).decoration(TextDecoration.ITALIC, false);
+    }
+
+    // ---- ballistics -------------------------------------------------------------------
+
+    /**
+     * Loose exactly one round down the aim line: clip at the first real wall, then take the first living
+     * body in the way. The hit deals {@code damage} with <b>no knockback</b> — the victim's velocity is
+     * captured and restored around it, because this round is meant to leave a hole in them, not move them.
+     *
+     * @param aimed true for a placed left-click round (heavy, close report), false for a hurried burst round
+     */
+    private void loose(Player player, double damage, double spread, boolean aimed) {
+        World world = player.getWorld();
+        Location eye = player.getEyeLocation();
+        Vector dir = scatter(eye.getDirection().normalize(), spread);
+        Location muzzle = eye.clone().add(dir.clone().multiply(MUZZLE_FORWARD)).add(0, -0.12, 0);
+
+        // Ignore passable blocks (grass, flowers, fluids) so only a real wall stops the round — the 3-arg
+        // overload would let a grass tuft eat the shot.
+        double maxDist = RANGE;
+        RayTraceResult blockHit = world.rayTraceBlocks(eye, dir, RANGE, FluidCollisionMode.NEVER, true);
+        if (blockHit != null && blockHit.getHitPosition() != null) {
+            maxDist = eye.toVector().distance(blockHit.getHitPosition());
+        }
+
+        RayTraceResult entHit = world.rayTraceEntities(
+                eye, dir, maxDist, RAY_SIZE,
+                e -> e instanceof LivingEntity && !e.getUniqueId().equals(player.getUniqueId()));
+
+        Location end;
+        if (entHit != null && entHit.getHitEntity() instanceof LivingEntity le) {
+            end = entHit.getHitPosition().toLocation(world);
+            Vector velocity = le.getVelocity();
+            // The burst's rounds land 2 ticks apart — inside the victim's i-frames, which would swallow
+            // every one after the first. Clear them so all six actually register.
+            le.setNoDamageTicks(0);
+            le.damage(damage, player);
+            le.setVelocity(velocity);   // a void in the soul, not a wound — it never shoves them
+            voidBloom(world, end);
+        } else {
+            end = eye.clone().add(dir.clone().multiply(maxDist));
+        }
+
+        reportFx(world, muzzle, aimed);
+        drawTracer(world, muzzle, end);
+    }
+
+    /** Nudge a shot off true by a hair — a placed round barely, a hurried one noticeably. */
+    private Vector scatter(Vector base, double spread) {
+        if (spread <= 0.0) return base;
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        return base.clone().add(new Vector(
+                rng.nextDouble(-spread, spread),
+                rng.nextDouble(-spread, spread),
+                rng.nextDouble(-spread, spread))).normalize();
+    }
+
+    // ---- presentation -----------------------------------------------------------------
+
+    /**
+     * The report: a low, hollow bark with a rusty mechanical edge and a thin crack tail, as if it were
+     * fired in a much larger and much emptier room than the one the wielder is standing in. A placed round
+     * lands heavy; a hurried burst round is quieter and higher so six of them read as chatter, not a din.
+     */
+    private void reportFx(World world, Location muzzle, boolean aimed) {
+        float vol = aimed ? 1.0f : 0.55f;
+        float pitch = aimed ? 0.65f : 0.95f;
+
+        world.playSound(muzzle, Sound.ITEM_CROSSBOW_SHOOT, 0.9f * vol, pitch);            // the body of the shot
+        world.playSound(muzzle, Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f * vol, 0.5f);           // the hollow chest under it
+        world.playSound(muzzle, Sound.ITEM_FIRECHARGE_USE, 0.35f * vol, 0.6f);            // old powder catching
+        world.playSound(muzzle, Sound.ENTITY_GENERIC_EXPLODE, 0.16f * vol, 1.9f);         // the thin crack, far away
+        world.playSound(muzzle, Sound.BLOCK_CHAIN_HIT, 0.30f * vol, 1.2f);                // the rusty hammer resetting
+
+        // A little rust and old smoke shaken off the barrel — the gun is visibly falling apart as it works.
+        world.spawnParticle(Particle.DUST, muzzle, 3, 0.05, 0.05, 0.05, 0, RUST_FLAKE);
+        world.spawnParticle(Particle.SMOKE, muzzle, aimed ? 4 : 2, 0.06, 0.06, 0.06, 0.01);
+    }
+
+    /** The trigger falling on nothing: a dry mechanical click on tired, rusty parts. */
+    private void dryClick(Player player) {
+        Location at = player.getLocation();
+        player.playSound(at, Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.4f, 1.5f);
+        player.playSound(at, Sound.BLOCK_CHAIN_HIT, 0.35f, 0.6f);
+    }
+
+    /** The cylinder swings out — a rusty hinge and the slow business of thumbing rounds home. */
+    private void reloadStartFx(Player player) {
+        Location at = player.getLocation();
+        player.playSound(at, Sound.ITEM_CROSSBOW_LOADING_START, 0.7f, 0.8f);
+        player.playSound(at, Sound.BLOCK_CHAIN_HIT, 0.5f, 0.7f);
+    }
+
+    /** The cylinder snaps home: the one clean, satisfying noise this gun still makes. */
+    private void reloadReadyFx(Player player) {
+        Location at = player.getLocation();
+        player.playSound(at, Sound.ITEM_CROSSBOW_LOADING_END, 0.7f, 0.9f);
+        player.playSound(at, Sound.BLOCK_ANVIL_LAND, 0.22f, 1.9f);
+    }
+
+    /** She starts talking: a low, lonely resonance that hangs under the burst that follows. */
+    private void storiesOpeningFx(Player player) {
+        World world = player.getWorld();
+        Location at = player.getLocation().add(0, 1.0, 0);
+        world.playSound(at, Sound.BLOCK_AMETHYST_BLOCK_RESONATE, 0.6f, 0.6f);
+        world.playSound(at, Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.5f);
+        world.spawnParticle(Particle.SOUL, at, 6, 0.35, 0.5, 0.35, 0.01, null, true);
+    }
+
+    /**
+     * The tracer: a fine line fading lilac-to-indigo down its length, with the odd wisp of soul peeling off
+     * it. Forced so it still draws at the far end of a {@value #RANGE}-block shot, where the client would
+     * otherwise cull it. The first metre is left bare so nothing bursts in first-person.
+     */
+    private void drawTracer(World world, Location from, Location to) {
+        Vector step = to.toVector().subtract(from.toVector());
+        double length = step.length();
+        if (length < 1.0e-4) return;
+        step.multiply(1.0 / length);
+
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        int idx = 0;
+        for (double d = 1.0; d < length; d += 0.6, idx++) {
+            Location p = from.clone().add(step.clone().multiply(d));
+            world.spawnParticle(Particle.DUST_COLOR_TRANSITION, p, 1, 0, 0, 0, 0, TRACER, true);
+            if (idx % 4 == 0) {
+                world.spawnParticle(Particle.SMOKE, p, 1, 0.02, 0.02, 0.02, 0.0, null, true);
+            }
+            if (rng.nextInt(10) == 0) { // a rare lonely wisp trailing the round out
+                world.spawnParticle(Particle.SOUL, p, 1, 0.04, 0.04, 0.04, 0.0, null, true);
+            }
+        }
+    }
+
+    /**
+     * The impact — the whole point of the weapon. Not a spray of blood: a small dark bloom that opens where
+     * the round went in, a ring of indigo collapsing on a hole too dark to be a wound, and a soul or two
+     * leaking out of it. One flat burst, no task, no entity, forced so it draws at range.
+     */
+    private void voidBloom(World world, Location at) {
+        world.spawnParticle(Particle.DUST, at, 1, 0, 0, 0, 0, VOID_CORE, true);              // the hole itself
+        world.spawnParticle(Particle.DUST, at, 4, 0.10, 0.10, 0.10, 0, VOID_RING, true);     // its dark edge
+        world.spawnParticle(Particle.SOUL, at, 3, 0.10, 0.12, 0.10, 0.02, null, true);       // what leaks out
+        world.spawnParticle(Particle.SMOKE, at, 3, 0.08, 0.08, 0.08, 0.01, null, true);
+
+        // The ring: motes placed evenly around the hit so the bloom reads as an opening, not a splatter.
+        for (int i = 0; i < RING_MOTES; i++) {
+            double a = (Math.PI * 2 * i) / RING_MOTES;
+            Location p = at.clone().add(Math.cos(a) * RING_RADIUS, 0, Math.sin(a) * RING_RADIUS);
+            world.spawnParticle(Particle.DUST, p, 1, 0, 0, 0, 0, VOID_RING, true);
+        }
+
+        world.playSound(at, Sound.BLOCK_NOTE_BLOCK_BASS, 0.5f, 0.5f);       // a hollow, unsatisfying thud
+        world.playSound(at, Sound.BLOCK_AMETHYST_BLOCK_HIT, 0.35f, 0.6f);   // and something ringing under it
+    }
+
+    // ---- item -------------------------------------------------------------------------
+
+    @Override
+    public boolean matches(ItemStack item) {
+        if (item == null || item.getType() != EgoModels.SOLITUDE.material()) return false;
+        ItemMeta m = item.getItemMeta();
+        return m != null && m.getPersistentDataContainer().has(key, PersistentDataType.BYTE);
+    }
+
+    @Override
+    public ItemStack createItem() {
+        ItemStack item = new ItemStack(EgoModels.SOLITUDE.material());
+        ItemMeta meta = item.getItemMeta();
+        TOOLTIP.applyTo(meta);
+        meta.setEnchantmentGlintOverride(false);
+        meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
+        EgoModels.stampWeapon(meta, EgoModels.SOLITUDE);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    // ---- lore -------------------------------------------------------------------------
+
+    /** Built once: the display name is the weapon, the title line is the Abnormality. Never the reverse. */
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Solitude",
+            "Old Lady",
+            PRIMARY,
+            SECONDARY,
+            List.of(
+                    "A strong sense of loneliness still",
+                    "lingers, even in the form of an E.G.O.",
+                    "Its bullets create a void that cannot",
+                    "be filled in the victim's soul, rather",
+                    "than a wound upon their flesh and",
+                    "bones. It was a rusty weapon from the",
+                    "beginning."),
+            List.of(
+                    new EgoLore.Ability("[Left Click] Bang. Bang.",
+                            "Shoot your revolver six times; there",
+                            "is a 1.5-second cooldown in between",
+                            "shots."),
+                    new EgoLore.Ability("[Right Click] Stories that Never Cease",
+                            "Only works when you have no bullets",
+                            "left. Burst 6 fast, low-damage ranged",
+                            "rounds, Instant reload after for free.",
+                            "45-second ability cooldown."),
+                    new EgoLore.Ability("[Shift+Right-Click] Reload",
+                            "Reload your gun at any point; face a",
+                            "5-second reload cooldown.")));
+
+    // ---- lifecycle --------------------------------------------------------------------
+
+    @Override
+    public void onQuit(UUID id) {
+        Cyl cyl = cylinders.remove(id);
+        if (cyl != null && cyl.burst != null) {
+            cyl.burst.cancel();     // the burst's own guard would stop it next tick; don't wait
+            cyl.burst = null;
+        }
+    }
+
+    @Override
+    public void onDisable() {
+        // Nothing of this weapon is ever out in the world — no entities are spawned, so there is nothing to
+        // sweep. The only thing that can outlive the plugin is a running burst.
+        for (Cyl cyl : cylinders.values()) {
+            if (cyl.burst != null) {
+                cyl.burst.cancel();
+                cyl.burst = null;
+            }
+        }
+        cylinders.clear();
+    }
+}

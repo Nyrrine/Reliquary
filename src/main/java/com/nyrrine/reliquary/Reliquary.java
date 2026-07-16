@@ -13,17 +13,27 @@ import com.nyrrine.reliquary.ego.weapons.BeakWeapon;
 import com.nyrrine.reliquary.ego.weapons.ChristmasWeapon;
 import com.nyrrine.reliquary.ego.weapons.CobaltScarWeapon;
 import com.nyrrine.reliquary.ego.weapons.CrimsonScarWeapon;
+import com.nyrrine.reliquary.ego.weapons.DiscordWeapon;
+import com.nyrrine.reliquary.ego.weapons.FaintAromaWeapon;
+import com.nyrrine.reliquary.ego.weapons.FragmentsFromSomewhereWeapon;
+import com.nyrrine.reliquary.ego.weapons.FrostSplinterWeapon;
+import com.nyrrine.reliquary.ego.weapons.GazeWeapon;
 import com.nyrrine.reliquary.ego.weapons.GreenStemWeapon;
 import com.nyrrine.reliquary.ego.weapons.GrinderMk4Weapon;
+import com.nyrrine.reliquary.ego.weapons.HarmonyWeapon;
 import com.nyrrine.reliquary.ego.weapons.HarvestWeapon;
 import com.nyrrine.reliquary.ego.weapons.HeavenWeapon;
+import com.nyrrine.reliquary.ego.weapons.HornetWeapon;
+import com.nyrrine.reliquary.ego.weapons.JustitiaWeapon;
 import com.nyrrine.reliquary.ego.weapons.LaetitiaWeapon;
 import com.nyrrine.reliquary.ego.weapons.LampWeapon;
+import com.nyrrine.reliquary.ego.weapons.LanternWeapon;
 import com.nyrrine.reliquary.ego.weapons.LifeForADaredevilWeapon;
 import com.nyrrine.reliquary.ego.weapons.FourthMatchFlameWeapon;
 import com.nyrrine.reliquary.ego.weapons.LoggingWeapon;
 import com.nyrrine.reliquary.ego.weapons.LoveAndHateWeapon;
 import com.nyrrine.reliquary.ego.weapons.MagicBulletWeapon;
+import com.nyrrine.reliquary.ego.weapons.MimicryWeapon;
 import com.nyrrine.reliquary.ego.weapons.OurGalaxyWeapon;
 import com.nyrrine.reliquary.ego.weapons.PenitenceWeapon;
 import com.nyrrine.reliquary.ego.weapons.RedEyesWeapon;
@@ -31,6 +41,7 @@ import com.nyrrine.reliquary.ego.weapons.RegretWeapon;
 import com.nyrrine.reliquary.ego.weapons.ScreamingWedgeWeapon;
 import com.nyrrine.reliquary.ego.weapons.SodaWeapon;
 import com.nyrrine.reliquary.ego.weapons.SolemnLamentWeapon;
+import com.nyrrine.reliquary.ego.weapons.SolitudeWeapon;
 import com.nyrrine.reliquary.ego.weapons.SwordOfTearsWeapon;
 import com.nyrrine.reliquary.ego.weapons.WristCutterWeapon;
 import com.nyrrine.reliquary.weapons.arayashiki.ArayashikiWeapon;
@@ -81,11 +92,14 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         LaevateinnWeapon laevateinn = new LaevateinnWeapon(this);
         weapons.register(laevateinn);
 
-        // ---- E.G.O weapons (Lobotomy Corp roster, ZAYIN..WAW) ----
+        // ---- E.G.O weapons (Lobotomy Corp roster, ZAYIN..ALEPH) ----
         // ZAYIN
         weapons.register(new PenitenceWeapon(this));
         weapons.register(new SodaWeapon(this));
         // TETH
+        weapons.register(new SolitudeWeapon(this));
+        weapons.register(new FragmentsFromSomewhereWeapon(this));
+        weapons.register(new LanternWeapon(this));
         weapons.register(new FourthMatchFlameWeapon(this));
         weapons.register(new RedEyesWeapon(this));
         weapons.register(new RegretWeapon(this));
@@ -94,6 +108,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         weapons.register(new WristCutterWeapon(this));
         weapons.register(new ChristmasWeapon(this));
         // HE
+        weapons.register(new FrostSplinterWeapon(this));
         weapons.register(new GrinderMk4Weapon(this));
         weapons.register(new CrimsonScarWeapon(this));
         weapons.register(new CobaltScarWeapon(this));
@@ -102,6 +117,11 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         weapons.register(new LifeForADaredevilWeapon(this));
         weapons.register(new LaetitiaWeapon(this));
         // WAW
+        weapons.register(new HarmonyWeapon(this));
+        weapons.register(new GazeWeapon(this));
+        weapons.register(new HornetWeapon(this));
+        weapons.register(new FaintAromaWeapon(this));
+        weapons.register(new DiscordWeapon(this));
         weapons.register(new LampWeapon(this));
         weapons.register(new SolemnLamentWeapon(this));
         weapons.register(new SwordOfTearsWeapon(this));
@@ -110,6 +130,9 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         weapons.register(new MagicBulletWeapon(this));
         weapons.register(new HeavenWeapon(this));
         weapons.register(new LoveAndHateWeapon(this));
+        // ALEPH
+        weapons.register(new JustitiaWeapon(this));
+        weapons.register(new MimicryWeapon(this));
 
         // ---- bus ego ----
         FlowerBuryingWedgeWeapon flowerWedge = new FlowerBuryingWedgeWeapon(this);
