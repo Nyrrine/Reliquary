@@ -18,6 +18,7 @@ import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -27,8 +28,10 @@ import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -74,11 +77,21 @@ public final class SolitudeWeapon implements Weapon {
     /** Wielder -> their cylinder. The only per-player state this weapon keeps. */
     private final Map<UUID, Cyl> cylinders = new HashMap<>();
 
+    /**
+     * Bodies currently taking one of our own rounds. The manager dispatches {@link #onHit} for any hit
+     * whose damager is a player holding this weapon, which every bullet is — so this fence tells a shot
+     * apart from a swing. Held only across the single {@code damage()} call, in a try/finally, so it is
+     * empty between rounds and can never accumulate a dead mob's id.
+     */
+    private final Set<UUID> shooting = new HashSet<>();
+
     // ---- tuning: a patient, rusty six-shooter ----------------------------------------
 
     private static final int    MAG               = 6;      // chambers in the cylinder — a six-shooter
-    private static final long   SHOT_INTERVAL_MS  = 1500L;  // the hammer cycle between aimed rounds
-    private static final long   RELOAD_MS         = 5000L;  // the on-demand shift+RC reload
+    // Both halved after playtest — she liked the gun and wanted less waiting in it. The old woman is still
+    // slow, she is just no longer testing anyone's patience: 750ms a round, 2.5s to fill the cylinder.
+    private static final long   SHOT_INTERVAL_MS  = 750L;   // the hammer cycle between aimed rounds
+    private static final long   RELOAD_MS         = 2500L;  // the on-demand shift+RC reload
     private static final double SHOT_DAMAGE       = 8.0;    // per aimed round — a netherite sword's hit, paid for by the 1.5s cycle
     private static final double SHOT_SPREAD       = 0.012;  // a hair of scatter so an aimed shot isn't a laser
     private static final double RANGE             = 30.0;   // hitscan reach, shared by both fire modes
@@ -143,6 +156,23 @@ public final class SolitudeWeapon implements Weapon {
     }
 
     // ---- fire: Bang. Bang. ------------------------------------------------------------
+
+    /**
+     * A revolver is not a cudgel. Left-click is the trigger, so a shot taken at a body within arm's reach
+     * would otherwise land a vanilla blow as well — and the blow, arriving first, stamps hurt-immunity that
+     * swallows the round. The gun appears to stop working at exactly the range where it matters most.
+     * Cancelling costs nothing: Solitude is a {@code ranged} model with no melee damage of its own.
+     *
+     * <p><b>The fence is not optional.</b> The manager dispatches this for <em>any</em> hit whose damager is
+     * a player holding this weapon — and a bullet is precisely that. Every round we fire comes straight back
+     * through here, so without {@link #shooting} the cancel would eat the shot it was meant to protect and
+     * the revolver would deal nothing whatsoever.
+     */
+    @Override
+    public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        if (shooting.contains(victim.getUniqueId())) return; // our own round, not a swing
+        event.setCancelled(true);
+    }
 
     @Override
     public void onSwing(Player player) {
@@ -339,7 +369,16 @@ public final class SolitudeWeapon implements Weapon {
             // The burst's rounds land 2 ticks apart — inside the victim's i-frames, which would swallow
             // every one after the first. Clear them so all six actually register.
             le.setNoDamageTicks(0);
-            le.damage(damage, player);
+            // The round's own damage comes back to us: the manager dispatches every hit whose damager is
+            // a player holding this weapon, and that is exactly what a bullet is. Without this fence
+            // onHit — which exists to stop the revolver being swung as a club — would cancel the shot the
+            // trigger just fired, and the gun would deal nothing at all.
+            shooting.add(le.getUniqueId());
+            try {
+                le.damage(damage, player);
+            } finally {
+                shooting.remove(le.getUniqueId());
+            }
             le.setVelocity(velocity);   // a void in the soul, not a wound — it never shoves them
             voidBloom(world, end);
         } else {
@@ -499,7 +538,7 @@ public final class SolitudeWeapon implements Weapon {
             List.of(
                     new EgoLore.Ability("[Left Click] Bang. Bang.",
                             "Shoot your revolver six times; there",
-                            "is a 1.5-second cooldown in between",
+                            "is a 0.75-second cooldown in between",
                             "shots."),
                     new EgoLore.Ability("[Right Click] Stories that Never Cease",
                             "Only works when you have no bullets",
@@ -508,7 +547,7 @@ public final class SolitudeWeapon implements Weapon {
                             "45-second ability cooldown."),
                     new EgoLore.Ability("[Shift+Right-Click] Reload",
                             "Reload your gun at any point; face a",
-                            "5-second reload cooldown.")));
+                            "2.5-second reload cooldown.")));
 
     // ---- lifecycle --------------------------------------------------------------------
 

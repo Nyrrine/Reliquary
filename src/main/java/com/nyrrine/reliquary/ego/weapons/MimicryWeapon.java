@@ -11,6 +11,7 @@ import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
@@ -20,16 +21,25 @@ import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.inventory.EntityEquipment;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -44,51 +54,67 @@ import java.util.concurrent.ThreadLocalRandom;
  * a weapon, bone-white and dried-blood red, that is <em>fast</em> and that <em>drinks</em>.
  *
  * <p>A melee E.G.O Equipment riding the vanilla NETHERITE_SWORD swing (never cancelled) at a cleaver's
- * tuning — {@link EgoModels#MIMICRY} sets 6.5 damage at 1.8 speed, faster than the eye can follow. The
- * weapon sets its meta exactly once in {@link #createItem()} and never repaints, so it takes vanilla
- * enchants like any other E.G.O piece. Everything below is state kept beside the item, never on it.
+ * tuning — {@link EgoModels#MIMICRY} sets 6.5 damage at 1.8 speed. The weapon sets its meta exactly once
+ * in {@link #createItem()} and never repaints, so it takes vanilla enchants like any other E.G.O piece.
+ * Everything below is state kept beside the item, never on it.
  *
  * <ul>
  *   <li><b>Is That the Red Mist?!?</b> ({@link #onHit}, passive) — a landed blow mends the wielder for
  *       {@link #LIFESTEAL_FRACTION} of the damage it dealt, throttled to once per
- *       {@link #LIFESTEAL_THROTTLE_MS}. The drink never carries the wielder past their own
- *       {@link Attribute#MAX_HEALTH}.</li>
- *   <li><b>Nothing There</b> ({@link #onInteract}, shift + right-click) — every point of damage the
- *       wielder deals pools in a <b>reservoir</b>. Shift-right-click empties it as one strike around the
- *       wielder, dealing {@link #RELEASE_FRACTION} of the pooled total to everything inside
- *       {@link #RELEASE_RADIUS}: the weapon giving back what it swallowed. The reservoir evaporates after
- *       {@link #RESERVOIR_DECAY_MS} without the wielder dealing a blow (whether they are logged in for
- *       that lull or not), and is hard-capped at {@link #RESERVOIR_CAP} — see that constant.</li>
- *   <li><b>Onrush</b> ({@link #onInteract}, right-click) — a blink onto the foe the wielder last struck.
+ *       {@link #LIFESTEAL_THROTTLE_MS}.</li>
+ *   <li><b>The reservoir</b> ({@link #onDamaged}, passive) — every point of damage that <em>lands on</em>
+ *       the wielder pools in the blade. It is the wounds it remembers, not the wounds it gave. There is no
+ *       ceiling. The pool evaporates after {@link #RESERVOIR_DECAY_MS} without a fresh wound (whether the
+ *       wielder is logged in for that lull or not).</li>
+ *   <li><b>Nothing There</b> ({@link #onInteract}, shift + right-click) — the downswing. Empties the
+ *       reservoir as one cleave around the wielder, dealing {@link #RELEASE_FRACTION} of the pooled total
+ *       to everything inside {@link #RELEASE_RADIUS}. The blade that falls is drawn to the size of the
+ *       pool and nothing clamps it.</li>
+ *   <li><b>Onrush</b> ({@link #onInteract}, right-click) — a rush onto the foe the wielder last struck.
  *       If that foe is already faltering (a player under {@link #THRESH_PLAYER}, a mob under
- *       {@link #THRESH_MOB}, a boss under {@link #THRESH_BOSS}) Mimicry appears at its back and finishes
+ *       {@link #THRESH_MOB}, a boss under {@link #THRESH_BOSS}) Mimicry arrives at its back and finishes
  *       it, and — resetting on the kill — costs no cooldown at all. If the foe is <em>not</em> executable
- *       the wielder still lands: a blink to the target's face, a devastating {@link #ONRUSH_DAMAGE}, and
+ *       the wielder still lands: a rush to the target's face, a devastating {@link #ONRUSH_DAMAGE}, and
  *       {@link #ONRUSH_COOLDOWN_MS} of silence.</li>
  * </ul>
  *
- * <p><b>The execute is a modest blow plus {@code setHealth(0)}, never an overkill number.</b> True
- * armour-bypass ({@code DamageType}/{@code DamageSource}) is not on this compile classpath, and buying a
- * kill with a huge damage figure is not a substitute for it: vanilla armour durability loss scales with
- * damage dealt (~damage/4 <em>per piece</em>), so a four-figure execute deletes a victim's whole armour set
- * in one hit. That was a real, shipped bug on this project. {@link #ONRUSH_EXECUTE_DAMAGE} is therefore
- * normal-sized and kill-credited, and {@code setHealth(0.0)} — which never runs the damage pipeline and so
- * takes no toll on armour — guarantees the finish through armour or Resistance. The same reasoning caps the
- * reservoir: {@link #RELEASE_FRACTION} of an <em>uncapped</em> pool would be both a one-shot-the-server
- * button and a second armour shredder wearing a different hat.
+ * <h2>The reservoir takes wounds, not kills</h2>
+ * {@link #onDamaged} is the only thing that fills the pool, and it banks {@code getFinalDamage()} — the
+ * settled, post-armour figure for damage that actually landed. A strike a shield ate arrives here with a
+ * final damage of zero and banks nothing: there is no wound to remember. The hook is read-only (it runs at
+ * monitor priority, so writing the event would lie to every listener that already read its final values).
  *
- * <p><b>Re-entrancy.</b> Both abilities deal their damage with {@link LivingEntity#damage(double,
- * Entity)}, which fires its own {@code EntityDamageByEntityEvent} and re-enters {@link #onHit}. The
- * {@link #striking} fence makes that re-entrant call a complete no-op — no lifesteal, and critically no
- * pooling. Without it the reservoir would feed on its own release and every cast would be larger than the
- * last; the drink would compound off the same loop. Ability damage is therefore deliberately dry: it
- * neither heals the wielder nor refills the pool.
+ * <h2>Why the release costs the victim's armour nothing</h2>
+ * The release is uncapped by design, and an uncapped number routed through {@link LivingEntity#damage} is
+ * how this weapon once shredded armour sets: vanilla charges armour durability off the damage
+ * <em>before</em> reduction, roughly {@code damage/4} <b>per piece</b>, so a four-figure cleave deletes a
+ * victim's whole kit in one blow even when their armour soaks nearly all of it. The fix is not to bypass
+ * armour — armour must still matter, and it still does, because the blow is a plain {@code damage()} the
+ * victim's protection reduces normally. Instead {@link #snapshotArmour}/{@link #restoreArmour} read every
+ * piece's {@link Damageable#getDamage()} immediately before the blow and put those exact values back
+ * immediately after, per victim, in a {@code finally}. See {@link #restoreArmour} for what each edge case
+ * does and for the one case it cannot cover.
+ *
+ * <p><b>The execute is a modest blow plus {@code setHealth(0)}, never an overkill number.</b>
+ * {@link #ONRUSH_EXECUTE_DAMAGE} is normal-sized and kill-credited, and {@code setHealth(0.0)} — which
+ * never runs the damage pipeline and so takes no toll on armour — guarantees the finish through armour or
+ * Resistance. Onrush's two blows are normal-sized on purpose and wear a victim's armour the normal amount;
+ * only the uncapped release needs the restore.
+ *
+ * <h2>Re-entrancy</h2>
+ * The release deals damage with {@link LivingEntity#damage(double, Entity)}, which fires its own
+ * {@code EntityDamageByEntityEvent} and re-enters {@link #onHit}. The {@link #striking} fence makes that
+ * re-entrant call a complete no-op, so ability damage neither pools nor lifesteals. The same fence guards
+ * {@link #onDamaged}: a victim's Thorns answering the wielder's own cleave is the wielder's own effect
+ * coming back at them, and banking it would refill — from a single cast — the very pool that cast just
+ * spent. {@link #selfInflicted} closes the same door for the wielder's own projectiles.
  *
  * <p>Mimicry spawns no entities and edits no blocks — it is particles, sound, and arithmetic — so there is
- * nothing for {@link #onDisable()} to reap from the world. Its per-wielder state is timestamped and swept
- * ({@link #prune}) rather than merely dropped on quit, because the reservoir's five-minute grace and the
- * Onrush cooldown must both survive a logout: the first is the design, the second is so that logging out is
- * never a free cooldown reset.
+ * nothing for {@link #onDisable()} to reap from the world, and its animations hold only {@link Location}s
+ * and a {@link World}, never an entity, so a mid-flight swing cannot pin a corpse in memory. Its
+ * per-wielder state is timestamped and swept ({@link #prune}) rather than merely dropped on quit, because
+ * the reservoir's five-minute grace and the Onrush cooldown must both survive a logout: the first is the
+ * design, the second is so that logging out is never a free cooldown reset.
  */
 public final class MimicryWeapon implements Weapon {
 
@@ -110,30 +136,33 @@ public final class MimicryWeapon implements Weapon {
     /** Share of the pooled total the release deals to each body caught in it. */
     private static final double RELEASE_FRACTION = 0.5;
 
-    /** Radius of the release. One scan, one strike per body inside it. */
+    /**
+     * Radius of the cut. One scan, one strike per body inside it.
+     *
+     * <p>Deliberately <b>not</b> scaled by the pool. The blade that falls is drawn as big as the pool
+     * demands — a large enough reservoir throws an arc taller than the render distance — but what it
+     * actually cuts stays five blocks, which is both the Library of Ruina read (a colossal blade, one
+     * target) and the only version of this that a busy box can afford: the entity scan is a fixed cost per
+     * cast no matter how absurd the number in the gauge is.
+     */
     private static final double RELEASE_RADIUS = 5.0;
 
     /** Below this the pool isn't worth a cast — the wielder keeps it rather than spending nothing. */
     private static final double RELEASE_MIN = 1.0;
 
-    /** The pool evaporates after this long without the wielder landing a blow (online or logged out). */
+    /** The pool evaporates after this long without the wielder taking a fresh wound (online or logged out). */
     private static final long RESERVOIR_DECAY_MS = 300_000L; // 5 minutes out of combat
 
     /**
-     * Hard ceiling on the pool, and the reason it exists: {@link #RELEASE_FRACTION} of an unbounded
-     * "everything you have ever dealt" is a one-shot-the-server button on a busy box, and — exactly like the
-     * old overkill execute — a four-figure damage number would strip every victim's armour set through
-     * vanilla's damage/4-per-piece durability toll. Capped here, the worst release is
-     * {@code RESERVOIR_CAP * RELEASE_FRACTION} = 60 raw: lethal to anything unarmoured, a serious but
-     * survivable hit through good armour, and ~15 durability per piece — a scratch, not a deletion. 120
-     * pooled is roughly a dozen landed cleaver blows, so the button still has to be earned.
-     * <p><b>Deviation:</b> the brief specifies no cap. This number wants a designer's sign-off.
+     * The gauge's full mark — <b>a display scale, not a cap.</b> Nothing clamps the pool; this is only the
+     * value at which the ten-segment bar reads full. The number beside the bar is always the true total, so
+     * a wielder carrying four figures sees a saturated bar and an honest count.
      */
-    private static final double RESERVOIR_CAP = 120.0;
+    private static final double HUD_SCALE = 200.0;
 
     // ---- tuning: Onrush ------------------------------------------------------------
 
-    /** How far the wielder will blink to reach the foe they last struck. */
+    /** How far the wielder will rush to reach the foe they last struck. */
     private static final double ONRUSH_RANGE = 14.0;
     private static final double ONRUSH_RANGE_SQ = ONRUSH_RANGE * ONRUSH_RANGE;
 
@@ -172,12 +201,71 @@ public final class MimicryWeapon implements Weapon {
     private static final Set<EntityType> BOSS_TYPES = EnumSet.of(
             EntityType.ENDER_DRAGON, EntityType.WITHER, EntityType.WARDEN);
 
+    // ---- tuning: the show ----------------------------------------------------------
+    //
+    // Every number in this block is a ceiling, and they are the reason an uncapped weapon is still
+    // affordable at ~100 players and ~13 TPS. The rule throughout: the pool scales the arc's SIZE and
+    // THICKNESS without limit, and its POINT COUNT not at all past SLASH_POINTS_MAX. A hundred-block
+    // cleave and a twelve-block cleave cost the server the same packets; the big one just spreads them
+    // further apart and draws them fatter, which is exactly where the drama lives anyway.
+
+    /** The arc a bare pool would throw, before {@link #slashRadius} grows it. */
+    private static final double SLASH_BASE_RADIUS = 3.0;
+
+    /** The pool at which the downswing has doubled its base reach. Growth is {@code sqrt} and never stops. */
+    private static final double SLASH_REF = 40.0;
+
+    /** Starting blade width — already thicker than Arayashiki's 1.1-1.6, which is the brief. */
+    private static final float SLASH_THICK_BASE = 2.0f;
+
+    /**
+     * Widest the blade is drawn. Unlike the radius this one is clamped, because dust size is a client-side
+     * scalar rather than real geometry: past ~7 the strand stops reading as an edge and starts reading as a
+     * row of boxes. Size carries the drama past here, not thickness.
+     */
+    private static final float SLASH_THICK_MAX = 7.0f;
+
+    /** Fewest / most points the arc is ever drawn with. The ceiling is the perf promise — see above. */
+    private static final int SLASH_POINTS_MIN = 40;
+    private static final int SLASH_POINTS_MAX = 120;
+
+    /** Ticks for the blade to fall, and ticks each point of it lingers after being cut. */
+    private static final int DOWNSWING_REVEAL = 4;
+    private static final int DOWNSWING_FADE = 3;
+
+    /** The impact ring: a fixed budget, pushed out to the reach of the cut but never past this. */
+    private static final int SHOCKWAVE_POINTS = 48;
+    private static final double SHOCKWAVE_RADIUS_MAX = 24.0;
+    private static final int IMPACT_SWEEPS = 6;
+
+    /** An M1 arc, and the heavier one that ends the three-beat chain. */
+    private static final int M1_POINTS = 18;
+    private static final int M1_POINTS_HEAVY = 26;
+    private static final int M1_REVEAL = 3;
+    private static final int M1_FADE = 3;
+
+    /** The chain forgets itself after this long, and the next swing starts from the first beat again. */
+    private static final long COMBO_RESET_MS = 1_200L;
+
+    /** Onrush's trail: sampling along the path, and the hard ceiling on how many samples that can become. */
+    private static final double RUSH_STEP = 0.45;
+    private static final int RUSH_POINTS_MAX = 32;
+    private static final int RUSH_REVEAL = 3;
+    private static final int RUSH_FADE = 4;
+
+    /**
+     * The slots vanilla charges durability to when a blow lands — {@code FEET, LEGS, CHEST, HEAD, BODY} on
+     * 26.1.2. Derived rather than written out so a future armour slot is covered the day it appears.
+     */
+    private static final EquipmentSlot[] ARMOUR_SLOTS =
+            Arrays.stream(EquipmentSlot.values()).filter(EquipmentSlot::isArmor).toArray(EquipmentSlot[]::new);
+
     // ---- housekeeping --------------------------------------------------------------
 
     /** How often the timestamped state maps are swept, at most. */
     private static final long PRUNE_PERIOD_MS = 1_000L;
 
-    /** Wielder -> the damage they have pooled, and when they last dealt a blow. */
+    /** Wielder -> the damage pooled in their blade, and when it last took a wound. */
     private final Map<UUID, Reservoir> reservoirs = new HashMap<>();
 
     /** Wielder -> the foe they last struck. Holds a UUID, never the entity, so a corpse can't be pinned in memory. */
@@ -189,7 +277,10 @@ public final class MimicryWeapon implements Weapon {
     /** Wielder -> epoch ms of their last drink, for the throttle. */
     private final Map<UUID, Long> lastDrinkAt = new HashMap<>();
 
-    /** Wielders currently inside their own ability damage — the fence against re-entrant {@link #onHit}. */
+    /** Wielder -> where they are in the three-beat M1 chain. Cosmetic only. */
+    private final Map<UUID, Combo> combos = new HashMap<>();
+
+    /** Wielders currently inside their own ability damage — the fence against re-entrant hooks. */
     private final Set<UUID> striking = new HashSet<>();
 
     /** When {@link #prune} last swept. */
@@ -231,15 +322,21 @@ public final class MimicryWeapon implements Weapon {
     /** A wielder's pooled damage and the clock that decides when it evaporates. */
     private static final class Reservoir {
         private double amount;
-        private long lastBlowMs;
+        private long lastWoundMs;
 
         private Reservoir(long nowMs) {
-            this.lastBlowMs = nowMs;
+            this.lastWoundMs = nowMs;
         }
     }
 
     /** The foe a wielder last struck, by id (never a hard entity reference) and when. */
     private record Mark(UUID victimId, long atMs) {}
+
+    /** Where a wielder is in the M1 chain, and when they last swung. Purely an animation. */
+    private static final class Combo {
+        private int beat;
+        private long lastMs;
+    }
 
     /**
      * Sweep the timestamped state. Every map here is wielder-keyed, but that alone is not enough: a mob
@@ -249,32 +346,33 @@ public final class MimicryWeapon implements Weapon {
      */
     private void prune(long now) {
         lastPruneMs = now;
-        reservoirs.entrySet().removeIf(e -> now - e.getValue().lastBlowMs > RESERVOIR_DECAY_MS);
+        reservoirs.entrySet().removeIf(e -> now - e.getValue().lastWoundMs > RESERVOIR_DECAY_MS);
         marks.entrySet().removeIf(e -> now - e.getValue().atMs() > MARK_TTL_MS);
         onrushReadyAt.entrySet().removeIf(e -> now >= e.getValue());
         lastDrinkAt.entrySet().removeIf(e -> now - e.getValue() > LIFESTEAL_THROTTLE_MS);
+        combos.entrySet().removeIf(e -> now - e.getValue().lastMs > COMBO_RESET_MS);
     }
 
     /** The wielder's live pool, or 0 if it has evaporated / never existed. */
     private double pooled(UUID id, long now) {
         Reservoir r = reservoirs.get(id);
         if (r == null) return 0.0;
-        if (now - r.lastBlowMs > RESERVOIR_DECAY_MS) {   // out of combat too long — it is already gone
+        if (now - r.lastWoundMs > RESERVOIR_DECAY_MS) {   // out of combat too long — it is already gone
             reservoirs.remove(id);
             return 0.0;
         }
         return r.amount;
     }
 
-    // ---- passive: the pool and the drink -------------------------------------------
+    // ---- passive: the drink ---------------------------------------------------------
 
     /**
-     * A landed blow. The vanilla cleaver damage is left exactly as it is — the pool and the drink are read
-     * off it, never written back onto it.
+     * A landed blow. The vanilla cleaver damage is left exactly as it is — the drink is read off it, never
+     * written back onto it, and the pool is not fed from here at all any more: what the wielder deals is
+     * the weapon's business, what the wielder <em>takes</em> is what it remembers. See {@link #onDamaged}.
      *
      * <p>When this fires from inside our own ability damage ({@link #striking}) it does nothing at all: the
-     * release must not pool its own output (each cast would then dwarf the last) and the drink must not
-     * compound off the same loop.
+     * drink must not compound off the release's own output.
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
@@ -290,8 +388,52 @@ public final class MimicryWeapon implements Weapon {
         if (dealt <= 0.0) return;
 
         mark(aid, victim, now);
-        pool(aid, dealt, now);
         drink(attacker, dealt, now);
+    }
+
+    /**
+     * A wound on the wielder — the reservoir's only intake.
+     *
+     * <p>What gets banked is {@code getFinalDamage()}: the settled figure, after the victim's own armour and
+     * resistances, for a blow that truly landed (the dispatch is monitor priority and ignores cancelled
+     * events, so a hit some other plugin vetoed never reaches here). A strike a shield or absorption ate
+     * outright arrives with a final damage of {@code 0} and is dropped rather than banked as a zero: the
+     * pool is a memory of wounds, and a blow that drew nothing left no wound to remember. The event is read
+     * and never written — at monitor priority a {@code setDamage} here would contradict every listener that
+     * has already read its final values.
+     *
+     * <p>Two doors are held shut so the wielder cannot fill their own pool. {@link #striking} rejects
+     * anything that arrives while the wielder is inside their own cast — a victim's Thorns answering the
+     * cleave is the cast hitting the caster, and banking it would let one release refill the pool it just
+     * spent. {@link #selfInflicted} rejects the wielder's own projectiles for the same reason.
+     *
+     * <p><b>Only wounds something gave you.</b> Environmental damage — a fall, a fire, a mouthful of poison
+     * — is damage the wielder received, and the literal reading would bank it. It doesn't. A pool you can
+     * fill by standing in a campfire somewhere quiet is not the memory of a fight, it is a farm, and it is
+     * the same shape as swinging a greatsword at empty air to stack its passive — which Nyrrine called out
+     * as abuse in the same breath she asked for this. She meant taking a beating, not hurting yourself on
+     * purpose. The blade drinks what is done to it. (One line if that is ever wanted back: drop the
+     * {@code EntityDamageByEntityEvent} narrowing below.)
+     */
+    @Override
+    public void onDamaged(Player victim, EntityDamageEvent event) {
+        UUID id = victim.getUniqueId();
+        if (striking.contains(id)) return;               // inside our own cast — never feed the loop
+        if (!(event instanceof EntityDamageByEntityEvent)) return; // a fire is not a foe; see the docs above
+        if (selfInflicted(victim, event)) return;        // the wielder's own effects are not a foe's wound
+
+        double taken = event.getFinalDamage();
+        if (taken <= 0.0) return;                        // blocked or absorbed outright — no wound to bank
+
+        bank(id, taken, System.currentTimeMillis());
+    }
+
+    /** True if this damage came from the wielder themselves, directly or by way of their own projectile. */
+    private boolean selfInflicted(Player victim, EntityDamageEvent event) {
+        if (!(event instanceof EntityDamageByEntityEvent e)) return false;
+        Entity damager = e.getDamager();
+        if (victim.equals(damager)) return true;
+        return damager instanceof Projectile p && victim.equals(p.getShooter());
     }
 
     /** Remember this foe as the one to chase, and for how long. */
@@ -299,17 +441,23 @@ public final class MimicryWeapon implements Weapon {
         marks.put(attackerId, new Mark(victim.getUniqueId(), now));
     }
 
-    /** Swallow a blow's damage into the wielder's pool, clamped to the cap, and stamp them in combat. */
-    private void pool(UUID attackerId, double dealt, long now) {
-        Reservoir r = reservoirs.get(attackerId);
+    /**
+     * Swallow a wound into the wielder's pool and stamp them in combat.
+     *
+     * <p><b>Nothing clamps this.</b> The old build capped the pool because the release routed a four-figure
+     * number through {@code damage()} and vanilla billed the victim's armour for it; the cap is gone because
+     * that bill is now torn up in {@link #restoreArmour} instead, which is the honest place to fix it.
+     */
+    private void bank(UUID wielderId, double taken, long now) {
+        Reservoir r = reservoirs.get(wielderId);
         if (r == null) {
             r = new Reservoir(now);
-            reservoirs.put(attackerId, r);
-        } else if (now - r.lastBlowMs > RESERVOIR_DECAY_MS) {
+            reservoirs.put(wielderId, r);
+        } else if (now - r.lastWoundMs > RESERVOIR_DECAY_MS) {
             r.amount = 0.0;                              // the lull already emptied it — start clean
         }
-        r.amount = Math.min(RESERVOIR_CAP, r.amount + dealt);
-        r.lastBlowMs = now;
+        r.amount += taken;
+        r.lastWoundMs = now;
     }
 
     /**
@@ -335,7 +483,7 @@ public final class MimicryWeapon implements Weapon {
 
     // ---- input ---------------------------------------------------------------------
 
-    /** Shift + right-click releases the pool; a bare right-click runs the foe down. */
+    /** Shift + right-click brings the blade down; a bare right-click runs the foe down. */
     @Override
     public void onInteract(Player player, boolean sneaking) {
         if (sneaking) {
@@ -345,16 +493,41 @@ public final class MimicryWeapon implements Weapon {
         }
     }
 
-    // ---- Nothing There: give back what was swallowed --------------------------------
+    /**
+     * The M1 chain: a real slash on every swing, three beats that alternate their roll and then land a
+     * heavier overhead — a small rhyme with the downswing the reservoir eventually buys. This is animation
+     * only. The vanilla swing under it is untouched and is what deals the damage; adding a blow here would
+     * double-hit and is not what "m1 animations" asks for.
+     */
+    @Override
+    public void onSwing(Player player) {
+        UUID id = player.getUniqueId();
+        long now = System.currentTimeMillis();
+
+        Combo c = combos.get(id);
+        if (c == null || now - c.lastMs > COMBO_RESET_MS) {
+            c = new Combo();
+            combos.put(id, c);
+        }
+        c.lastMs = now;
+        int beat = c.beat;
+        c.beat = (c.beat + 1) % 3;
+
+        m1Fx(player, beat);
+    }
+
+    // ---- Nothing There: give back every wound at once --------------------------------
 
     /**
-     * Empty the reservoir as a single strike around the wielder: everything living inside
-     * {@link #RELEASE_RADIUS} takes {@link #RELEASE_FRACTION} of the pooled total. One
-     * {@code getNearbyEntities} scan for the whole cast, one blow per body.
+     * Bring the blade down. Everything living inside {@link #RELEASE_RADIUS} takes
+     * {@link #RELEASE_FRACTION} of the pooled total. One {@code getNearbyEntities} scan for the whole cast,
+     * one blow per body.
      *
      * <p>The pool is spent whether or not anything was standing there — the weapon gives it back either
-     * way. Damage is routed through {@code victim.damage(...)} so other plugins can veto it, and each blow
-     * is fenced so it cannot pool itself straight back into the reservoir it just came out of.
+     * way. Damage is routed through {@code victim.damage(...)} so armour reduces it and other plugins can
+     * veto it, each blow is fenced so it cannot pool itself straight back into the reservoir it just came
+     * out of, and each blow is wrapped in the armour-durability restore that makes an uncapped number safe
+     * to deal. See {@link #restoreArmour}.
      */
     private void nothingThere(Player player) {
         UUID id = player.getUniqueId();
@@ -362,7 +535,7 @@ public final class MimicryWeapon implements Weapon {
 
         double amount = pooled(id, now);
         if (amount < RELEASE_MIN) {
-            player.sendActionBar(EgoHud.status("Nothing There — nothing swallowed yet", RUST));
+            player.sendActionBar(EgoHud.status("Nothing There — no wound to give back", RUST));
             return;
         }
 
@@ -371,7 +544,7 @@ public final class MimicryWeapon implements Weapon {
         // Spend the pool first: whatever happens below, this cast owns it and nothing can double-dip it.
         reservoirs.remove(id);
 
-        releaseFx(player, amount);
+        nothingThereFx(player, amount);
 
         // One scan for the whole cast.
         List<Entity> nearby = player.getNearbyEntities(RELEASE_RADIUS, RELEASE_RADIUS, RELEASE_RADIUS);
@@ -384,10 +557,18 @@ public final class MimicryWeapon implements Weapon {
                 if (victim.isDead() || !victim.isValid()) continue;
                 if (victim.getLocation().distanceSquared(player.getLocation()) > RELEASE_RADIUS * RELEASE_RADIUS) continue;
 
-                // A body the wielder just cut is still inside its i-frames; without this the release
-                // would silently no-op on exactly the foe it was aimed at.
-                victim.setNoDamageTicks(0);
-                victim.damage(perTarget, player);
+                // Per victim, tight around that victim's own blow: read the wear, land the cleave, put the
+                // wear back. The finally is what makes the restore survive a veto from another plugin, or a
+                // listener throwing, or the blow killing outright.
+                List<ArmourWear> wear = snapshotArmour(victim);
+                try {
+                    // A body the wielder just cut is still inside its i-frames; without this the release
+                    // would silently no-op on exactly the foe it was aimed at.
+                    victim.setNoDamageTicks(0);
+                    victim.damage(perTarget, player);
+                } finally {
+                    restoreArmour(victim, wear);
+                }
             }
         } finally {
             striking.remove(id);
@@ -397,7 +578,98 @@ public final class MimicryWeapon implements Weapon {
         EgoDurability.wearMainHand(player);
     }
 
-    // ---- Onrush: the blink you don't see coming --------------------------------------
+    // ---- the armour restore -----------------------------------------------------------
+
+    /**
+     * One armour piece's durability as it stood immediately before a blow. The material is carried so the
+     * restore can tell "the same piece, now dented" from "a different item is in that slot now" without
+     * holding a reference to a stack the server may have replaced underneath us.
+     */
+    private record ArmourWear(EquipmentSlot slot, Material material, int damage) {}
+
+    /**
+     * Read every armour piece's durability, immediately before the blow.
+     *
+     * <p>Works off {@link LivingEntity#getEquipment()} rather than a player inventory, so a mob in a full
+     * set is covered exactly like a player — vanilla charges their armour too. An entity with no equipment
+     * at all, or nothing but empty slots, yields an empty list and the restore becomes a no-op.
+     *
+     * <p>{@code BODY} is skipped for humans: it is a real armour slot on 26.1.2 (wolf and horse armour live
+     * there) but a player has no such slot, and asking a player inventory for it is a question with no
+     * meaningful answer. Every other armour slot is read for everyone.
+     */
+    private List<ArmourWear> snapshotArmour(LivingEntity victim) {
+        EntityEquipment eq = victim.getEquipment();
+        if (eq == null) return List.of();                       // some entities carry no equipment at all
+
+        List<ArmourWear> out = null;
+        for (EquipmentSlot slot : ARMOUR_SLOTS) {
+            if (slot == EquipmentSlot.BODY && victim instanceof HumanEntity) continue;
+
+            ItemStack piece = eq.getItem(slot);
+            if (piece == null || piece.getType().isAir()) continue;          // empty slot — nothing to keep
+            if (!(piece.getItemMeta() instanceof Damageable d)) continue;    // carries no durability at all
+
+            if (out == null) out = new ArrayList<>(ARMOUR_SLOTS.length);
+            out.add(new ArmourWear(slot, piece.getType(), d.getDamage()));
+        }
+        return out == null ? List.of() : out;
+    }
+
+    /**
+     * Put the durability back, immediately after the blow — the whole reason the reservoir can be uncapped.
+     *
+     * <p>Every case this is asked to survive, and what it does:
+     * <ul>
+     *   <li><b>The ordinary one</b> — the piece is still worn and vanilla has billed it {@code damage/4}.
+     *       Same slot, same material, damage now higher: the recorded value is written straight back, so the
+     *       victim's armour reduced a four-figure cleave and paid nothing for the privilege.</li>
+     *   <li><b>The event was cancelled</b> by another plugin. No blow landed, so no durability moved, so the
+     *       recorded value already equals the live one and the equality check makes the whole restore a
+     *       no-op — not a redundant write, and not a stale value stamped over someone else's change. The
+     *       restore runs from a {@code finally}, so a veto (or a listener throwing) cannot skip it.</li>
+     *   <li><b>The piece broke.</b> Vanilla empties the slot, so the slot reads air and the piece is left
+     *       alone: the recorded stack is <em>not</em> written back, because a destroyed item must stay
+     *       destroyed. This is the one case the restore cannot save — see below.</li>
+     *   <li><b>The piece was replaced</b> mid-event (another plugin swapping gear on hit). The material no
+     *       longer matches what was recorded, so it is left alone: someone else owns that slot now, and
+     *       stamping an unrelated item with our remembered number would be a corruption, not a repair.</li>
+     *   <li><b>The victim died</b> to the blow and dropped everything inside the same {@code damage()} call.
+     *       The slots read air, every piece is skipped, and their drops keep whatever durability they died
+     *       with.</li>
+     *   <li><b>No armour, or a non-player victim.</b> Empty snapshot, or a mob's snapshot handled by the
+     *       same code path as a player's — the loop is over {@link EntityEquipment}, which both have.</li>
+     * </ul>
+     *
+     * <p><b>The hole, stated plainly rather than papered over:</b> a piece vanilla <em>destroys</em> during
+     * the blow cannot be restored, because the only way to bring it back is to write the recorded stack into
+     * the slot, and that is item duplication wearing a repair's clothes. A cleave big enough to bill a piece
+     * more durability than it had left therefore still destroys it. This bites a victim who dies to the cut
+     * (their armour breaks before the death drop) and a victim who survives it wearing nearly-spent gear.
+     * Everything that survives with the piece intact — which is every case where "armour soaked it" is
+     * meaningful — is fully covered. Closing the last case needs either a damage type that skips the armour
+     * bill (rejected: armour must still matter) or a cap on the number (rejected: the point of the rework).
+     */
+    private void restoreArmour(LivingEntity victim, List<ArmourWear> before) {
+        if (before.isEmpty()) return;
+
+        EntityEquipment eq = victim.getEquipment();
+        if (eq == null) return;                                  // equipment went away with the entity
+
+        for (ArmourWear w : before) {
+            ItemStack piece = eq.getItem(w.slot());
+            if (piece == null || piece.getType().isAir()) continue;      // broke, or dropped — do not resurrect
+            if (piece.getType() != w.material()) continue;               // someone else's item now — leave it
+            if (!(piece.getItemMeta() instanceof Damageable d)) continue;
+            if (d.getDamage() == w.damage()) continue;                   // untouched (or cancelled) — no write
+
+            d.setDamage(w.damage());
+            piece.setItemMeta(d);
+            eq.setItem(w.slot(), piece, true);                           // silent: no re-equip clatter
+        }
+    }
+
+    // ---- Onrush: the rush you don't see coming --------------------------------------
 
     /**
      * Run down the foe the wielder last struck. If it is faltering past its threshold, Mimicry arrives at
@@ -428,17 +700,17 @@ public final class MimicryWeapon implements Weapon {
         }
 
         if (executable(target)) {
-            blink(player, target, true);                 // behind it: the blow it never sees
+            rush(player, target, true);                   // behind it: the blow it never sees
             execute(player, target);
             marks.remove(id);                            // the mark died with it
             onrushReadyAt.remove(id);                    // resets on the kill — no cooldown paid
         } else {
-            blink(player, target, false);                // to its face
+            rush(player, target, false);                 // to its face
             strike(player, target);
             onrushReadyAt.put(id, now + ONRUSH_COOLDOWN_MS);
         }
 
-        // Blink + blow is a non-vanilla use, so it wears the blade beyond the swing it never made.
+        // Rush + blow is a non-vanilla use, so it wears the blade beyond the swing it never made.
         EgoDurability.wearMainHand(player);
     }
 
@@ -520,15 +792,23 @@ public final class MimicryWeapon implements Weapon {
         }
     }
 
-    // ---- the blink -------------------------------------------------------------------
+    // ---- the rush ---------------------------------------------------------------------
 
     /**
-     * Put the wielder at the target's back ({@code behind}) or in its face, looking at it. Wall-safe: the
-     * landing spot is probed for a clear two-block standing space and walked back toward the target — which
-     * is by definition standing somewhere legal — until one is found. If nothing along that line is clear
-     * the wielder simply doesn't move; the blow still lands, since the range check already passed.
+     * Put the wielder at the target's back ({@code behind}) or in its face, looking at it.
+     *
+     * <p>The arrival is instant — it has to be, or the blow that follows would be aimed at where the target
+     * used to be — but nothing about it is allowed to read as a teleport. There is no enderman chime and no
+     * puff at either end; instead {@link #rushFx} lays a body-height streak down the whole path, revealed
+     * from where the wielder stood toward where they now are, so the eye is handed a wake to follow and
+     * reads it as something that crossed the gap far too quickly rather than something that blinked out.
+     *
+     * <p>Wall-safe: the landing spot is probed for a clear two-block standing space and walked back toward
+     * the target — which is by definition standing somewhere legal — until one is found. If nothing along
+     * that line is clear the wielder simply doesn't move; the blow still lands, since the range check
+     * already passed.
      */
-    private void blink(Player player, LivingEntity target, boolean behind) {
+    private void rush(Player player, LivingEntity target, boolean behind) {
         Location tLoc = target.getLocation();
 
         Vector facing = tLoc.getDirection().setY(0);
@@ -550,7 +830,7 @@ public final class MimicryWeapon implements Weapon {
         Location landing = wallSafe(want, tLoc);
         if (landing == null) return;                     // nowhere legal to stand — stay put, still swing
 
-        blinkFx(player.getLocation(), landing);
+        rushFx(player.getLocation(), landing);
         player.teleport(landing);
     }
 
@@ -591,7 +871,8 @@ public final class MimicryWeapon implements Weapon {
      * it is not — a wielder who sheathes the blade must stop costing ticks immediately.
      *
      * <p>Note the pool itself is <em>not</em> dropped here: sheathing the weapon is not "out of combat", and
-     * only {@link #RESERVOIR_DECAY_MS} of no blows empties it.
+     * only {@link #RESERVOIR_DECAY_MS} without a fresh wound empties it. The bar is scaled by
+     * {@link #HUD_SCALE} and saturates; the number next to it never does.
      */
     @Override
     public boolean onTick(Player player, long tick) {
@@ -608,9 +889,9 @@ public final class MimicryWeapon implements Weapon {
                 ? EgoHud.cooldown("Onrush", readyAt - now, RUST)     // whole seconds, never milliseconds
                 : EgoHud.ready("Onrush", BONE);
 
-        Component label = plain("Nothing There  " + (int) Math.round(amount))
+        Component label = plain("Nothing There  " + (long) Math.round(amount))
                 .append(plain("  ")).append(onrush);
-        player.sendActionBar(EgoHud.gauge(RUST, amount / RESERVOIR_CAP, label));
+        player.sendActionBar(EgoHud.gauge(RUST, amount / HUD_SCALE, label));
         return true;
     }
 
@@ -633,9 +914,10 @@ public final class MimicryWeapon implements Weapon {
     }
 
     /**
-     * A wielder left. Their fence entry goes — it is per-call state and can only be stale. Their reservoir
-     * and Onrush cooldown deliberately stay: the design gives the pool a five-minute grace across a logout,
-     * and dropping the cooldown here would make quitting a free reset. Both are timestamped and swept by
+     * A wielder left. Their fence entry goes — it is per-call state and can only be stale — and so does
+     * their M1 chain, which is an animation and means nothing across a session. Their reservoir and Onrush
+     * cooldown deliberately stay: the design gives the pool a five-minute grace across a logout, and
+     * dropping the cooldown here would make quitting a free reset. Both are timestamped and swept by
      * {@link #prune}, so neither can outlive its meaning.
      */
     @Override
@@ -643,6 +925,7 @@ public final class MimicryWeapon implements Weapon {
         striking.remove(id);
         marks.remove(id);
         lastDrinkAt.remove(id);
+        combos.remove(id);
         prune(System.currentTimeMillis());
     }
 
@@ -653,7 +936,112 @@ public final class MimicryWeapon implements Weapon {
         marks.clear();
         onrushReadyAt.clear();
         lastDrinkAt.clear();
+        combos.clear();
         striking.clear();
+    }
+
+    // ---- the slash vocabulary ------------------------------------------------------------
+    //
+    // Arayashiki is the house's slash language and the named reference, so this is its grammar rather than
+    // a second one invented alongside it: a parametric arc whose points are given staggered birth ticks so
+    // the blade visibly travels its cut, each point lingering a few ticks and shrinking as it goes, with a
+    // sparse END_ROD leading tip. What differs is the accent — Arayashiki cuts in white, Mimicry cuts in
+    // bone bleeding to dried red — and the weight: every arc here starts thicker than Arayashiki's widest.
+
+    /**
+     * Lay down one arc. The cut lives in the plane spanned by {@code u} and {@code v}, swinging {@code
+     * sweep} radians about {@code aMid}; {@code reverse} flips which end the blade starts from.
+     *
+     * <p>{@code force} is passed on every particle here, unconditionally: a large enough reservoir throws an
+     * arc a hundred blocks across, and everything past ~32 blocks is culled client-side without it. The cost
+     * is paid only by casts big enough to need it, because a small arc's points are all inside the radius
+     * anyway.
+     */
+    private void arc(World world, Location pivot, Vector u, Vector v,
+                     double radius, double sweep, double aMid, boolean reverse,
+                     float thickness, int points, int reveal, int fade, boolean tip) {
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        final Location[] pts = new Location[points + 1];
+        final int[] birth = new int[points + 1];
+
+        // Hand-jitter, proportional to the cut so a huge one doesn't look laser-ruled, capped so it stays a
+        // waver rather than a cloud.
+        double jitter = Math.min(0.30, 0.02 * radius);
+
+        for (int i = 0; i <= points; i++) {
+            double f = (double) i / points;
+            double a = aMid - sweep / 2.0 + sweep * f;
+            Vector radial = u.clone().multiply(Math.cos(a) * radius)
+                    .add(v.clone().multiply(Math.sin(a) * radius));
+            Location p = pivot.clone().add(radial);
+            p.add((rng.nextDouble() - 0.5) * jitter,
+                  (rng.nextDouble() - 0.5) * jitter,
+                  (rng.nextDouble() - 0.5) * jitter);
+            pts[i] = p;
+            int order = reverse ? (points - i) : i;
+            birth[i] = Math.round((float) reveal * order / points);
+        }
+
+        animateArc(world, pts, birth, thickness, reveal, fade, tip);
+    }
+
+    /**
+     * Reveal an arc point by point and let it fade. Holds only the point array and the world — never an
+     * entity — so a cut still hanging in the air when its wielder dies or logs out pins nothing, and cancels
+     * itself on a tick count rather than on anything's liveness.
+     */
+    private void animateArc(World world, Location[] pts, int[] birth, float thickness,
+                            int reveal, int fade, boolean tip) {
+        // One dust object per fade step instead of one per point per tick: the size is a pure function of
+        // age, and at up to SLASH_POINTS_MAX points a tick the difference is real garbage.
+        final Particle.DustTransition[] byAge = new Particle.DustTransition[fade];
+        for (int a = 0; a < fade; a++) {
+            byAge[a] = new Particle.DustTransition(BONE_C, BLOOD_C, thickness * (1.0f - 0.5f * a / fade));
+        }
+
+        new BukkitRunnable() {
+            int t = 0;
+
+            @Override
+            public void run() {
+                if (t > reveal + fade) { cancel(); return; }
+                for (int i = 0; i < pts.length; i++) {
+                    int age = t - birth[i];
+                    if (age < 0 || age >= fade) continue;
+                    world.spawnParticle(Particle.DUST_COLOR_TRANSITION, pts[i], 1, 0, 0, 0, 0, byAge[age], true);
+                    if (tip && age == 0 && i % 5 == 0) {   // the glowing leading edge, sparse on purpose
+                        world.spawnParticle(Particle.END_ROD, pts[i], 1, 0, 0, 0, 0, (Object) null, true);
+                    }
+                }
+                t++;
+            }
+        }.runTaskTimer(plugin, 0L, 1L);
+    }
+
+    /**
+     * How far the cleave reaches, given what is in the pool. <b>Unbounded on purpose</b> — a wielder who has
+     * banked four figures gets an arc that leaves the render distance, which is the whole point of the
+     * rework. Growth is {@code sqrt} so the early pool is felt immediately and an absurd one still lands
+     * somewhere drawable: 40 pooled reads 6 blocks, 1,000 reads 18, 10,000 reads 50, 100,000 reads 153.
+     */
+    private static double slashRadius(double amount) {
+        return SLASH_BASE_RADIUS * (1.0 + Math.sqrt(Math.max(0.0, amount) / SLASH_REF));
+    }
+
+    /** How wide the blade is drawn. Clamped, and {@link #SLASH_THICK_MAX} says why. */
+    private static float slashThickness(double amount) {
+        return (float) Math.min(SLASH_THICK_MAX,
+                SLASH_THICK_BASE + Math.sqrt(Math.max(0.0, amount) / 50.0));
+    }
+
+    /**
+     * How many points the arc is drawn with — <b>the perf ceiling, and the one thing the pool does not get
+     * to grow.</b> Density tracks size until {@link #SLASH_POINTS_MAX}, past which a bigger cleave spends
+     * exactly the same packets and simply spaces them further apart. At that scale each point is also being
+     * drawn several blocks wide, so the arc still reads as an edge rather than a dotted line.
+     */
+    private static int slashPoints(double radius) {
+        return Math.max(SLASH_POINTS_MIN, Math.min(SLASH_POINTS_MAX, (int) Math.round(radius * 8.0)));
     }
 
     // ---- SFX / VFX -----------------------------------------------------------------------
@@ -667,49 +1055,168 @@ public final class MimicryWeapon implements Weapon {
     }
 
     /**
-     * Nothing There: the weapon giving back everything it swallowed. A ring of dust that bleeds from
-     * bone-white to dried red as it goes out, sized by how much was in the pool, over a sonic crack.
+     * The M1 chain. Beats one and two are wide swoops rolled opposite ways around the look direction; beat
+     * three drops the blade overhead, a small quotation of the downswing the reservoir eventually buys, and
+     * carries the weight in its sound rather than in more particles.
      */
-    private void releaseFx(Player player, double amount) {
+    private void m1Fx(Player player, int beat) {
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
         World world = player.getWorld();
-        Location feet = player.getLocation();
-        double fill = Math.max(0.0, Math.min(1.0, amount / RESERVOIR_CAP));
+        Location eye = player.getEyeLocation();
+        Location pivot = player.getLocation().add(0, 1.1, 0);
+        Vector dir = eye.getDirection().normalize();
 
-        world.playSound(feet, Sound.ENTITY_WARDEN_SONIC_BOOM, 0.9f, 1.4f);
-        world.playSound(feet, Sound.ENTITY_GENERIC_EXPLODE, 0.7f + (float) fill * 0.3f, 1.6f);
-        world.spawnParticle(Particle.EXPLOSION, feet.clone().add(0, 0.8, 0), 1);
+        boolean heavy = beat == 2;
 
-        // The ring: bone-white at the wielder, dried blood by the time it reaches the edge.
-        Particle.DustTransition bleed = new Particle.DustTransition(BONE_C, BLOOD_C, 1.5f);
-        final int rings = 3;
-        final int points = 26;
-        for (int r = 1; r <= rings; r++) {
-            double radius = RELEASE_RADIUS * ((double) r / rings);
-            for (int i = 0; i < points; i++) {
-                double a = (Math.PI * 2 * i) / points;
-                Location p = feet.clone().add(Math.cos(a) * radius, 0.25 + r * 0.2, Math.sin(a) * radius);
-                world.spawnParticle(Particle.DUST_COLOR_TRANSITION, p, 1, 0.04, 0.04, 0.04, 0.0, bleed);
-            }
+        if (heavy) {
+            // Overhead: the plane of the cut is vertical, straight down through the facing.
+            Vector fwd = dir.clone().setY(0);
+            if (fwd.lengthSquared() < 1.0e-6) fwd = new Vector(0, 0, 1);
+            fwd.normalize();
+            arc(world, pivot, new Vector(0, 1, 0), fwd,
+                    2.9, Math.toRadians(175), Math.toRadians(50), false,
+                    2.2f, M1_POINTS_HEAVY, M1_REVEAL + 1, M1_FADE, true);
+
+            world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_STRONG, 1.0f, 0.75f);
+            world.playSound(eye, Sound.ITEM_TRIDENT_RIPTIDE_3, 0.6f, 1.1f);
+            world.playSound(eye, Sound.BLOCK_ANVIL_LAND, 0.22f, 1.7f);
+            world.spawnParticle(Particle.DUST_COLOR_TRANSITION, eye.clone().add(dir.clone().multiply(1.6)),
+                    8, 0.3, 0.3, 0.3, 0.0, new Particle.DustTransition(BONE_C, BLOOD_C, 1.6f));
+        } else {
+            // A swoop rolled around the facing, alternating side to side so the chain reads as a rhythm.
+            Vector right = dir.clone().crossProduct(new Vector(0, 1, 0));
+            if (right.lengthSquared() < 1.0e-6) right = new Vector(1, 0, 0);
+            right.normalize();
+            Vector up = right.clone().crossProduct(dir).normalize();
+
+            double roll = (beat == 0 ? 0.7 : -0.7) + rng.nextDouble(-0.18, 0.18);
+            Vector v = up.clone().multiply(Math.cos(roll)).add(right.clone().multiply(Math.sin(roll)));
+
+            arc(world, pivot, dir.clone(), v, 2.3 + rng.nextDouble() * 0.35,
+                    Math.toRadians(165), rng.nextDouble(-0.2, 0.2), beat == 1,
+                    1.9f, M1_POINTS, M1_REVEAL, M1_FADE, true);
+
+            world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.85f, 1.25f + rng.nextFloat() * 0.3f);
+            world.playSound(eye, Sound.ITEM_TRIDENT_RETURN, 0.4f, 1.6f + rng.nextFloat() * 0.25f);
         }
-        world.spawnParticle(Particle.SWEEP_ATTACK, feet.clone().add(0, 1.0, 0), 4, 0.8, 0.4, 0.8, 0.0);
     }
 
-    /** The blink itself: the wielder unmaking where they were and reassembling where they are. */
-    private void blinkFx(Location from, Location to) {
+    /**
+     * Nothing There: the blade going up and coming down, drawn to the size of everything the wielder has
+     * been made to swallow. Nothing here clamps the pool — the reach and the width both read straight off it
+     * — and nothing here scans, spawns, or damages either; it is one arc and one impact, and the count it
+     * spends is capped by {@link #slashPoints} no matter how absurd the number is.
+     *
+     * <p>The blow itself has already landed by the time the blade finishes falling. That is deliberate: the
+     * alternative is holding the damage for {@link #DOWNSWING_REVEAL} ticks, which means re-validating every
+     * victim afterwards and carrying entity references across ticks to do it. Four ticks is 200ms and the
+     * impact reads as the hit; correctness is worth more than the frame.
+     */
+    private void nothingThereFx(Player player, double amount) {
+        World world = player.getWorld();
+        Location feet = player.getLocation();
+        Location pivot = feet.clone().add(0, 1.2, 0);
+
+        final double radius = slashRadius(amount);
+        float thick = slashThickness(amount);
+        int points = slashPoints(radius);
+
+        // 0..1: how far past "big" this one is, used to lean on the sound rather than the particle count.
+        final float bigness = (float) Math.min(1.0, radius / 24.0);
+
+        // The plane of the cleave: straight down through the way the wielder is facing.
+        Vector fwd = feet.getDirection().setY(0);
+        if (fwd.lengthSquared() < 1.0e-6) fwd = new Vector(0, 0, 1);
+        fwd.normalize();
+
+        // The wind-up and the cut. Deep, and deeper the more it is carrying.
+        world.playSound(feet, Sound.ENTITY_PLAYER_ATTACK_STRONG, 1.0f, 0.5f);
+        world.playSound(feet, Sound.ITEM_TRIDENT_RIPTIDE_3, 1.0f, 0.6f - bigness * 0.1f);
+        world.playSound(feet, Sound.ENTITY_WARDEN_SONIC_BOOM, 1.0f, 1.5f - bigness * 0.7f);
+        if (bigness > 0.35f) {                              // only the genuinely absurd ones get the bass
+            world.playSound(feet, Sound.ENTITY_WITHER_BREAK_BLOCK, 1.0f, 0.5f);
+            world.playSound(feet, Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 0.55f * bigness, 0.65f);
+        }
+
+        // Up and back, over the top, down through the front: -40 degrees to +150.
+        arc(world, pivot, new Vector(0, 1, 0), fwd, radius,
+                Math.toRadians(190), Math.toRadians(55), false,
+                thick, points, DOWNSWING_REVEAL, DOWNSWING_FADE, true);
+
+        // The impact, on the frame the edge reaches the ground.
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                impactFx(world, feet, radius, bigness);
+            }
+        }.runTaskLater(plugin, DOWNSWING_REVEAL);
+    }
+
+    /** Where the downswing lands: a flash, a crack, and one fixed-budget ring pushed out to the cut's reach. */
+    private void impactFx(World world, Location feet, double radius, float bigness) {
+        world.playSound(feet, Sound.ITEM_MACE_SMASH_GROUND_HEAVY, 1.0f, 0.6f);
+        world.playSound(feet, Sound.ENTITY_GENERIC_EXPLODE, 0.8f + bigness * 0.2f, 0.6f);
+        world.playSound(feet, Sound.ENTITY_WARDEN_ATTACK_IMPACT, 0.9f, 0.7f);
+
+        Location chest = feet.clone().add(0, 1.0, 0);
+        world.spawnParticle(Particle.EXPLOSION, chest, 1, 0, 0, 0, 0, (Object) null, true);
+        world.spawnParticle(Particle.SWEEP_ATTACK, chest, IMPACT_SWEEPS, 1.0, 0.5, 1.0, 0.0, (Object) null, true);
+        world.spawnParticle(Particle.FLASH, chest, 1, 0, 0, 0, 0, BLOOD_C, true);  // FLASH takes a Color here
+
+        // The shockwave. Fixed point count, so its cost never tracks the size of the cut.
+        double ring = Math.min(radius, SHOCKWAVE_RADIUS_MAX);
+        Particle.DustTransition bleed = new Particle.DustTransition(BONE_C, BLOOD_C, 2.0f + bigness * 3.0f);
+        for (int i = 0; i < SHOCKWAVE_POINTS; i++) {
+            double a = (Math.PI * 2 * i) / SHOCKWAVE_POINTS;
+            Location p = feet.clone().add(Math.cos(a) * ring, 0.3, Math.sin(a) * ring);
+            world.spawnParticle(Particle.DUST_COLOR_TRANSITION, p, 1, 0.05, 0.05, 0.05, 0.0, bleed, true);
+        }
+    }
+
+    /**
+     * The rush: a body-height wake laid down the whole path and revealed from the wielder's old ground
+     * toward their new, so what the eye follows is something that crossed the gap rather than something that
+     * stopped existing in one place and started in another.
+     *
+     * <p>There is deliberately no {@code ENTITY_ENDERMAN_TELEPORT} here. It was the old cue and it is the
+     * literal sound of a teleport, which is precisely the read this is meant to kill; the departure is a
+     * riptide crack, the crossing is a sweep at the midpoint, and the arrival is a body's worth of weight
+     * hitting the ground.
+     */
+    private void rushFx(Location from, Location to) {
         World world = from.getWorld();
-        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        if (world == null) return;
 
-        world.playSound(from, Sound.ENTITY_ENDERMAN_TELEPORT, 0.8f, 1.5f + (rng.nextFloat() - 0.5f) * 0.2f);
-
-        Particle.DustTransition trail = new Particle.DustTransition(BONE_C, BLOOD_C, 1.1f);
         Vector step = to.toVector().subtract(from.toVector());
         double span = step.length();
         if (span < 1.0e-6) return;
         step.normalize();
-        for (double d = 0; d < span; d += 0.4) {
-            Location p = from.clone().add(step.clone().multiply(d)).add(0, 1.0, 0);
-            world.spawnParticle(Particle.DUST_COLOR_TRANSITION, p, 1, 0.06, 0.06, 0.06, 0.0, trail);
+
+        // Departure, crossing, arrival — three points in space, not one chime at both ends.
+        world.playSound(from, Sound.ITEM_TRIDENT_RIPTIDE_3, 0.9f, 1.5f);
+        world.playSound(from, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.8f, 0.6f);
+        world.playSound(from.clone().add(step.clone().multiply(span * 0.5)),
+                Sound.ITEM_TRIDENT_THROW, 0.7f, 1.9f);
+        world.playSound(to, Sound.ENTITY_PLAYER_ATTACK_KNOCKBACK, 0.9f, 1.4f);
+        world.playSound(to, Sound.ENTITY_GENERIC_BIG_FALL, 0.5f, 1.6f);
+
+        // Sample the path, capped: fourteen blocks at RUSH_STEP is ~31 samples, and the cap holds it there
+        // however the range is retuned.
+        int n = Math.min(RUSH_POINTS_MAX, Math.max(2, (int) Math.round(span / RUSH_STEP)));
+        final Location[] pts = new Location[(n + 1) * 2];
+        final int[] birth = new int[(n + 1) * 2];
+        for (int i = 0; i <= n; i++) {
+            double d = span * i / n;
+            Location base = from.clone().add(step.clone().multiply(d));
+            int b = Math.round((float) RUSH_REVEAL * i / n);
+            // Two strands, knee and shoulder: a person went through here, not a thread.
+            pts[i * 2] = base.clone().add(0, 0.6, 0);
+            pts[i * 2 + 1] = base.clone().add(0, 1.5, 0);
+            birth[i * 2] = b;
+            birth[i * 2 + 1] = b;
         }
+
+        animateArc(world, pts, birth, 1.7f, RUSH_REVEAL, RUSH_FADE, true);
     }
 
     /** The devastating blow to a foe that stood its ground: a heavy cleave and a burst of red. */
@@ -718,9 +1225,20 @@ public final class MimicryWeapon implements Weapon {
         World world = victim.getWorld();
         Location body = victim.getLocation().add(0, victim.getHeight() * 0.6, 0);
 
-        world.playSound(body, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 1.0f, 0.7f + (rng.nextFloat() - 0.5f) * 0.1f);
+        world.playSound(body, Sound.ENTITY_PLAYER_ATTACK_STRONG, 1.0f, 0.65f);
         world.playSound(body, Sound.ENTITY_PLAYER_ATTACK_CRIT, 1.0f, 0.8f);
         world.playSound(body, Sound.BLOCK_ANVIL_LAND, 0.3f, 1.5f);
+        world.playSound(body, Sound.ENTITY_HOGLIN_ATTACK, 0.4f, 0.6f + (rng.nextFloat() - 0.5f) * 0.1f);
+
+        // A real cut across the body, in the same grammar as everything else this weapon does.
+        Vector across = victim.getLocation().toVector().subtract(attacker.getLocation().toVector()).setY(0);
+        if (across.lengthSquared() < 1.0e-6) across = new Vector(0, 0, 1);
+        across.normalize();
+        Vector side = across.clone().crossProduct(new Vector(0, 1, 0));
+        if (side.lengthSquared() < 1.0e-6) side = new Vector(1, 0, 0);
+        side.normalize();
+        arc(world, body, side, new Vector(0, 1, 0), 1.9, Math.toRadians(150),
+                Math.toRadians(20), rng.nextBoolean(), 2.1f, 16, 2, 3, true);
 
         world.spawnParticle(Particle.SWEEP_ATTACK, body, 2, 0.3, 0.2, 0.3, 0.0);
         world.spawnParticle(Particle.DUST, body, 18, 0.3, 0.3, 0.3, 0.0,
@@ -736,6 +1254,16 @@ public final class MimicryWeapon implements Weapon {
         world.playSound(neck, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 1.0f, 1.3f);
         world.playSound(neck, Sound.ENTITY_PLAYER_ATTACK_CRIT, 1.0f, 0.6f + (rng.nextFloat() - 0.5f) * 0.1f);
         world.playSound(neck, Sound.BLOCK_HONEY_BLOCK_BREAK, 0.7f, 0.5f);
+        world.playSound(neck, Sound.ENTITY_ZOMBIE_VILLAGER_CONVERTED, 0.35f, 1.9f);
+
+        // One short, fast cut straight across the nape — the blow it never saw.
+        Vector side = victim.getLocation().getDirection().setY(0);
+        if (side.lengthSquared() < 1.0e-6) side = new Vector(0, 0, 1);
+        side = side.crossProduct(new Vector(0, 1, 0));
+        if (side.lengthSquared() < 1.0e-6) side = new Vector(1, 0, 0);
+        side.normalize();
+        arc(world, neck, side, new Vector(0, 1, 0), 1.3, Math.toRadians(120), 0.0,
+                false, 1.8f, 12, 1, 3, true);
 
         world.spawnParticle(Particle.CRIT, neck, 12, 0.2, 0.2, 0.2, 0.3);
         world.spawnParticle(Particle.DUST_COLOR_TRANSITION, neck, 24, 0.25, 0.2, 0.25, 0.0,
@@ -763,27 +1291,39 @@ public final class MimicryWeapon implements Weapon {
             BONE,
             RUST,
             List.of(
-                    "The blade of the Red Mist — a thing",
-                    "wearing the shape of a weapon. It",
-                    "strikes faster than the eye can",
-                    "follow and drinks a quarter of every",
-                    "wound to mend its wielder into a",
-                    "wall of flesh."
+                    "The yearning to imitate the human",
+                    "form is sloppily reflected on the",
+                    "E.G.O, as if it were a reminder that",
+                    "it should remain a mere desire.",
+                    "When the unfamiliar and otherworldly",
+                    "eyes stare at you, you will feel a",
+                    "chill up your spine. If pushed to the",
+                    "limit, one can wield it.",
+                    "",
+                    "It can deliver a powerful downswing",
+                    "that should be impossible for a",
+                    "human."
             ),
             List.of(
                     new EgoLore.Ability("[Passive] Is That the Red Mist?!?",
                             "Heal 25% of the damage you deal,",
                             "at most once every 5 seconds."),
+                    new EgoLore.Ability("[Passive] The reservoir",
+                            "Damage dealt TO you pools in the",
+                            "blade. There is no ceiling on it.",
+                            "The pool empties after 5 minutes",
+                            "without a fresh wound."),
                     new EgoLore.Ability("[Shift + Right-click] Nothing There",
-                            "Release a strike around you dealing",
-                            "half of the damage you have pooled,",
-                            "then spend it. The pool empties after",
-                            "5 minutes out of combat."),
+                            "Bring the blade down. Everything",
+                            "within 5 blocks takes half of the",
+                            "pooled total, then the pool is",
+                            "spent. The more it swallowed, the",
+                            "bigger the blade that falls."),
                     new EgoLore.Ability("[Right-click] Onrush",
-                            "Blink onto the foe you last struck",
-                            "and finish it: player <25%, mob <50%,",
+                            "Rush the foe you last struck and",
+                            "finish it: player <25%, mob <50%,",
                             "boss <10% HP. Free if it lands.",
-                            "Otherwise blink to its face and strike",
-                            "hard — 3 minute cooldown.")
+                            "Otherwise rush to its face and",
+                            "strike hard — 3 minute cooldown.")
             ));
 }

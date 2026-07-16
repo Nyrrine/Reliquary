@@ -19,6 +19,7 @@ import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -100,6 +101,14 @@ public final class HornetWeapon implements Weapon {
 
     /** Wielder -> their twin magazines, stance, strike tallies and reload clock. The only state this weapon keeps. */
     private final Map<UUID, Hive> hives = new HashMap<>();
+
+    /**
+     * Bodies currently taking one of our own rounds. The manager dispatches {@link #onHit} for any hit
+     * whose damager is a player holding this weapon, which every spore round and every pellet is — so this
+     * fence is what tells a shot apart from a swing. Held only across the single {@code damage()} call, in
+     * a try/finally, so it is empty between rounds and can never accumulate a dead mob's id.
+     */
+    private final Set<UUID> shooting = new HashSet<>();
 
     // ---- tuning: magazines & the shared reload ------------------------------------
     private static final int  SPORE_MAG    = 10;     // spore rounds per magazine (rifle)
@@ -267,6 +276,28 @@ public final class HornetWeapon implements Weapon {
      * A swing-refreshed window long enough to bridge a 1s gap would keep firing after the wielder had already
      * let go — a phantom extra shot out of an unforgiving magazine. One click, one round.
      */
+    /**
+     * A gun does not punch. Left-clicking a body at arm's length used to do both — the vanilla melee blow
+     * landed <em>and</em> the trigger pulled — and the melee won, because it stamped hurt-immunity on the
+     * victim a fraction before the round arrived, so the shot was swallowed whole. From the wielder's side
+     * the weapon simply stopped firing whenever an enemy got close, which is the worst possible moment for
+     * a gun to stop firing.
+     *
+     * <p>Cancelling the swing's damage settles it: the blow never lands, no i-frames are stamped, and the
+     * round that {@link #onSwing} fires on the very same click is the only thing that touches them. Nothing
+     * is lost — Hornet is a {@code ranged} model with no melee damage of its own to give up.
+     *
+     * <p><b>The fence is not optional.</b> The manager dispatches this for <em>any</em> hit whose damager is
+     * a player holding this weapon, and every round we fire is exactly that — so our own bullets arrive back
+     * here. Without {@link #shooting} the cancel would eat the shot it exists to protect, and the gun would
+     * deal nothing at all.
+     */
+    @Override
+    public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        if (shooting.contains(victim.getUniqueId())) return; // our own round, not a swing
+        event.setCancelled(true);
+    }
+
     @Override
     public void onSwing(Player player) {
         if (!matches(player.getInventory().getItemInMainHand())) return;
@@ -367,7 +398,12 @@ public final class HornetWeapon implements Weapon {
         drawTracer(world, muzzle, end, SPORE_DUST, SPORE_FINE, 0.55);
 
         if (victim != null) {
-            victim.damage(RIFLE_DAMAGE, player);   // routed so other plugins can cancel
+            shooting.add(victim.getUniqueId());
+            try {
+                victim.damage(RIFLE_DAMAGE, player);   // routed so other plugins can cancel
+            } finally {
+                shooting.remove(victim.getUniqueId());
+            }
             sporeImpactFx(world, end);
         }
         return victim;
@@ -456,7 +492,17 @@ public final class HornetWeapon implements Weapon {
             if (entHit == null || !(entHit.getHitEntity() instanceof LivingEntity le)) break;
 
             Location at = entHit.getHitPosition().toLocation(world);
-            le.damage(BUCKSHOT_PELLET_DAMAGE, player);   // routed so other plugins can cancel
+            // A blast is six pellets arriving together, and vanilla only lets a body be hurt once every
+            // ten ticks — so without this the first pellet stamped hurt-immunity and the other five were
+            // swallowed whole. A full point-blank blast landed 1.8 instead of 10.8, which read in play as
+            // "buckshot does half a heart". The pellets aren't weak; they were never arriving.
+            le.setNoDamageTicks(0);
+            shooting.add(le.getUniqueId());
+            try {
+                le.damage(BUCKSHOT_PELLET_DAMAGE, player);   // routed so other plugins can cancel
+            } finally {
+                shooting.remove(le.getUniqueId());
+            }
             buckImpactFx(world, at);
             bitten.add(le.getUniqueId());
             out.add(le);
@@ -507,7 +553,10 @@ public final class HornetWeapon implements Weapon {
         Location at = player.getLocation();
         world.playSound(at, Sound.ITEM_CROSSBOW_LOADING_START, 0.7f, 0.8f);
         world.playSound(at, Sound.BLOCK_COMPOSTER_FILL_SUCCESS, 0.6f, 0.7f); // the chamber packing wet
-        world.playSound(at, Sound.ENTITY_BEE_LOOP_AGGRESSIVE, 0.5f, 0.7f);   // the hive stirring
+        // A short stir, not a drone. This was BEE_LOOP_AGGRESSIVE at 0.7 — an ambient loop, which is long
+        // by nature and longer still pitched down, so every reload left a buzz hanging in the room after
+        // the wielder had walked away. BEE_HURT is a clipped note: the hive objects, briefly.
+        world.playSound(at, Sound.ENTITY_BEE_HURT, 0.45f, 0.8f);             // the hive stirring
     }
 
     /** Both magazines are back: a bright hive chirp and a puff of fresh spores off the breech. */
@@ -646,7 +695,9 @@ public final class HornetWeapon implements Weapon {
 
         world.playSound(at, Sound.ITEM_CROSSBOW_LOADING_MIDDLE, 0.7f, rifle ? 1.6f : 0.8f);
         world.playSound(at, Sound.BLOCK_SNIFFER_EGG_CRACK, 0.5f, rifle ? 1.5f : 0.7f); // the mutated shell shifting
-        world.playSound(at, Sound.ENTITY_BEE_LOOP, 0.4f, rifle ? 1.7f : 0.6f);
+        // Was BEE_LOOP — an ambient drone, and the swap is a thing you do mid-fight, repeatedly. Stacked
+        // loops meant the buzz never actually stopped. A single clipped wing-beat marks the change instead.
+        world.playSound(at, Sound.ENTITY_BEE_HURT, 0.4f, rifle ? 1.8f : 1.0f);
 
         Location breech = at.clone().add(at.getDirection().multiply(0.7));
         if (rifle) {

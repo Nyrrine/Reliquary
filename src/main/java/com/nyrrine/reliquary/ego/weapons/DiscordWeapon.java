@@ -154,7 +154,12 @@ public final class DiscordWeapon implements Weapon {
      * is released to make room, which keeps marking-order semantics natural.
      */
     private static final int MARK_MAX = 6;
-    /** A small gate on marking, purely so a held right-click can't spam the sigil FX. */
+    /**
+     * A small gate on marking the <b>same body twice</b>, purely so a held right-click can't spam the
+     * sigil FX at one target. It deliberately does not apply between <em>different</em> bodies: turning
+     * from one enemy to the next and marking them both is the whole point of Omnipresence, and a gate that
+     * made you wait half a second per head made chaining marks feel like the weapon was refusing you.
+     */
     private static final long MARK_CD_MS = 500L;
 
     // ---- Cycle tuning (sneak + right-click) ---------------------------------------
@@ -193,6 +198,14 @@ public final class DiscordWeapon implements Weapon {
 
     /** Wielder -> epoch-millis of their last Omnipresence mark. */
     private final Map<UUID, Long> lastMark = new HashMap<>();
+
+    /**
+     * Wielder -> the body their last mark landed on. Paired with {@link #lastMark} so the anti-spam gate
+     * can tell "you are holding right-click at one enemy" from "you have turned to the next one". Holds a
+     * UUID rather than the entity, so a dead or unloaded target can never be kept alive by this map; it is
+     * dropped on quit and cleared on disable alongside its partner.
+     */
+    private final Map<UUID, UUID> lastMarkTarget = new HashMap<>();
 
     /** Wielder -> their running Cycle sequence, so it can be cancelled on quit/death/disable. */
     private final Map<UUID, CycleRun> cycleRuns = new HashMap<>();
@@ -325,8 +338,6 @@ public final class DiscordWeapon implements Weapon {
     private void omnipresence(Player player) {
         UUID id = player.getUniqueId();
         long now = System.currentTimeMillis();
-        Long last = lastMark.get(id);
-        if (last != null && now - last < MARK_CD_MS) return;   // held right-click — quietly ignore
 
         LivingEntity target = lookedAt(player, MARK_RANGE);
         if (target == null) {
@@ -335,7 +346,16 @@ public final class DiscordWeapon implements Weapon {
             return;
         }
 
+        // The gate is per-body, not per-wielder: a held right-click can't spam one target's sigil, but
+        // turning to the next enemy marks them the instant the crosshair finds them. Chaining marks is
+        // what the ability is for; it should never make you wait between heads.
+        Long last = lastMark.get(id);
+        if (last != null && now - last < MARK_CD_MS && target.getUniqueId().equals(lastMarkTarget.get(id))) {
+            return;
+        }
+
         lastMark.put(id, now);
+        lastMarkTarget.put(id, target.getUniqueId());
         pruneMarks(id);
 
         LinkedHashMap<UUID, Long> m = marks.computeIfAbsent(id, k -> new LinkedHashMap<>());
@@ -853,6 +873,7 @@ public final class DiscordWeapon implements Weapon {
         releaseMarks(id);
         lastPendant.remove(id);
         lastMark.remove(id);
+        lastMarkTarget.remove(id);
         striking.remove(id);
         // A quitting PLAYER may also have been someone else's marked foe — mobs can't, which is exactly
         // why pruneMarks has to carry the load.
@@ -866,6 +887,7 @@ public final class DiscordWeapon implements Weapon {
         marks.clear();
         lastPendant.clear();
         lastMark.clear();
+        lastMarkTarget.clear();
         striking.clear();
         // No entities to sweep: the beam, the sigils and Cycle are all particles. Any in-flight beam task
         // dies with the scheduler on disable and holds no world state.

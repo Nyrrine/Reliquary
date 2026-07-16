@@ -47,6 +47,15 @@ import java.util.concurrent.ThreadLocalRandom;
  * into a long and endless realm of mind — and there is a persistent rumour that it lights up when it
  * catches an echo of a world that isn't this one.
  *
+ * <p><b>On the fallback item, and the thing to check first.</b> It is a TRIDENT now, for the spear
+ * silhouette (see {@link EgoModels#FRAGMENTS_FROM_SOMEWHERE}). That is a deliberate bet: a trident's own
+ * right-click throws it, and right-click is this weapon's lunge, so the two would fight if the throw ever
+ * got through. It shouldn't — {@code WeaponManager} cancels the interact before the item is ever used,
+ * which is the same reason Fourth Match Flame's flint-and-steel doesn't set fire to the floor — but a
+ * trident <em>charges</em> rather than firing instantly, and nothing in this roster has proven that path.
+ * <b>If the spear ever leaves the wielder's hand on a right-click, this is why: put the material back to a
+ * netherite sword and let the custom model carry the silhouette instead.</b>
+ *
  * <p>Mechanically that rumour <em>is</em> the weapon. The spear does not travel with its wielder so much
  * as it refuses to fully agree that they moved:
  *

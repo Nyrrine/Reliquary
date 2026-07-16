@@ -60,8 +60,10 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li><b>Indifference</b> (passive) — every {@link #INDIFFERENCE_PERIOD ninth} landed hit blinds the
  *       guilty with Darkness. A Judgement combo's own cuts each count, so a ten-hit verdict walks the
  *       counter ten places forward.</li>
- *   <li><b>Jurisdiction</b> (left-click, {@link #onSwing}) — every swing tips the scales a little
- *       further, ramping both proc coefficients. The ramp resets the instant a verdict is passed.</li>
+ *   <li><b>Jurisdiction</b> (left-click, {@link #onHit}) — every <em>landed</em> blow tips the scales a
+ *       little further, ramping both proc coefficients; the ramp resets the instant a verdict is passed.
+ *       A blow struck at the top of the swing arc also hurries Judgement's rest along by
+ *       {@link #HURRY_MS}. Swinging at nothing earns neither — the scales weigh sins, not exercise.</li>
  *   <li><b>Persecution</b> (right-click, {@link #onInteract}) — hang the scales behind you and take a
  *       counter-stance. Strike the stance and you are rooted while the bearer appears at your back,
  *       blinded by Indifference.</li>
@@ -86,6 +88,12 @@ import java.util.concurrent.ThreadLocalRandom;
  * read off the blow rather than guessed at from whoever stood nearest, and no per-tick entity scan is
  * needed at all. The stance answers a <em>strike</em>, not a wound: a blow a shield turns aside still
  * gets a verdict.
+ *
+ * <h2>What it looks like</h2>
+ * The house's ALEPH melee weapons cut with their own hand-drawn arc rather than vanilla's sweep, and
+ * Justitia's is the <b>Verdict Arc</b> ({@link #judgementArc}) — the Arayashiki/Lævateinn swoop, slowed
+ * and fattened until it reads as a greatsword. See the presentation section for the shape, and for the
+ * particle ceiling every effect in this file is held to.
  *
  * <p>Every scale display is non-persistent, tagged {@link #SCALES_TAG}, and reaped on unequip / quit /
  * disable (plus a world sweep) so no orphan is ever left behind. Player roots are best-effort — see
@@ -118,15 +126,21 @@ public final class JustitiaWeapon implements Weapon {
     private final Set<RootTask> activeRoots = new HashSet<>();
 
     // ---- Judgement: the verdicts ---------------------------------------------------
-    // NOTE (balance): these totals sit deliberately above the netherite band (a plain netherite sword is
-    // 8/hit, ~11 with Sharpness V). This is signed off and flagged for playtest — do not quietly rescale.
-    // Damage is dealt through victim.damage(), so armour still reduces it; these are pre-mitigation.
+    // These still land above the netherite band (a plain netherite sword is 8/hit, ~11 with Sharpness V),
+    // and they are meant to — a verdict is supposed to be a sentence, not a hit. Damage is dealt through
+    // victim.damage(), so armour still reduces it; these are pre-mitigation.
+    //
+    // The ten-hit was 29 (5x3 then 2x7) as originally specified. It was built to that number, flagged, and
+    // playtested at it; the verdict was "too much" (Nyrrine, 2026-07-17), so it came down to 19.5. The
+    // shape is what matters and it is preserved: three heavy opening cuts, then a long light flurry, and
+    // the rare verdict still out-hits the common one. If it ever drops below the five-hit's 15 the jackpot
+    // becomes a downgrade wearing a jackpot's odds.
 
     /** The five-hit verdict: 3 damage, five times = 15, on top of the swing that proc'd it. */
     private static final double[] FIVE_HIT_STEPS = {3.0, 3.0, 3.0, 3.0, 3.0};
 
-    /** The ten-hit verdict: 5 damage three times (15), then 2 damage seven times (14) = 29 total. */
-    private static final double[] TEN_HIT_STEPS = {5.0, 5.0, 5.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0};
+    /** The ten-hit verdict: 3 damage three times (9), then 1.5 damage seven times (10.5) = 19.5 total. */
+    private static final double[] TEN_HIT_STEPS = {3.0, 3.0, 3.0, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5};
 
     /** Ticks between a verdict's cuts — 2 ticks reads as a flurry (five-hit ~0.5s, ten-hit ~1s). */
     private static final long COMBO_STEP_TICKS = 2L;
@@ -141,6 +155,19 @@ public final class JustitiaWeapon implements Weapon {
 
     /** Judgement rests this long after EITHER verdict — no procs at all while it sleeps. */
     private static final long JUDGEMENT_COOLDOWN_MS = 15_000L;
+
+    /**
+     * How much of Judgement's rest a fully-charged landed blow burns off. The rest is not a timer you wait
+     * out; it is a debt you work off, one honest swing at a time.
+     */
+    private static final long HURRY_MS = 1_000L;
+
+    /**
+     * How drawn the swing must be to count as fully charged. {@code getAttackCooldown()} runs 0 → 1 as the
+     * vanilla attack bar refills; 0.9 rather than a strict 1.0 because the bar is sampled a tick or two
+     * late and a perfectly-timed swing should never be told it wasn't.
+     */
+    private static final float FULL_SWING = 0.9f;
 
     // ---- Jurisdiction: the ramp ----------------------------------------------------
 
@@ -196,6 +223,22 @@ public final class JustitiaWeapon implements Weapon {
     private static final double BEAM_SPAN       = 1.5;  // the crossbeam, pan to pan
     private static final double PAN_DROP        = 0.42; // how far the pans hang beneath the beam ends
 
+    private static final double BASE_WIDTH  = 0.52;  // the plinth the column stands on
+    private static final double BASE_THICK  = 0.07;  // ...kept a slab, not a block
+    private static final double PAN_WIDTH   = 0.50;  // pans read as shallow dishes: wide and thin
+    private static final double PAN_THICK   = 0.05;
+    private static final double FINIAL_SIZE = 0.16;  // the bone-white jewel at the pivot
+    private static final double CHAIN_THICK = 0.035; // the two links the pans hang on
+
+    /** How far the beam tips when Jurisdiction has banked every sin it can hold. */
+    private static final double MAX_TILT_DEG = 14.0;
+    /** A hanging balance is never perfectly still — the beam breathes by this much either way. */
+    private static final double TILT_SWAY = Math.toRadians(1.4);
+    /** How quickly the beam eases toward the tilt its load asks for — it settles, it does not snap. */
+    private static final double TILT_LERP = 0.16;
+    /** Don't re-cut the beam's transform for a movement smaller than this — the client can't see it. */
+    private static final double TILT_RECUT = Math.toRadians(0.5);
+
     /** Scoreboard tag on every scale display, for the belt-and-braces world sweep on shutdown. */
     private static final String SCALES_TAG = "reliquary_justitia_scales";
 
@@ -238,15 +281,20 @@ public final class JustitiaWeapon implements Weapon {
     // ---- Jurisdiction: every swing tips the scales -----------------------------------
 
     /**
-     * A swing of the greatsword. The manager only dispatches this while Justitia is in the main hand, so
-     * every call is a real swing of it — hit or miss, the balance leans a little further. The ramp keeps
-     * accumulating while Judgement sleeps (the spec gates the <em>procs</em> on the cooldown, not the
-     * enhancer), which turns the 15s rest into ramp time rather than dead time.
+     * A swing of the greatsword — and deliberately, nothing happens here.
+     *
+     * <p>Jurisdiction used to tip the scales from this hook, on every swing, hit or miss. That let a
+     * wielder stand in an empty field beating the air until the ramp was maxed, then walk into a fight
+     * with the proc coefficient already paid for. The scales weigh sins, not exercise: the ramp now lives
+     * in {@link #onHit} and only a landed blow moves it.
+     *
+     * <p>The Verdict Arc is not drawn here either, for the same reason and one more: a slash effect on a
+     * whiffed swing is a slash effect a bored player can spray at the horizon all day. It is drawn from
+     * {@link #onHit}, on a blow that actually landed.
      */
     @Override
     public void onSwing(Player player) {
-        Wielder w = wielder(player.getUniqueId());
-        if (w.swingStacks < MAX_BONUS_STACKS) w.swingStacks++;
+        // Intentionally empty — see the javadoc. Jurisdiction ramps on landed hits, in onHit.
     }
 
     /** The current five-hit proc coefficient, ramp included. */
@@ -273,6 +321,19 @@ public final class JustitiaWeapon implements Weapon {
         if (comboing.contains(id)) return; // our own verdict's cut — a proc must never proc itself
 
         Wielder w = wielder(id);
+        if (w.swingStacks < MAX_BONUS_STACKS) w.swingStacks++; // Jurisdiction: only a landed blow tips it
+
+        // Read the swing bar once: the hurry below and the arc's weight both want the same number.
+        float draw = attacker.getAttackCooldown();
+
+        // A blow struck at the top of the swing arc is worth more than a flurry of half-drawn ones: each
+        // one hurries Judgement back by a second. Spamming light hits earns nothing here, which is the
+        // point — the greatsword rewards the wielder who waits for it.
+        if (draw >= FULL_SWING) {
+            w.judgementReadyAt = Math.max(System.currentTimeMillis(), w.judgementReadyAt - HURRY_MS);
+        }
+
+        slashFx(attacker, w, draw);
         registerHit(victim, w);
         rollJudgement(attacker, victim, w);
     }
@@ -366,7 +427,8 @@ public final class JustitiaWeapon implements Weapon {
                 return;
             }
 
-            double dmg = steps[step++];
+            int index = step++;          // which stroke of the sentence this is — the cut's VFX wants it
+            double dmg = steps[index];
             Vector preVel = victim.getVelocity();
             UUID aid = attacker.getUniqueId();
 
@@ -380,7 +442,7 @@ public final class JustitiaWeapon implements Weapon {
             }
 
             registerHit(victim, wielder); // each cut of the verdict counts toward Indifference
-            cutFx(victim, dmg);
+            cutFx(attacker, victim, dmg, index);
 
             if (step >= steps.length) finish();
         }
@@ -542,7 +604,9 @@ public final class JustitiaWeapon implements Weapon {
             target.setVelocity(new Vector(0, 0, 0));
             target.addPotionEffect(new PotionEffect(
                     PotionEffectType.SLOWNESS, 6, ROOT_SLOWNESS_AMP, false, false, false));
-            rootVfx(target.getLocation());
+            // The hold is every tick; the shackle is drawn every fourth. A 2s root that painted a ring
+            // 40 times over would spend more particles than the whole verdict that earned it.
+            if ((ticks & 3) == 0) rootVfx(target.getLocation());
         }
 
         private void finish() {
@@ -595,7 +659,9 @@ public final class JustitiaWeapon implements Weapon {
         Wielder w = wielder(id);
 
         if (w.stanceOpen()) {
-            w.scales.tick(player, tick);
+            // The beam is shown the load Jurisdiction has banked, so the scales physically weigh what the
+            // action bar reports. A reading of state that already exists — it decides nothing.
+            w.scales.tick(player, tick, w.swingStacks / (double) MAX_BONUS_STACKS);
             if (now >= w.stanceEndsAt) {
                 closeStance(w, now, true); // lapsed unanswered — the rest is still spent, so it can't be spammed
                 lapseFx(player);
@@ -655,7 +721,7 @@ public final class JustitiaWeapon implements Weapon {
         wielders.clear();
         comboing.clear();
 
-        sweepOrphans(); // belt-and-braces: reap any stray tagged scale anywhere in the world
+        sweepOrphans(); // belt-and-braces: reap any stray scale piece anywhere in the world
     }
 
     /** Remove every scale display carrying our tag across all loaded worlds. */
@@ -695,6 +761,11 @@ public final class JustitiaWeapon implements Weapon {
         Scales scales;
         /** Epoch-millis when the open stance settles. */
         long stanceEndsAt = 0L;
+        /**
+         * Epoch-millis when the Verdict Arc may be drawn again. Purely a VFX rate gate — see
+         * {@link #slashFx}. Nothing Judgement reads ever looks at this.
+         */
+        long arcVfxAt = 0L;
         boolean stanceOpen() {
             return scales != null;
         }
@@ -703,29 +774,61 @@ public final class JustitiaWeapon implements Weapon {
     // ---- the scales: the visual signature --------------------------------------------
 
     /**
-     * The scales of the Long Bird, hanging in the air behind the wielder: a gold column, a gold crossbeam,
-     * and two bone-white pans swaying beneath its ends. Four {@link BlockDisplay} entities — non-persistent
-     * and tagged, so a crash can never leave them on disk and the world sweep can always find them.
+     * The scales of the Long Bird, hanging in the air behind the wielder — and built to read as a real
+     * object rather than a suggestion of one: a plinth, a gold column standing on it, a bone-white jewel
+     * at the pivot, the crossbeam turning on that jewel, and two shallow bone-white dishes hanging off
+     * the beam's ends on their own gold links. Eight {@link BlockDisplay} entities — every one
+     * non-persistent and tagged, so a crash can never leave them on disk and the world sweep can always
+     * find them.
      *
-     * <p>Each display is teleported to its slot every 2 ticks with a matching teleport duration, which the
+     * <p><b>It is a balance, so it balances.</b> The beam rolls under the load Jurisdiction has banked —
+     * level with a clean slate, tipped hard at the ramp's cap — easing toward it rather than snapping, and
+     * breathing slightly even at rest, the way a suspended beam never quite stops. The pans hang from the
+     * beam's ends on fixed links and stay level as it tips, rising and dropping with the end they hang
+     * from; that is what a real balance does, and it is why the chains are solid displays now instead of
+     * the three dust motes that used to imply them. Cheaper and truer at once.
+     *
+     * <p>Each piece is teleported to its slot every 2 ticks with a matching teleport duration, which the
      * client interpolates into a smooth float. The beam is scaled along its own local X axis and carries
      * the wielder's yaw, so it always lies across their back rather than pointing at it.
      */
     private static final class Scales {
 
         private final BlockDisplay post;
+        private final BlockDisplay base;
         private final BlockDisplay beam;
+        private final BlockDisplay finial;
+        private final BlockDisplay chainLeft;
+        private final BlockDisplay chainRight;
         private final BlockDisplay panLeft;
         private final BlockDisplay panRight;
+        /** Every piece, for the reap — so adding one to the constructor can't leave one behind. */
+        private final BlockDisplay[] pieces;
+
         private boolean alive = true;
+        /** The beam's live roll, radians. Positive lifts the {@code +right} end. */
+        private double tilt = 0.0;
+        /** The roll the beam's transform was last cut to — see {@link #TILT_RECUT}. */
+        private double drawnTilt = 0.0;
 
         Scales(Player owner) {
             Location at = owner.getLocation().add(0, SCALES_HEIGHT, 0);
             World world = owner.getWorld();
-            post     = spawn(world, at, FRAME_MATERIAL, bar(0.09f, (float) POST_HEIGHT, 0.09f));
-            beam     = spawn(world, at, FRAME_MATERIAL, bar((float) BEAM_SPAN, 0.08f, 0.08f));
-            panLeft  = spawn(world, at, PAN_MATERIAL,   bar(0.44f, 0.06f, 0.44f));
-            panRight = spawn(world, at, PAN_MATERIAL,   bar(0.44f, 0.06f, 0.44f));
+            post       = spawn(world, at, FRAME_MATERIAL, bar(0.09f, (float) POST_HEIGHT, 0.09f));
+            base       = spawn(world, at, FRAME_MATERIAL,
+                    bar((float) BASE_WIDTH, (float) BASE_THICK, (float) BASE_WIDTH));
+            beam       = spawn(world, at, FRAME_MATERIAL, beamShape(0.0));
+            finial     = spawn(world, at, PAN_MATERIAL,
+                    bar((float) FINIAL_SIZE, (float) FINIAL_SIZE, (float) FINIAL_SIZE));
+            chainLeft  = spawn(world, at, FRAME_MATERIAL,
+                    bar((float) CHAIN_THICK, (float) PAN_DROP, (float) CHAIN_THICK));
+            chainRight = spawn(world, at, FRAME_MATERIAL,
+                    bar((float) CHAIN_THICK, (float) PAN_DROP, (float) CHAIN_THICK));
+            panLeft    = spawn(world, at, PAN_MATERIAL,
+                    bar((float) PAN_WIDTH, (float) PAN_THICK, (float) PAN_WIDTH));
+            panRight   = spawn(world, at, PAN_MATERIAL,
+                    bar((float) PAN_WIDTH, (float) PAN_THICK, (float) PAN_WIDTH));
+            pieces = new BlockDisplay[]{post, base, beam, finial, chainLeft, chainRight, panLeft, panRight};
         }
 
         /** One piece of the scales: a coloured block, shaped by its transform, non-persistent and tagged. */
@@ -747,60 +850,96 @@ public final class JustitiaWeapon implements Weapon {
          * axis lands the shape centred rather than hanging off one corner.
          */
         private static Transformation bar(float sx, float sy, float sz) {
+            return bar(sx, sy, sz, new Quaternionf());
+        }
+
+        /**
+         * The same bar, rolled by {@code leftRot} about its own middle.
+         *
+         * <p>The subtlety worth writing down: a display applies
+         * {@code translation + leftRotation * (scale * vertex)} — the translation lands <em>outside</em>
+         * the rotation. So the -s/2 centring offset has to be rotated along with the shape, or the bar
+         * swings around the display's origin like a thrown stick instead of turning on its own middle like
+         * a beam on a pivot. Rotating the offset by the same quaternion puts the pivot back in the centre.
+         */
+        private static Transformation bar(float sx, float sy, float sz, Quaternionf leftRot) {
+            Vector3f centring = new Vector3f(-sx / 2f, -sy / 2f, -sz / 2f);
+            leftRot.transform(centring); // in-place: the offset now turns with the shape
             return new Transformation(
-                    new Vector3f(-sx / 2f, -sy / 2f, -sz / 2f),
-                    new Quaternionf(),
+                    centring,
+                    new Quaternionf(leftRot), // copied — the caller's quaternion is not ours to keep
                     new Vector3f(sx, sy, sz),
                     new Quaternionf());
         }
 
-        /** Hang the scales behind the wielder, swaying gently, and weep a little gold from the pans. */
-        void tick(Player owner, long tick) {
+        /**
+         * The crossbeam at a given roll. The bar is scaled along its own local X — which, because the
+         * display carries the wielder's yaw, is the wielder's {@code right} — so rolling it about local Z
+         * lifts the {@code +right} end and drops the other by the same amount.
+         */
+        private static Transformation beamShape(double roll) {
+            return bar((float) BEAM_SPAN, 0.08f, 0.08f, new Quaternionf().rotateZ((float) roll));
+        }
+
+        /**
+         * Hang the scales behind the wielder, tip the beam to its load, and let the low pan weep a little
+         * gold.
+         *
+         * @param load Jurisdiction's ramp as 0..1 — how much the balance is being asked to carry
+         */
+        void tick(Player owner, long tick, double load) {
             if (!alive) return;
 
-            Location base = owner.getLocation();
-            float yaw = base.getYaw();
+            Location stand = owner.getLocation();
+            float yaw = stand.getYaw();
             double rad = Math.toRadians(yaw);
             Vector forward = new Vector(-Math.sin(rad), 0, Math.cos(rad));
             Vector right = new Vector(Math.cos(rad), 0, Math.sin(rad));
 
             double bob = Math.sin(tick * 0.10) * SCALES_BOB;
-            Location centre = base.clone()
-                    .subtract(forward.multiply(SCALES_DISTANCE))
+            Location centre = stand.clone()
+                    .subtract(forward.clone().multiply(SCALES_DISTANCE))
                     .add(0, SCALES_HEIGHT + bob, 0);
 
+            // The balance answers its load, and never quite stops moving even when it doesn't.
+            double target = Math.toRadians(MAX_TILT_DEG) * Math.max(0.0, Math.min(1.0, load))
+                    + Math.sin(tick * 0.07) * TILT_SWAY;
+            tilt += (target - tilt) * TILT_LERP;
+
             place(post, centre, yaw);
-            Location beamAt = centre.clone().add(0, POST_HEIGHT / 2.0, 0);
-            place(beam, beamAt, yaw);
+            place(base, centre.clone().add(0, -POST_HEIGHT / 2.0, 0), yaw);
 
-            Location leftAt = beamAt.clone()
-                    .add(right.clone().multiply(-BEAM_SPAN / 2.0)).add(0, -PAN_DROP, 0);
-            Location rightAt = beamAt.clone()
-                    .add(right.clone().multiply(BEAM_SPAN / 2.0)).add(0, -PAN_DROP, 0);
-            place(panLeft, leftAt, yaw);
-            place(panRight, rightAt, yaw);
-
-            if ((tick % 4) == 0) {
-                // The chains: a thin thread of gold from each beam end down to its pan.
-                chain(beamAt.clone().add(right.clone().multiply(-BEAM_SPAN / 2.0)), leftAt);
-                chain(beamAt.clone().add(right.clone().multiply(BEAM_SPAN / 2.0)), rightAt);
+            Location pivot = centre.clone().add(0, POST_HEIGHT / 2.0, 0);
+            place(beam, pivot, yaw);
+            place(finial, pivot, yaw);
+            if (Math.abs(tilt - drawnTilt) > TILT_RECUT && beam != null && beam.isValid()) {
+                drawnTilt = tilt;
+                beam.setTransformation(beamShape(tilt)); // the client interpolates the roll for us
             }
-            if ((tick % 8) == 0) {
+
+            // The beam's ends, lifted and dropped by the roll. The pans hang beneath them on fixed links
+            // and stay level — a balance tips its beam, not its dishes.
+            double halfSpan = BEAM_SPAN / 2.0;
+            double reach = halfSpan * Math.cos(tilt);
+            double lift = halfSpan * Math.sin(tilt);
+            Location endLeft = pivot.clone().add(right.clone().multiply(-reach)).add(0, -lift, 0);
+            Location endRight = pivot.clone().add(right.clone().multiply(reach)).add(0, lift, 0);
+
+            place(chainLeft, endLeft.clone().add(0, -PAN_DROP / 2.0, 0), yaw);
+            place(chainRight, endRight.clone().add(0, -PAN_DROP / 2.0, 0), yaw);
+
+            Location panL = endLeft.clone().add(0, -PAN_DROP, 0);
+            Location panR = endRight.clone().add(0, -PAN_DROP, 0);
+            place(panLeft, panL, yaw);
+            place(panRight, panR, yaw);
+
+            if ((tick % 8) == 0) { // once every 16 game ticks — the scales are an object, not a firework
                 World w = centre.getWorld();
-                w.spawnParticle(Particle.DUST, centre, 2, 0.10, 0.35, 0.10, 0, GOLD_FINE);
-                w.spawnParticle(Particle.END_ROD, beamAt, 1, 0.30, 0.02, 0.30, 0.004);
-            }
-        }
-
-        /** A few motes strung between a beam end and the pan below it — the chain, implied. */
-        private static void chain(Location top, Location pan) {
-            World w = top.getWorld();
-            for (int i = 1; i <= 3; i++) {
-                Location p = top.clone().add(
-                        (pan.getX() - top.getX()) * i / 4.0,
-                        (pan.getY() - top.getY()) * i / 4.0,
-                        (pan.getZ() - top.getZ()) * i / 4.0);
-                w.spawnParticle(Particle.DUST, p, 1, 0.01, 0.01, 0.01, 0, GOLD_FINE);
+                w.spawnParticle(Particle.DUST, pivot, 1, 0.06, 0.04, 0.06, 0, GOLD_FINE);
+                w.spawnParticle(Particle.END_ROD, pivot, 1, 0.10, 0.02, 0.10, 0.002);
+                // Whichever dish is carrying the weight runs a little gold off its lip.
+                Location low = tilt >= 0 ? panL : panR;
+                w.spawnParticle(Particle.DUST, low.clone().add(0, -0.05, 0), 2, 0.10, 0.02, 0.10, 0, GOLD_FINE);
             }
         }
 
@@ -816,13 +955,256 @@ public final class JustitiaWeapon implements Weapon {
         /** Reap every piece and mark the scales dead so a late tick bails out. */
         void dispose() {
             alive = false;
-            for (BlockDisplay d : new BlockDisplay[]{post, beam, panLeft, panRight}) {
+            for (BlockDisplay d : pieces) {
                 if (d != null && d.isValid()) d.remove();
             }
         }
     }
 
     // ---- presentation ----------------------------------------------------------------
+    //
+    // THE PARTICLE BUDGET. This roster runs ~100 players at ~13 TPS, so every burst below is a fixed
+    // compile-time count — not one of them scales with players, entities, distance or damage. Drama is
+    // bought with SIZE, SPREAD and LIFETIME (Justitia's dust is 2.4-2.8f where Arayashiki's is 1.1f);
+    // it is never bought with more motes.
+    //
+    //   Verdict Arc (per landed swing) .. <=  104   rate-gated to 1 per ARC_VFX_GAP_MS
+    //   one verdict cut ................. <=   17   (heavy: 16 + a SWEEP_ATTACK; light: 16)
+    //   verdict opening ................. <=   55   (ten-hit, column included) / 27 (five-hit)
+    //   -> whole five-hit verdict ....... <=  112 = 27 + 5x17
+    //   -> whole ten-hit verdict ........ <=  218 = 55 + 3x17 + 7x16, over ~20 ticks
+    //   -> worst swing a wielder can buy   <=  322 = arc 104 + ten-hit 218, spread over ~24 ticks
+    //   counter ......................... <=   82   once per 15s per wielder
+    //   Indifference .................... <=   20   once per 9 landed hits
+    //   root shackle .................... <=   10 a frame, drawn every 4th tick => <= 100 per 2s root
+    //   scales .......................... <=    4 per 16 game ticks, per hanging stance
+    //
+    // Nothing here forces its particles. Every mote is spawned within ~3 blocks of the wielder or the
+    // guilty, so the people the effect is FOR are never near vanilla's ~32-block cull; forcing would only
+    // buy spectators at the back a slash they don't need, at 100 players' worth of packets. That is a
+    // deliberate call, not an oversight — a forced burst is exactly how a roster kills a server.
+    //
+    // AUDIT: DUST -> DustOptions, DUST_COLOR_TRANSITION -> DustTransition. Every spawnParticle in this
+    // file passes the data class its particle actually demands (a mismatch is a runtime crash, not a
+    // compile error); END_ROD / CRIT / SWEEP_ATTACK / ENCHANTED_HIT / ELECTRIC_SPARK take no data at all.
+    // Nothing here uses BLOCK / FALLING_DUST / DUST_PILLAR / ITEM / ENTITY_EFFECT / FLASH, so no
+    // BlockData, ItemStack or Color is ever handed to a particle that wants something else.
+
+    // ---- the Verdict Arc: Justitia's M1 ----------------------------------------------
+
+    /**
+     * Points along the cut. Deliberately far fewer than Arayashiki's 46: a katana's edge is a fine line,
+     * a bandaged greatsword's is a slab. The weight comes from how big each mote is, never from how many.
+     */
+    private static final int ARC_POINTS = 24;
+
+    /** Ticks the blade takes to travel the arc. The slowest reveal in the house, and the point of it. */
+    private static final int ARC_REVEAL = 7;
+
+    /** Ticks a point of the cut hangs in the air once the blade has passed it. */
+    private static final int ARC_FADE = 6;
+
+    /** How far the cut reaches at a full draw. */
+    private static final double ARC_RADIUS = 2.6;
+
+    /**
+     * The arc's rate gate. At the greatsword's 1.0 attack speed an honest swing is a second apart, so a
+     * wielder never meets this; it exists only so a click-spammer landing five half-draws a second can't
+     * paint five arcs a second on top of them.
+     */
+    private static final long ARC_VFX_GAP_MS = 300L;
+
+    /**
+     * Draw the Verdict Arc for a landed blow, at most once per {@link #ARC_VFX_GAP_MS}.
+     *
+     * <p>The gate is <em>presentation only</em>: it lives in its own field, nothing Judgement, Jurisdiction
+     * or Persecution reads ever looks at it, and skipping the arc skips exactly the arc.
+     */
+    private void slashFx(Player attacker, Wielder w, float draw) {
+        long now = System.currentTimeMillis();
+        if (now < w.arcVfxAt) return;
+        w.arcVfxAt = now + ARC_VFX_GAP_MS;
+        judgementArc(attacker, draw);
+    }
+
+    /**
+     * <b>The Verdict Arc.</b> Arayashiki's travelling swoop and Lævateinn's heavy sealed sweep, spoken in
+     * gold and bone — the same construction the house uses for every big cut, tuned until it reads as a
+     * greatsword rather than a katana:
+     *
+     * <ul>
+     *   <li><b>The frame</b> is theirs exactly: an orthonormal basis off the look direction, the arc laid
+     *       in the plane of {@code u} (forward) and a rolled perpendicular {@code v}, sampled as
+     *       {@code u·cos a + v·sin a} about a pivot on the body, with a little per-point jitter so the
+     *       edge isn't a ruled line.</li>
+     *   <li><b>The travel</b> is theirs: each point carries a {@code birth} tick, the runnable reveals a
+     *       point when its age hits 0 and fades it out over {@link #ARC_FADE}, so the blade visibly walks
+     *       its own arc instead of the whole crescent flashing at once.</li>
+     *   <li><b>The roll is where it parts company.</b> Arayashiki rolls the plane the full circle, so no
+     *       two of its swoops share an orientation; Justitia rolls it only a little either side of
+     *       vertical. The plane stays a standing wheel and the cut always arrives as an axe-stroke — the
+     *       variety lives in the sweep, the reach and the tilt, never in "which way did the die say".</li>
+     *   <li><b>The blade always falls.</b> Arayashiki flips its reveal direction at random. Justitia never
+     *       does: the top of the wheel is cut first and the ground last. A verdict comes down.</li>
+     *   <li><b>The weight</b> is timing and size. Arayashiki reveals in 5 ticks and fades in 4; Lævateinn's
+     *       heavy sweep in 4 and 5. This is 7 and 6 — 0.65s of blade, the slowest cut in the house, and at
+     *       1.0 attack speed it has just faded as the next swing lands. The dust is 2.4-2.8f against
+     *       Arayashiki's 1.1f, and there are half as many points behind it.</li>
+     *   <li><b>The colours</b> are Lævateinn's body/edge split: a bone-white leading edge — the blade
+     *       itself, mid-fall — trailing gold behind it, with END_ROD on the edge for Arayashiki's glowing
+     *       tip and a few CRIT for the bite.</li>
+     * </ul>
+     *
+     * <p>One capped runnable, O(active wielders). 104 particles at the ceiling, spread across 13 ticks:
+     * the edge is drawn at full density because it is the thing you actually look at, and the trailing
+     * wake at half, because a wake nobody reads shouldn't cost what the blade costs.
+     *
+     * @param draw the swing bar, 0..1 — a half-drawn blow cuts a smaller, thinner arc than a committed one
+     */
+    private void judgementArc(Player player, float draw) {
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        World world = player.getWorld();
+        Location centre = player.getLocation().add(0, 1.0, 0); // the swoop pivots on the body
+        Vector dir = player.getEyeLocation().getDirection().normalize();
+
+        Vector right = dir.clone().crossProduct(new Vector(0, 1, 0));
+        if (right.lengthSquared() < 1.0e-6) right = new Vector(1, 0, 0);
+        right.normalize();
+        Vector up = right.clone().crossProduct(dir).normalize();
+
+        // The roll, kept near vertical: v stays close to `up`, so the wheel stands.
+        double roll = rng.nextDouble(-0.55, 0.55);
+        final Vector u = dir.clone();
+        final Vector v = up.clone().multiply(Math.cos(roll)).add(right.clone().multiply(Math.sin(roll)));
+
+        double weight = 0.75 + 0.25 * Math.max(0f, Math.min(1f, draw)); // the greatsword rewards the wait
+        double radius = ARC_RADIUS * weight * (0.95 + rng.nextDouble() * 0.20);
+        double sweep = Math.toRadians(190 + rng.nextInt(50)); // wraps wide across the view, like the cleave
+        double aMid = rng.nextDouble(-0.18, 0.18);
+        final float thick = (float) (2.4 * weight);
+
+        final Location[] pts = new Location[ARC_POINTS + 1];
+        final int[] birth = new int[ARC_POINTS + 1];
+        for (int i = 0; i <= ARC_POINTS; i++) {
+            double f = (double) i / ARC_POINTS;
+            double a = aMid - sweep / 2.0 + sweep * f;   // i = 0 is the low end of the wheel, i = N the high
+            Vector radial = u.clone().multiply(Math.cos(a) * radius)
+                    .add(v.clone().multiply(Math.sin(a) * radius));
+            Location p = centre.clone().add(radial);
+            p.add((rng.nextDouble() - 0.5) * 0.10,
+                  (rng.nextDouble() - 0.5) * 0.10,
+                  (rng.nextDouble() - 0.5) * 0.10);
+            pts[i] = p;
+            // Cut the top first and the ground last — never the other way about.
+            birth[i] = Math.round((float) ARC_REVEAL * (ARC_POINTS - i) / ARC_POINTS);
+        }
+
+        final Particle.DustOptions edge = new Particle.DustOptions(BONE_RGB, thick + 0.4f);
+
+        new BukkitRunnable() {
+            int t = 0;
+            @Override
+            public void run() {
+                if (t > ARC_REVEAL + ARC_FADE) { cancel(); return; }
+                for (int i = 0; i <= ARC_POINTS; i++) {
+                    int age = t - birth[i];
+                    if (age < 0 || age >= ARC_FADE) continue;
+                    if (age == 0) {
+                        // The bone-white leading edge: the blade, caught mid-fall.
+                        world.spawnParticle(Particle.DUST, pts[i], 1, 0, 0, 0, 0, edge);
+                        if (i % 3 == 0) world.spawnParticle(Particle.END_ROD, pts[i], 1, 0, 0, 0, 0);
+                        if (i % 6 == 0) world.spawnParticle(Particle.CRIT, pts[i], 1, 0, 0, 0, 0.02);
+                    } else if ((i & 1) == 0) {
+                        // The gold wake, at half the edge's density — and that halving is the whole
+                        // reason a cut this big is affordable at 100 players.
+                        float sz = thick * (1.0f - 0.45f * age / ARC_FADE);
+                        world.spawnParticle(Particle.DUST, pts[i], 1, 0, 0, 0, 0,
+                                new Particle.DustOptions(GOLD_RGB, sz));
+                    }
+                }
+                t++;
+            }
+        }.runTaskTimer(plugin, 0L, 1L);
+
+        // Low and slow: the same two voices Arayashiki swings with, pitched down until they read as mass.
+        world.playSound(centre, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.9f, 0.55f + jitter());
+        world.playSound(centre, Sound.ITEM_TRIDENT_RETURN, 0.45f, 0.60f + jitter());
+    }
+
+    // ---- the verdict's strokes -------------------------------------------------------
+
+    /** Points in one stroke of a verdict. Fixed — ten of these land inside a second. */
+    private static final int CUT_POINTS = 9;
+
+    /** How wide a stroke is cut across the guilty. */
+    private static final double CUT_LENGTH = 1.7;
+
+    /**
+     * The angles the strokes are cut at, in order — not rolled. A verdict is a sentence being written, so
+     * the cuts cross each other into a tally instead of scribbling, and the ten-hit's last word is the
+     * upright at the end. The five-hit takes the first five; the ten-hit walks all ten.
+     */
+    private static final double[] CUT_ANGLES = {
+            Math.toRadians(-52), Math.toRadians(52), Math.toRadians(-24), Math.toRadians(24),
+            Math.toRadians(-72), Math.toRadians(72), Math.toRadians(0), Math.toRadians(-40),
+            Math.toRadians(40), Math.toRadians(90),
+    };
+
+    /**
+     * One cut of a verdict landing. The heavier steps bite louder — and note the threshold: with the
+     * settled steps ({@code 3,3,3,1.5×7}) nothing reaches 5, so the old {@code >= 5.0} test had quietly
+     * become dead code after the rebalance and every cut of every verdict was reading light. At 3.0 it
+     * lives again exactly as it was meant to: the five-hit is five full-weight cuts, the ten-hit opens on
+     * three and then flurries.
+     */
+    private static void cutFx(Player attacker, LivingEntity victim, double dmg, int index) {
+        World w = victim.getWorld();
+        Location at = victim.getLocation().add(0, victim.getHeight() * 0.6, 0);
+        boolean heavy = dmg >= 3.0;
+
+        w.playSound(at, heavy ? Sound.ENTITY_PLAYER_ATTACK_CRIT : Sound.ENTITY_PLAYER_ATTACK_SWEEP,
+                heavy ? 0.8f : 0.45f, 0.75f + jitter());
+        verdictCut(attacker, victim, index);
+        if (heavy) w.spawnParticle(Particle.SWEEP_ATTACK, at, 1, 0.10, 0.10, 0.10, 0);
+    }
+
+    /**
+     * One stroke, carved across the guilty — Lævateinn's {@code afterimage}: a straight, bright,
+     * edge-cored line with a deep glow offset behind it for thickness and hard sparks where the blade
+     * left. One frame, no runnable, exactly as Lævateinn built it ("spawn rapidly") — which is precisely
+     * what a ten-cut verdict needs, because whatever hangs off a cut here runs ten times inside a second.
+     *
+     * <p>The stroke is laid in the plane square to the attacker's eye, so a verdict always presents its
+     * face to the person passing it rather than edge-on.
+     */
+    private static void verdictCut(Player attacker, LivingEntity victim, int index) {
+        World w = victim.getWorld();
+        Location centre = victim.getLocation().add(0, victim.getHeight() * 0.55, 0);
+
+        Vector view = centre.toVector().subtract(attacker.getEyeLocation().toVector());
+        if (view.lengthSquared() < 1.0e-6) view = new Vector(0, 0, 1);
+        view.normalize();
+        Vector right = view.clone().crossProduct(new Vector(0, 1, 0));
+        if (right.lengthSquared() < 1.0e-6) right = new Vector(1, 0, 0);
+        right.normalize();
+        Vector up = right.clone().crossProduct(view).normalize();
+
+        double angle = CUT_ANGLES[Math.floorMod(index, CUT_ANGLES.length)];
+        Vector cut = right.clone().multiply(Math.cos(angle)).add(up.clone().multiply(Math.sin(angle)));
+        Vector perp = cut.clone().crossProduct(view).normalize().multiply(0.07); // the stroke's thickness
+
+        Location start = centre.clone().subtract(cut.clone().multiply(CUT_LENGTH / 2.0));
+        for (int i = 0; i < CUT_POINTS; i++) {
+            double f = i / (double) (CUT_POINTS - 1);
+            Location p = start.clone().add(cut.clone().multiply(CUT_LENGTH * f));
+            boolean tip = i == 0 || i == CUT_POINTS - 1;
+            w.spawnParticle(Particle.DUST, p, 1, 0, 0, 0, 0, tip ? CUT_TIP : CUT_BODY);
+            if ((i & 1) == 0) w.spawnParticle(Particle.DUST, p.clone().add(perp), 1, 0, 0, 0, 0, CUT_DEEP);
+        }
+        w.spawnParticle(Particle.CRIT, centre, 2, 0.10, 0.10, 0.10, 0.08);
+    }
+
+    // ---- the rest of the show --------------------------------------------------------
 
     /** The scales come down: a bell, a chain, and a ring of gold about the wielder. */
     private void summonFx(Player player) {
@@ -831,6 +1213,7 @@ public final class JustitiaWeapon implements Weapon {
         w.playSound(at, Sound.BLOCK_CHAIN_PLACE, 0.8f, 0.7f);
         w.playSound(at, Sound.BLOCK_BELL_USE, 0.7f, 0.6f);
         ring(at.clone().add(0, 0.08, 0), 1.4, GOLD_DUST, 22);
+        w.spawnParticle(Particle.END_ROD, at.clone().add(0, 1.2, 0), 4, 0.35, 0.30, 0.35, 0.01);
     }
 
     /**
@@ -841,7 +1224,11 @@ public final class JustitiaWeapon implements Weapon {
         player.getWorld().playSound(player.getLocation(), Sound.BLOCK_BELL_RESONATE, 0.5f, 0.6f);
     }
 
-    /** A verdict opens: the toll of the bell, weighted by how heavy the sentence is. */
+    /**
+     * A verdict opens — the sentence, read out. The toll of the bell weighted by how heavy it is, gold
+     * turning to bone in the air, the scales' mark struck on the ground, and for the ten-hit the
+     * {@link #column} standing on the guilty before a single cut has landed.
+     */
     private void verdictOpenFx(Player attacker, LivingEntity victim, int cuts) {
         World w = victim.getWorld();
         Location at = victim.getLocation().add(0, victim.getHeight() * 0.6, 0);
@@ -849,23 +1236,34 @@ public final class JustitiaWeapon implements Weapon {
 
         w.playSound(at, Sound.BLOCK_BELL_USE, heavy ? 1.0f : 0.7f, heavy ? 0.5f : 0.9f);
         if (heavy) w.playSound(at, Sound.BLOCK_BEACON_ACTIVATE, 0.6f, 1.4f);
-        w.spawnParticle(Particle.DUST_COLOR_TRANSITION, at, heavy ? 24 : 14,
+
+        w.spawnParticle(Particle.DUST_COLOR_TRANSITION, at, heavy ? 18 : 12,
                 0.35, 0.45, 0.35, 0, GOLD_SHIMMER);
-        ring(victim.getLocation().add(0, 0.06, 0), heavy ? 1.5 : 1.1, GOLD_DUST, heavy ? 20 : 14);
+        ring(victim.getLocation().add(0, 0.06, 0), heavy ? 1.5 : 1.1, GOLD_DUST, heavy ? 18 : 12);
+        w.spawnParticle(Particle.END_ROD, at, heavy ? 5 : 3, 0.30, 0.40, 0.30, 0.01);
+        if (heavy) column(victim);
         attacker.playSound(attacker.getLocation(), Sound.ITEM_TRIDENT_THROW, 0.5f, heavy ? 0.7f : 1.0f);
     }
 
-    /** One cut of a verdict landing — the heavier steps bite louder. */
-    private void cutFx(LivingEntity victim, double dmg) {
-        World w = victim.getWorld();
-        Location at = victim.getLocation().add(0, victim.getHeight() * 0.6, 0);
-        boolean heavy = dmg >= 5.0;
+    /** How tall the sentence stands, and how many motes it is allowed to stand in. */
+    private static final double COLUMN_HEIGHT = 3.0;
+    private static final int COLUMN_POINTS = 12;
 
-        w.playSound(at, heavy ? Sound.ENTITY_PLAYER_ATTACK_CRIT : Sound.ENTITY_PLAYER_ATTACK_SWEEP,
-                heavy ? 0.8f : 0.5f, 0.8f + jitter());
-        w.spawnParticle(Particle.DUST, at, heavy ? 10 : 5, 0.28, 0.32, 0.28, 0, GOLD_DUST);
-        w.spawnParticle(Particle.CRIT, at, heavy ? 8 : 4, 0.22, 0.28, 0.22, 0.12);
-        if (heavy) w.spawnParticle(Particle.SWEEP_ATTACK, at, 1, 0.10, 0.10, 0.10, 0);
+    /**
+     * The sentence, stood on the guilty: a shaft of gold tapering as it rises, and a bone-white spark at
+     * the top of it. One frame, twelve motes and a pair of sparks — the drama is that it is three blocks
+     * tall, not that it is expensive.
+     */
+    private static void column(LivingEntity victim) {
+        World w = victim.getWorld();
+        Location foot = victim.getLocation();
+        for (int i = 0; i < COLUMN_POINTS; i++) {
+            double f = i / (double) (COLUMN_POINTS - 1);
+            Location p = foot.clone().add(0, 0.1 + f * COLUMN_HEIGHT, 0);
+            w.spawnParticle(Particle.DUST, p, 1, 0.06, 0.02, 0.06, 0,
+                    new Particle.DustOptions(GOLD_RGB, (float) (1.7 - 1.0 * f)));
+        }
+        w.spawnParticle(Particle.END_ROD, foot.clone().add(0, COLUMN_HEIGHT, 0), 2, 0.05, 0.05, 0.05, 0.01);
     }
 
     /** Indifference takes hold: the bone-white blindness, and a bell no one answers. */
@@ -877,29 +1275,55 @@ public final class JustitiaWeapon implements Weapon {
         w.spawnParticle(Particle.ELECTRIC_SPARK, at, 6, 0.25, 0.30, 0.25, 0.02);
     }
 
-    /** The counter lands: the bearer gone from where they stood, and arrived at the guilty one's back. */
+    /** How many motes the bearer's passage is drawn in, however far it was. */
+    private static final int PASSAGE_POINTS = 18;
+
+    /**
+     * The bearer's passage: a thread of bone and gold from where they stood to where they arrived.
+     *
+     * <p>The count is fixed, so a counter thrown across the whole 16-block jurisdiction costs exactly what
+     * a counter at arm's length costs — only the spacing stretches. Anything that draws a line between two
+     * points has to decide this, and "one mote every 0.2 blocks" is how a burst quietly becomes unbounded.
+     */
+    private static void passage(Location from, Location to) {
+        if (!from.getWorld().equals(to.getWorld())) return;
+        World w = from.getWorld();
+        double dx = to.getX() - from.getX();
+        double dy = to.getY() - from.getY();
+        double dz = to.getZ() - from.getZ();
+        for (int i = 0; i < PASSAGE_POINTS; i++) {
+            double f = i / (double) (PASSAGE_POINTS - 1);
+            Location p = from.clone().add(dx * f, dy * f, dz * f);
+            w.spawnParticle(Particle.DUST, p, 1, 0.03, 0.03, 0.03, 0, (i & 1) == 0 ? BONE_FINE : GOLD_FINE);
+        }
+    }
+
+    /**
+     * The counter lands: the bearer gone from where they stood, the thread of their passage still hanging
+     * in the air behind them, and the sentence standing on the guilty one at the other end of it.
+     */
     private void counterFx(Location from, Player player, LivingEntity striker) {
         World w = striker.getWorld();
         Location at = striker.getLocation().add(0, striker.getHeight() * 0.6, 0);
 
         from.getWorld().playSound(from, Sound.ENTITY_ENDERMAN_TELEPORT, 0.7f, 0.6f);
-        from.getWorld().spawnParticle(Particle.DUST, from.clone().add(0, 1.0, 0), 16,
-                0.28, 0.55, 0.28, 0, GOLD_DUST);
-
         w.playSound(at, Sound.BLOCK_ANVIL_LAND, 0.9f, 0.6f);          // the weight of the sentence
         w.playSound(at, Sound.BLOCK_BELL_USE, 1.0f, 0.5f);            // the toll
         w.playSound(at, Sound.ITEM_SHIELD_BLOCK, 0.6f, 0.5f);         // the strike, turned aside
-        w.spawnParticle(Particle.DUST_COLOR_TRANSITION, at, 26, 0.40, 0.50, 0.40, 0, GOLD_SHIMMER);
-        w.spawnParticle(Particle.ENCHANTED_HIT, at, 10, 0.30, 0.35, 0.30, 0.10);
-        ring(striker.getLocation().add(0, 0.06, 0), 1.6, GOLD_DUST, 24);
+
+        passage(from.clone().add(0, 1.0, 0), player.getLocation().add(0, 1.0, 0));
+        w.spawnParticle(Particle.DUST_COLOR_TRANSITION, at, 20, 0.40, 0.50, 0.40, 0, GOLD_SHIMMER);
+        w.spawnParticle(Particle.ENCHANTED_HIT, at, 8, 0.30, 0.35, 0.30, 0.10);
+        ring(striker.getLocation().add(0, 0.06, 0), 1.6, GOLD_DUST, 20);
+        column(striker);
 
         player.playSound(player.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, 0.5f, 1.6f);
     }
 
-    /** The shackle: a tight gold ring dragging at a rooted target's feet. */
+    /** The shackle: a tight gold ring dragging at a rooted target's feet. Drawn every 4th tick of a hold. */
     private void rootVfx(Location at) {
         World w = at.getWorld();
-        w.spawnParticle(Particle.DUST, at.clone().add(0, 0.25, 0), 3, 0.26, 0.20, 0.26, 0, GOLD_FINE);
+        w.spawnParticle(Particle.DUST, at.clone().add(0, 0.25, 0), 2, 0.26, 0.20, 0.26, 0, GOLD_FINE);
         ring(at.clone().add(0, 0.04, 0), 0.75, BONE_DUST, 8);
     }
 
@@ -927,16 +1351,22 @@ public final class JustitiaWeapon implements Weapon {
     private static final TextColor BONE_HUD = TextColor.color(0xF4F2EC); // action-bar status
 
     // Particle colours, kept apart from the lore palette so tuning one never disturbs the other.
-    // AUDIT: DUST -> DustOptions, DUST_COLOR_TRANSITION -> DustTransition. Every spawnParticle below
-    // passes the data class its particle actually demands (a mismatch is a runtime crash, not a compile
-    // error); END_ROD / CRIT / SWEEP_ATTACK / ENCHANTED_HIT / ELECTRIC_SPARK take no data at all.
     private static final Color GOLD_RGB = Color.fromRGB(0xE0, 0xB2, 0x3A);
+    private static final Color GOLD_DEEP_RGB = Color.fromRGB(0x8A, 0x6A, 0x18); // the shadow under the gold
     private static final Color BONE_RGB = Color.fromRGB(0xF4, 0xF2, 0xEC);
+
     private static final Particle.DustOptions GOLD_DUST = new Particle.DustOptions(GOLD_RGB, 1.1f);
     private static final Particle.DustOptions GOLD_FINE = new Particle.DustOptions(GOLD_RGB, 0.6f);
     private static final Particle.DustOptions BONE_DUST = new Particle.DustOptions(BONE_RGB, 1.0f);
+    private static final Particle.DustOptions BONE_FINE = new Particle.DustOptions(BONE_RGB, 0.7f);
     private static final Particle.DustTransition GOLD_SHIMMER =
             new Particle.DustTransition(GOLD_RGB, BONE_RGB, 0.9f);
+
+    // A verdict's stroke: bone-white where the blade entered and left, gold along the cut, and a deep
+    // gold offset behind it so the stroke has a near side and a far one.
+    private static final Particle.DustOptions CUT_TIP = new Particle.DustOptions(BONE_RGB, 1.8f);
+    private static final Particle.DustOptions CUT_BODY = new Particle.DustOptions(GOLD_RGB, 1.5f);
+    private static final Particle.DustOptions CUT_DEEP = new Particle.DustOptions(GOLD_DEEP_RGB, 0.9f);
 
     /** The scales' materials: a gold frame, bone-white pans. */
     private static final Material FRAME_MATERIAL = Material.GOLD_BLOCK;
@@ -969,17 +1399,20 @@ public final class JustitiaWeapon implements Weapon {
                     new EgoLore.Ability("[Passive] Judgement",
                             "A landed hit weighs the sin.",
                             "40% — five cuts of 3 damage.",
-                            "20% — a ten-hit verdict, 29 damage.",
-                            "Either verdict rests for 15s."),
+                            "20% — a ten-hit verdict, 19.5 damage.",
+                            "Either verdict rests for 15s. A hit",
+                            "struck at full draw hurries the rest",
+                            "along by a second."),
                     new EgoLore.Ability("[Passive] Indifference",
                             "Every 9th hit blinds the guilty with",
                             "Darkness for 5s. Judgement's own",
                             "cuts each count toward the ninth."),
                     new EgoLore.Ability("[Left-Click] Jurisdiction",
-                            "Each swing tips the scales further:",
+                            "Each landed blow tips the scales:",
                             "+1% to the five-cut chance, +0.5% to",
                             "the ten-hit. Resets when Judgement",
-                            "passes a verdict."),
+                            "passes a verdict. Swinging at nothing",
+                            "weighs nothing."),
                     new EgoLore.Ability("[Right-Click] Persecution",
                             "Hang the scales behind you for 3s.",
                             "Strike the stance and you are rooted",

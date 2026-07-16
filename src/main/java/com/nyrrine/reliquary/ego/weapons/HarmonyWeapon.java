@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Harmony — "Singing Machine" (Lobotomy Corp E.G.O Equipment, WAW).
@@ -54,23 +55,34 @@ import java.util.UUID;
  *       adds {@value #RHYTHM_DAMAGE_PER_STACK} to the Note, linearly — the machine finding its pitch. The
  *       chord climbs a whole tone per stack, and the seventh stack lands as a discordant shriek. Fall out
  *       of combat for {@value #COMBAT_TIMEOUT_MS}ms and the performance dies: every stack is lost.</li>
- *   <li><b>Left-click — Note</b>: a hitscan beam on a {@value #NOTE_COOLDOWN_MS}ms refresh. It pierces
- *       every body along its line (one damage instance each, no matter how the beam folds) and reaches
- *       {@value #NOTE_RANGE} blocks. This is the weapon's entire offence — there is no melee to speak of.
- *       While Obsession is up the beam <b>ricochets</b>, reflecting off block faces up to
- *       {@value #NOTE_RICOCHETS} times and spending the same travel budget around corners.</li>
+ *   <li><b>Left-click — Note</b>: a hitscan beam on a seven-second refresh, or a <b>four</b>-second one
+ *       while Obsession burns. It pierces every body along its line (one damage instance each, no matter
+ *       how the beam folds) and reaches {@value #NOTE_RANGE} blocks. This is the weapon's entire offence —
+ *       there is no melee to speak of. While Obsession is up the beam <b>ricochets</b>, reflecting off
+ *       block faces up to {@value #NOTE_RICOCHETS} times and spending the same travel budget around
+ *       corners.</li>
  *   <li><b>Right-click — Obsession</b>: the stance toggle. Switching it ON costs
  *       {@code 10%} of the wielder's <b>current</b> HP and is refused unless they hold <b>more than</b>
- *       {@code 10%} of their <b>max</b> HP. While it burns: weapon damage {@code +30%}, the Note
- *       ricochets, and Rhythm can be earned at all. Switching it off is free and keeps the stacks.</li>
+ *       {@code 10%} of their <b>max</b> HP. While it burns: weapon damage {@code +30%}, the Note refreshes
+ *       in four seconds instead of seven, the Note ricochets, and Rhythm can be earned at all. Switching
+ *       it off is free and keeps the stacks.</li>
  * </ul>
  *
  * <h2>Balance</h2>
  * {@link EgoModels#HARMONY} is {@code ranged}, so the weapon's damage <i>is</i> the beam.
  * {@value #NOTE_DAMAGE} base, {@code +0.35} per Rhythm, {@code x1.30} under Obsession — so the ceiling is
  * {@code (6.0 + 7 x 0.35) x 1.30 = 10.985}, which lands just inside a Sharpness-V netherite sword's ~11
- * for the beam's single instance. Bare, with no stacks and no stance, it is {@value #NOTE_DAMAGE} — a
- * netherite sword that fires once every seven seconds. Everything above that has been paid for in blood.
+ * for the beam's single instance. Bare, with no stacks and no stance, it is {@value #NOTE_DAMAGE}.
+ *
+ * <p><b>The four-second Obsession refresh does not move that ceiling</b> — it is a per-instance number and
+ * the instance is unchanged — but it does move the <i>rate</i>, so the sustained figures are worth writing
+ * down. Against one body: {@code 6.0 / 7s = 0.86} DPS bare; {@code 8.45 / 7s = 1.21} DPS at seven stacks
+ * with the stance dropped; and {@code 10.985 / 4s = 2.75} DPS at seven stacks under Obsession, up from
+ * {@code 1.57} at the old seven-second clock — a {@code +75%} sustained increase for the stance, bought
+ * with a tenth of the wielder's blood every time they enter it. The beam pierces up to
+ * {@value #NOTE_MAX_TARGETS} bodies, so a perfectly-lined-up shot tops out at {@code 10.985 x 8 / 4s =
+ * 21.97} DPS spread across eight targets — still one instance each. The faster clock also halves the
+ * ramp: seven connecting shots to full Rhythm is now ~28s of Obsession rather than ~49s.
  *
  * <h2>Safety</h2>
  * The weapon <b>spawns no entities at all</b> — the Note is a raytrace and the visuals are particles — so
@@ -119,6 +131,12 @@ public final class HarmonyWeapon implements Weapon {
 
     private static final double NOTE_DAMAGE       = 6.0;    // the bare beam, no stacks, no stance
     private static final long   NOTE_COOLDOWN_MS  = 7000L;  // "refreshes every 7 seconds"
+    /**
+     * The Note's refresh <b>while Obsession burns</b>. The machine, run on blood, plays 75% more often;
+     * the shot itself is untouched, so the per-instance balance band is exactly where it was. See the
+     * class Balance note for the sustained figures this buys.
+     */
+    private static final long   NOTE_COOLDOWN_OBSESSED_MS = 4000L;
     private static final double NOTE_RANGE        = 40.0;   // total travel budget, shared across ricochets
     private static final double NOTE_RADIUS       = 1.1;    // how near the line a body must be to be struck
     private static final int    NOTE_MAX_TARGETS  = 8;      // cap on bodies one shot can pierce
@@ -141,13 +159,47 @@ public final class HarmonyWeapon implements Weapon {
     // ---- tuning: presentation ------------------------------------------------------
 
     private static final double NOTE_VFX_START   = 0.9;   // start the beam line off the wielder's face
-    private static final double NOTE_VFX_STEP    = 0.5;   // spacing of the beam's core motes
-    private static final int    NOTE_ECHO_TICKS  = 7;     // how long the fired note lingers, sustained then decaying
-    private static final double NOTE_ECHO_THIN   = 0.55;  // how fast the sustain thins out per tick
+    private static final double NOTE_VFX_STEP    = 0.5;   // base spacing of the beam's core motes
     private static final int    HUD_PERIOD_TICKS = 3;     // refresh the action bar every 3rd weapon tick
     private static final int    HUM_PERIOD_TICKS = 6;     // Obsession's idle drone cadence
     private static final int    CHORD_ROOT_NOTE  = 6;     // note-block note index the chord starts on
     private static final int    CHORD_STEP       = 2;     // semitones the chord climbs per stack of Rhythm
+
+    // ---- tuning: the echo (how long the note hangs, and what it costs) --------------
+    // The ask was "linger longer and look bigger". Both are paid for out of RATE, not out of raw counts:
+    // the note now hangs more than twice as long, every mote in it is roughly 70% larger, and the beam's
+    // peak per-tick particle spend is LOWER than it was, because the line thins as it decays and a hard
+    // ceiling caps the densest frame. See NOTE_ECHO_MAX_MOTES for the arithmetic.
+
+    /** How long the fired note lingers: 16 ticks (0.8s), up from 7. The sustain, then the decay. */
+    private static final int    NOTE_ECHO_TICKS      = 16;
+    /** How fast the sustain thins out per tick — the mote spacing grows by this fraction each tick. */
+    private static final double NOTE_ECHO_THIN       = 0.5;
+    /**
+     * <b>Hard per-tick ceiling</b> on the beam's core motes, across the whole folded polyline.
+     *
+     * <p>This is the number that makes a 100-player roster survive a "bigger, lingering" beam. The draw
+     * step is {@code max(baseStep x growth, pathLength / this)}, so no matter how long the path is or how
+     * young the echo is, one echo can never draw more than this many core motes in a tick. At the full
+     * {@value #NOTE_RANGE}-block budget that pins the densest frame (age 0) to a 0.67-block step.
+     *
+     * <p>Ceilings that follow from it, per echo per tick: {@value} core, ~1/3 that in edge motes, ~1/8 in
+     * music notes (and only on the first few ticks), ~1/7 in sparks (age 0 only) — so ~97 particles on the
+     * loudest tick, against ~135 on the old 7-tick echo's loudest tick. Whole-shot total is ~526 particles
+     * spread over 16 ticks (~33/tick average) against the old ~381 over 7 ticks (~54/tick average): 38%
+     * more note, 39% less rate.
+     */
+    private static final int    NOTE_ECHO_MAX_MOTES  = 60;
+    /** Music notes are emitted over the first few ticks of the echo (every other one), not just the attack. */
+    private static final int    NOTE_ECHO_NOTE_TICKS = 6;
+    /** One music note per this many core motes — the notes garnish the beam, they do not build it. */
+    private static final int    NOTE_ECHO_NOTE_EVERY = 8;
+
+    /**
+     * Cap on the music notes any single burst may spawn. Coloured notes cost one packet each (see
+     * {@link #note}), so every caller must be capped rather than trusted.
+     */
+    private static final int    NOTE_BURST_CAP       = 12;
 
     // ---- palette -------------------------------------------------------------------
     // Grey machine and rust-red blood. The tooltip takes the two spec colours verbatim; the action bar and
@@ -162,11 +214,84 @@ public final class HarmonyWeapon implements Weapon {
     private static final Color C_RUST  = Color.fromRGB(0x6b, 0x00, 0x00); // the blood in it
     private static final Color C_BLOOD = Color.fromRGB(0x8E, 0x0B, 0x0B); // a shade up from RUST so it renders
 
-    private static final Particle.DustOptions NOTE_CORE = new Particle.DustOptions(C_STEEL, 1.0f);
-    private static final Particle.DustOptions NOTE_EDGE = new Particle.DustOptions(C_BLOOD, 0.8f);
-    private static final Particle.DustOptions RUST_FINE = new Particle.DustOptions(C_RUST, 0.7f);
+    // Sizes are the "look bigger" half of the ask. DustOptions size is clamped client-side at 4.0; these
+    // sit well inside that. Raising size costs nothing — it is one float in a packet we were sending
+    // anyway — which is exactly why the ask is paid for here rather than in counts.
+    private static final Particle.DustOptions NOTE_CORE = new Particle.DustOptions(C_STEEL, 1.7f);
+    private static final Particle.DustOptions NOTE_EDGE = new Particle.DustOptions(C_BLOOD, 1.4f);
+    private static final Particle.DustOptions RUST_FINE = new Particle.DustOptions(C_RUST, 1.1f);
     /** Obsession's core: the note bleeds out of the wielder and pales into the machine's grey. */
-    private static final Particle.DustTransition NOTE_BLED = new Particle.DustTransition(C_BLOOD, C_STEEL, 1.2f);
+    private static final Particle.DustTransition NOTE_BLED = new Particle.DustTransition(C_BLOOD, C_STEEL, 2.0f);
+
+    // ---- the three music notes -----------------------------------------------------
+
+    /**
+     * The only three colours a music note is ever allowed to be: <b>yellow, red, green</b>.
+     *
+     * <p><b>How a NOTE particle's colour is actually chosen.</b> {@link Particle#NOTE} takes no data class
+     * — there is no {@code DustOptions} to hand it, and passing one is a runtime crash. The client derives
+     * the colour from the particle's <b>x velocity</b> ({@code f} below), as a three-phase sine:
+     * <pre>
+     *   r = max(0, sin((f + 0/3) x 2PI) x 0.65 + 0.35)
+     *   g = max(0, sin((f + 1/3) x 2PI) x 0.65 + 0.35)
+     *   b = max(0, sin((f + 2/3) x 2PI) x 0.65 + 0.35)
+     * </pre>
+     * and the only way to set that velocity from the server is the {@code count = 0} form of the particle
+     * packet — see {@link #note}. Solving the three phases for the colours asked for gives exactly the
+     * note-block indices below:
+     * <ul>
+     *   <li>{@code 2/24} -> (0.675, 0.675, 0) = <b>RGB(172, 172, 0)</b>, yellow. This is the brightest
+     *       yellow the curve can produce: r and g are only equal where the two sines cross, and they cross
+     *       at 0.675.</li>
+     *   <li>{@code 6/24} -> (1.0, 0.025, 0.025) = <b>RGB(255, 6, 6)</b>, red.</li>
+     *   <li>{@code 22/24} -> (0.025, 1.0, 0.025) = <b>RGB(6, 255, 6)</b>, green.</li>
+     * </ul>
+     * No fourth colour can leak in: the hue is not sampled, it is stated, and it is only ever stated from
+     * this array.
+     */
+    private static final double[] NOTE_HUES = { 2.0 / 24.0, 6.0 / 24.0, 22.0 / 24.0 }; // yellow, red, green
+
+    // ---- the twisted harmony -------------------------------------------------------
+
+    /**
+     * The chords the machine fires on, as semitone offsets from whatever root the current Rhythm has
+     * climbed to. Every one of them is built to <b>refuse to resolve</b>: tritones, minor seconds and
+     * major sevenths, the intervals a tuned instrument is written to avoid. That is the twist — the
+     * machine knows the shape of harmony and gets it deliberately wrong.
+     *
+     * <p>Offsets are folded back into the note-block's 0..24 range by {@link #fold}, so a high Rhythm root
+     * drops the offending voice an octave rather than clamping it flat onto the root and quietly losing
+     * the dissonance.
+     */
+    private static final int[][] VOICINGS = {
+            { 0, 6, 11 },   // root + tritone + major seventh — the chord straining and never landing
+            { 0, 1, 6 },    // root + minor second + tritone — the shriek, in embryo
+            { 0, 6, 13 },   // root + tritone + minor ninth — the same clash, opened out an octave
+            { 0, 11, 14 },  // root + major seventh + major ninth — top-heavy, hollow underneath
+            { 0, 5, 6 },    // root + fourth + tritone — the fourth pulled a semitone out of true
+    };
+
+    /** The timbres the machine sings in. Two are drawn per shot, so no two shots share a voice pair. */
+    private static final Sound[] VOICES = {
+            Sound.BLOCK_NOTE_BLOCK_BASS,
+            Sound.BLOCK_NOTE_BLOCK_DIDGERIDOO,
+            Sound.BLOCK_NOTE_BLOCK_BIT,
+            Sound.BLOCK_NOTE_BLOCK_IRON_XYLOPHONE,
+            Sound.BLOCK_NOTE_BLOCK_PLING,
+            Sound.BLOCK_NOTE_BLOCK_XYLOPHONE,
+    };
+
+    /** The body underneath the music: deteriorating parts, complaining. Never the same complaint twice. */
+    private static final Sound[] FRAMES = {
+            Sound.BLOCK_GRINDSTONE_USE,
+            Sound.BLOCK_ANVIL_USE,
+            Sound.BLOCK_CHAIN_HIT,
+            Sound.BLOCK_PISTON_CONTRACT,
+            Sound.ITEM_AXE_SCRAPE,
+    };
+
+    /** Five sounds per shot, hard: three voices, the boom, and one frame rattle. */
+    private static final int MUZZLE_SOUNDS = 5;
 
     public HarmonyWeapon(Reliquary plugin) {
         this.plugin = plugin;
@@ -183,10 +308,12 @@ public final class HarmonyWeapon implements Weapon {
      * meaning "never".
      */
     private static final class Performance {
-        int     rhythm     = 0;
-        boolean obsession  = false;
-        long    lastNote   = 0L;
-        long    lastCombat = 0L;
+        int     rhythm      = 0;
+        boolean obsession   = false;
+        long    lastNote    = 0L;
+        long    lastCombat  = 0L;
+        /** The voicing this wielder's last shot used, so the next one can refuse to repeat it. */
+        int     lastVoicing = -1;
     }
 
     private Performance performance(Player player) {
@@ -219,6 +346,19 @@ public final class HarmonyWeapon implements Weapon {
         return Math.max(0L, cooldown - (now - last));
     }
 
+    /**
+     * The Note's refresh right now: seven seconds, or four while Obsession burns.
+     *
+     * <p>Read <b>live off the stance</b> rather than snapshotted at the shot, so the gate and the action
+     * bar can never disagree with the stance the wielder is actually standing in. The consequence is
+     * deliberate and reads correctly in both directions: taking Obsession mid-wait shortens the remaining
+     * wait to the four-second clock, and dropping it lengthens the wait back out to seven. The stance is
+     * the thing being paid for in blood, so the stance is what the clock answers to.
+     */
+    private static long noteCooldown(Performance perf) {
+        return perf.obsession ? NOTE_COOLDOWN_OBSESSED_MS : NOTE_COOLDOWN_MS;
+    }
+
     // ---- the Note (left-click) -----------------------------------------------------
 
     /**
@@ -236,7 +376,7 @@ public final class HarmonyWeapon implements Weapon {
 
         Performance perf = performance(player);
         long now = System.currentTimeMillis();
-        if (remaining(perf.lastNote, NOTE_COOLDOWN_MS, now) > 0) {
+        if (remaining(perf.lastNote, noteCooldown(perf), now) > 0) {
             // Still winding: the machine only clicks. The bar already shows the whole-second remainder.
             player.playSound(player.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.35f, 0.7f);
             hud(player, perf);
@@ -269,7 +409,8 @@ public final class HarmonyWeapon implements Weapon {
      * the note back through the same target should not silently double it.
      *
      * <p>The finished polyline is handed to a {@link NoteEcho} so the note is <i>sustained</i> on screen
-     * for a few ticks rather than flashing for one; the echo is pure visuals and deals nothing.
+     * for {@value #NOTE_ECHO_TICKS} ticks rather than flashing for one; the echo is pure visuals and deals
+     * nothing.
      */
     private void fireNote(Player player, Performance perf) {
         World world = player.getWorld();
@@ -333,7 +474,8 @@ public final class HarmonyWeapon implements Weapon {
      *
      * <p>Exactly <b>one</b> {@code getNearbyEntities} per segment — the box is drawn around the segment's
      * midpoint and everything in it is projected onto the line, rather than querying at each step of a walk.
-     * A shot is at most {@value #NOTE_RICOCHETS}+1 segments once every seven seconds, so this is cheap.
+     * A shot is at most {@value #NOTE_RICOCHETS}+1 segments once every four seconds at the very fastest, so
+     * this is cheap.
      */
     private void sweep(Player player, World world, Location origin, Vector dir,
                        double length, double damage, Set<UUID> struck) {
@@ -364,10 +506,10 @@ public final class HarmonyWeapon implements Weapon {
     /**
      * Land the Note on one body as its own distinct damage instance.
      *
-     * <p>The victim's hurt-immunity is cleared first: the beam is a single deliberate hit on a seven-second
-     * clock and must never be swallowed because something else grazed the target a few ticks ago. The
-     * {@link #ticking} fence stops the resulting damage event — which re-enters this weapon's {@link #onHit}
-     * — from being mistaken for a fresh melee strike.
+     * <p>The victim's hurt-immunity is cleared first: the beam is a single deliberate hit on a four- to
+     * seven-second clock and must never be swallowed because something else grazed the target a few ticks
+     * ago. The {@link #ticking} fence stops the resulting damage event — which re-enters this weapon's
+     * {@link #onHit} — from being mistaken for a fresh melee strike.
      */
     private void strike(Player player, LivingEntity victim, double damage) {
         if (victim.isDead() || !victim.isValid()) return;
@@ -462,16 +604,24 @@ public final class HarmonyWeapon implements Weapon {
     // ---- melee dispatch ------------------------------------------------------------
 
     /**
-     * The wielder landed a vanilla hit with Harmony in hand. Harmony is a cannon, not a club — this adds
-     * nothing and leaves the (negligible) vanilla damage alone; it exists only to notice that the wielder
-     * is in a fight. Rhythm deliberately does <b>not</b> come from here: the machine is charged by its own
-     * music, and letting a melee flurry fill the bar would gut the slow-charging fantasy the passive is
-     * built on. Our own beam's damage re-enters this method and is dropped by the fence.
+     * The wielder swung Harmony at something close enough to touch. Harmony is a cannon, not a club: the
+     * swing notices that the wielder is in a fight, and then the blow is <b>cancelled</b>.
+     *
+     * <p>Cancelling matters more than it looks. Left-click is the trigger, so a swing at a body in reach
+     * used to land a vanilla blow <em>and</em> fire the Note — and the blow, arriving first, stamped
+     * hurt-immunity on the victim that swallowed the beam. The machine appeared to stop working at exactly
+     * the range where its wielder needed it. Nothing is given up: Harmony is a {@code ranged} model with no
+     * melee damage of its own.
+     *
+     * <p>Rhythm deliberately does <b>not</b> come from here — the machine is charged by its own music, and
+     * letting a melee flurry fill the bar would gut the slow-charging fantasy the passive is built on. Our
+     * own beam's damage re-enters this method and is dropped by the fence.
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
         if (ticking.contains(victim.getUniqueId())) return; // the Note's own damage — not a melee strike
         markCombat(performance(attacker));
+        event.setCancelled(true);
     }
 
     // ---- tick ----------------------------------------------------------------------
@@ -513,7 +663,7 @@ public final class HarmonyWeapon implements Weapon {
                 ? EgoHud.status("Obsession", EMBER)
                 : EgoHud.status("Idle", FAINT);
 
-        long rem = remaining(perf.lastNote, NOTE_COOLDOWN_MS, System.currentTimeMillis());
+        long rem = remaining(perf.lastNote, noteCooldown(perf), System.currentTimeMillis());
         Component note = rem > 0 ? EgoHud.cooldown("Note", rem, STEEL) : EgoHud.ready("Note", STEEL);
 
         player.sendActionBar(pips
@@ -523,24 +673,124 @@ public final class HarmonyWeapon implements Weapon {
                 .append(note));
     }
 
-    // ---- presentation --------------------------------------------------------------
+    // ---- presentation: the music notes ---------------------------------------------
 
     /**
-     * The note-block pitch of the current chord: a root that climbs a whole tone per stack of Rhythm, so
-     * the machine audibly finds its key as the performance builds. Vanilla maps note index 0..24 onto
-     * pitch 0.5..2.0 as {@code 2^((n-12)/12)}.
+     * Spawn exactly one music note, in exactly one of {@link #NOTE_HUES}.
+     *
+     * <p><b>Why this is not an ordinary spawnParticle call.</b> With {@code count > 0} the client rolls the
+     * particle's velocity as {@code gaussian x extra} — and for NOTE that velocity <i>is</i> the hue, so a
+     * counted spawn either scatters the colour at random ({@code extra > 0}) or pins every note to the one
+     * colour at {@code f = 0} ({@code extra = 0}). Neither can be asked for yellow, red and green.
+     *
+     * <p>With {@code count = 0} the client instead reads the offsets as a literal velocity and multiplies
+     * them by {@code extra}, so {@code count = 0, offsetX = f, extra = 1.0} states the hue exactly. The
+     * y/z offsets are ignored by the note particle entirely (it hands its own zero velocity to its parent
+     * and keeps the x only as a colour), so the note still rises and drifts the way a vanilla note does —
+     * the hue never becomes motion.
+     *
+     * <p>{@code force = true}: the beam runs to {@value #NOTE_RANGE} blocks and a client culls unforced
+     * particles at ~32.
+     *
+     * <p>The cost of exactness is one packet per note, which is why every caller goes through
+     * {@link #noteBurst} and its {@value #NOTE_BURST_CAP} cap.
      */
-    private static float chordPitch(int stacks) {
-        int note = Math.max(0, Math.min(24, CHORD_ROOT_NOTE + stacks * CHORD_STEP));
-        return (float) Math.pow(2.0, (note - 12) / 12.0);
+    private static void note(World world, Location at, double hue) {
+        world.spawnParticle(Particle.NOTE, at, 0, hue, 0.0, 0.0, 1.0, null, true);
     }
 
-    /** The cannon speaks: the chord at its current pitch, over the machine's rattle and body. */
+    /**
+     * A scatter of music notes around {@code at}, cycling yellow -> red -> green from a random start so
+     * every burst shows all three and none of them favours a colour. Never spawns more than
+     * {@value #NOTE_BURST_CAP} however many are asked for.
+     */
+    private static void noteBurst(World world, Location at, double spread, int count) {
+        int n = Math.min(count, NOTE_BURST_CAP);
+        if (n <= 0) return;
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        int start = rng.nextInt(NOTE_HUES.length);
+        for (int i = 0; i < n; i++) {
+            Location p = at.clone().add(
+                    rng.nextDouble(-spread, spread),
+                    rng.nextDouble(-spread, spread),
+                    rng.nextDouble(-spread, spread));
+            note(world, p, NOTE_HUES[(start + i) % NOTE_HUES.length]);
+        }
+    }
+
+    // ---- presentation: pitch -------------------------------------------------------
+
+    /**
+     * Fold a note index back inside the note-block's 0..24 range by octaves. Folding rather than clamping
+     * is what keeps a dissonant voicing dissonant at high Rhythm: clamping would slide a tritone flat onto
+     * the root and silently resolve the chord, where dropping it an octave keeps the clash intact.
+     */
+    private static int fold(int note) {
+        while (note > 24) note -= 12;
+        while (note < 0) note += 12;
+        return note;
+    }
+
+    /** Vanilla maps note index 0..24 onto pitch 0.5..2.0 as {@code 2^((n-12)/12)}. */
+    private static float pitchOf(int note) {
+        return (float) Math.pow(2.0, (fold(note) - 12) / 12.0);
+    }
+
+    /**
+     * The root of the current chord: it climbs a whole tone per stack of Rhythm, so the machine audibly
+     * finds its key as the performance builds. Untouched — this is the passive's voice.
+     */
+    private static float chordPitch(int stacks) {
+        return pitchOf(CHORD_ROOT_NOTE + stacks * CHORD_STEP);
+    }
+
+    /** One voice of a chord, detuned by {@code mul} and held inside the pitch range the client accepts. */
+    private static float voice(int note, float mul) {
+        float p = pitchOf(note) * mul;
+        return (float) Math.max(0.5, Math.min(2.0, p));
+    }
+
+    /**
+     * A few cents either side of true. Two layers a hair apart <b>beat</b> against each other rather than
+     * blending — that slow wobble is the difference between a chord and a machine trying to play one.
+     */
+    private static float detune(ThreadLocalRandom rng) {
+        return 1.0f + (rng.nextFloat() - 0.5f) * 0.03f; // ±1.5%
+    }
+
+    /**
+     * The cannon speaks — and it must never speak the same way twice.
+     *
+     * <p>Exactly {@value #MUZZLE_SOUNDS} sounds, every one of them varied per shot: a voicing drawn from
+     * {@link #VOICINGS} that is guaranteed not to repeat the last one, two timbres drawn from
+     * {@link #VOICES}, two of the three voices detuned so they beat against the root, the boom's pitch
+     * wobbled, and a frame rattle pulled from {@link #FRAMES} at a random pitch. The root itself still
+     * climbs with Rhythm, so the machine is finding its key and getting it wrong at the same time.
+     */
     private void muzzleFx(World world, Location eye, Performance perf) {
-        world.playSound(eye, Sound.BLOCK_NOTE_BLOCK_BASS, 0.9f, chordPitch(perf.rhythm));
-        world.playSound(eye, Sound.ENTITY_WARDEN_SONIC_BOOM, 0.5f, perf.obsession ? 0.7f : 1.0f);
-        world.playSound(eye, Sound.BLOCK_NOTE_BLOCK_DIDGERIDOO, 0.45f, 0.6f);
-        world.playSound(eye, Sound.BLOCK_GRINDSTONE_USE, 0.3f, 0.5f); // the deteriorating parts complaining
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+
+        // Never the same voicing twice running — a repeated chord is the exact thing being fixed here.
+        int v = rng.nextInt(VOICINGS.length);
+        if (v == perf.lastVoicing) v = (v + 1 + rng.nextInt(VOICINGS.length - 1)) % VOICINGS.length;
+        perf.lastVoicing = v;
+        int[] voicing = VOICINGS[v];
+
+        int root = CHORD_ROOT_NOTE + perf.rhythm * CHORD_STEP; // the Rhythm climb, unchanged
+        Sound lead = VOICES[rng.nextInt(VOICES.length)];
+        Sound pad = VOICES[rng.nextInt(VOICES.length)];
+
+        world.playSound(eye, lead, 0.9f, voice(root + voicing[0], 1.0f));
+        world.playSound(eye, pad, 0.6f, voice(root + voicing[1], detune(rng)));
+        world.playSound(eye, lead, 0.5f, voice(root + voicing[2], detune(rng)));
+
+        world.playSound(eye, Sound.ENTITY_WARDEN_SONIC_BOOM, 0.5f,
+                (perf.obsession ? 0.7f : 1.0f) * detune(rng));
+        world.playSound(eye, FRAMES[rng.nextInt(FRAMES.length)], 0.3f,
+                0.5f + rng.nextFloat() * 0.35f); // the deteriorating parts complaining
+
+        // Three notes off the muzzle — the chord made visible, in the only three colours it comes in.
+        noteBurst(world, eye.clone().add(eye.getDirection().multiply(1.2)), 0.3, 3);
     }
 
     /** One stack earned — a chord swelling a tone higher, and rust shaken loose off the frame. */
@@ -549,7 +799,7 @@ public final class HarmonyWeapon implements Weapon {
         Location at = player.getEyeLocation();
         world.playSound(at, Sound.BLOCK_NOTE_BLOCK_HARP, 0.7f, chordPitch(stacks));
         world.playSound(at, Sound.BLOCK_NOTE_BLOCK_IRON_XYLOPHONE, 0.5f, chordPitch(stacks));
-        world.spawnParticle(Particle.NOTE, at, 2, 0.35, 0.3, 0.35, 0.0, null, true);
+        noteBurst(world, at, 0.35, 3);
         world.spawnParticle(Particle.DUST, at, 3, 0.3, 0.3, 0.3, 0.0, RUST_FINE, true);
     }
 
@@ -561,7 +811,7 @@ public final class HarmonyWeapon implements Weapon {
         world.playSound(at, Sound.BLOCK_NOTE_BLOCK_BIT, 1.0f, 1.9f);
         world.playSound(at, Sound.BLOCK_NOTE_BLOCK_BIT, 0.9f, 0.55f);
         world.playSound(at, Sound.ENTITY_ELDER_GUARDIAN_CURSE, 0.45f, 1.5f);
-        world.spawnParticle(Particle.NOTE, at, 12, 0.6, 0.5, 0.6, 0.0, null, true);
+        noteBurst(world, at, 0.6, NOTE_BURST_CAP);
         world.spawnParticle(Particle.DUST, at, 10, 0.5, 0.5, 0.5, 0.0, NOTE_EDGE, true);
         world.spawnParticle(Particle.ELECTRIC_SPARK, at, 8, 0.4, 0.4, 0.4, 0.02, null, true);
     }
@@ -614,12 +864,16 @@ public final class HarmonyWeapon implements Weapon {
         world.spawnParticle(Particle.DUST, at, 4, 0.15, 0.15, 0.15, 0.0, NOTE_EDGE, true);
     }
 
-    /** The note passing through a body. */
+    /**
+     * The note passing through a body. Capped deliberately: a shot may pierce {@value #NOTE_MAX_TARGETS}
+     * bodies, and this fires once per body in the same tick, so its ceiling is multiplied by eight before
+     * it reaches the network. 16 particles a body -> 128 on the worst shot ever fired.
+     */
     private void pierceFx(World world, LivingEntity victim) {
         Location c = victim.getLocation().add(0, victim.getHeight() * 0.6, 0);
-        world.spawnParticle(Particle.DUST_COLOR_TRANSITION, c, 10, 0.28, 0.4, 0.28, 0.0, NOTE_BLED, true);
-        world.spawnParticle(Particle.DUST, c, 6, 0.25, 0.35, 0.25, 0.0, NOTE_EDGE, true);
-        world.spawnParticle(Particle.NOTE, c, 3, 0.25, 0.3, 0.25, 0.0, null, true);
+        world.spawnParticle(Particle.DUST_COLOR_TRANSITION, c, 8, 0.3, 0.42, 0.3, 0.0, NOTE_BLED, true);
+        world.spawnParticle(Particle.DUST, c, 5, 0.28, 0.38, 0.28, 0.0, NOTE_EDGE, true);
+        noteBurst(world, c, 0.3, 3);
         world.playSound(c, Sound.BLOCK_NOTE_BLOCK_BELL, 0.55f, 1.8f);
     }
 
@@ -627,6 +881,12 @@ public final class HarmonyWeapon implements Weapon {
      * The Note held on screen: the fired polyline is redrawn each tick for {@value #NOTE_ECHO_TICKS} ticks,
      * thinning as it goes, so the shot reads as a sustained note decaying rather than a single frame's
      * flash. Purely cosmetic — the damage was all dealt the instant the beam was resolved.
+     *
+     * <p><b>The lingering is bought out of rate, not out of counts.</b> The step between motes grows every
+     * tick ({@link #NOTE_ECHO_THIN}) and is floored by {@link #NOTE_ECHO_MAX_MOTES} against the path's
+     * true length, so the echo's densest frame is capped no matter how far the beam ran, and every frame
+     * after it is strictly cheaper. The note is on screen for more than twice as long as it was while its
+     * peak and average per-tick spend are both below what the old 7-tick echo cost.
      *
      * <p>Every mote is spawned with {@code force = true}: the beam runs out to {@value #NOTE_RANGE} blocks
      * and a client culls unforced particles somewhere around 32, which would cut the note off mid-air for
@@ -636,12 +896,17 @@ public final class HarmonyWeapon implements Weapon {
         private final World world;
         private final List<Segment> path;
         private final boolean obsession;
+        /** The polyline's true length, so the per-tick mote ceiling can be enforced against it. */
+        private final double total;
         private int age = 0;
 
         NoteEcho(World world, List<Segment> path, boolean obsession) {
             this.world = world;
             this.path = path;
             this.obsession = obsession;
+            double t = 0.0;
+            for (Segment s : path) t += s.length();
+            this.total = Math.max(NOTE_VFX_STEP, t); // never divide by a zero-length path
         }
 
         @Override
@@ -651,13 +916,16 @@ public final class HarmonyWeapon implements Weapon {
                 echoes.remove(this);
                 return;
             }
-            // The sustain thins as the note decays: the same line, drawn ever more sparsely.
-            double step = NOTE_VFX_STEP * (1.0 + age * NOTE_ECHO_THIN);
-            for (int i = 0; i < path.size(); i++) draw(path.get(i), step, i == 0);
+            // The sustain thins as the note decays: the same line, drawn ever more sparsely. The second
+            // term is the hard ceiling — however long the path, never more than NOTE_ECHO_MAX_MOTES of it.
+            double step = Math.max(NOTE_VFX_STEP * (1.0 + age * NOTE_ECHO_THIN),
+                    total / NOTE_ECHO_MAX_MOTES);
+            boolean notes = age < NOTE_ECHO_NOTE_TICKS && (age & 1) == 0;
+            for (int i = 0; i < path.size(); i++) draw(path.get(i), step, i == 0, notes);
             age++;
         }
 
-        private void draw(Segment s, double step, boolean first) {
+        private void draw(Segment s, double step, boolean first, boolean notes) {
             // Only the muzzle leg starts short — the wielder's own metre is left bare so nothing bursts
             // in first person. A ricocheted leg begins right at the wall it came off.
             double start = first ? NOTE_VFX_START : 0.0;
@@ -672,9 +940,10 @@ public final class HarmonyWeapon implements Weapon {
                 if (idx % 3 == 0) {
                     world.spawnParticle(Particle.DUST, p, 1, 0.09, 0.09, 0.09, 0.0, NOTE_EDGE, true);
                 }
-                if (age == 0 && idx % 5 == 0) {
-                    // Only the note's attack scatters visible notes; the decay is just the line fading.
-                    world.spawnParticle(Particle.NOTE, p, 1, 0.05, 0.05, 0.05, 0.0, null, true);
+                if (notes && idx % NOTE_ECHO_NOTE_EVERY == 0) {
+                    // The notes hang along the beam for the first few ticks, not just its attack frame —
+                    // one at a time, because that is the only way to state their colour. See note().
+                    note(world, p, NOTE_HUES[(idx / NOTE_ECHO_NOTE_EVERY + age) % NOTE_HUES.length]);
                 }
                 if (age == 0 && idx % 7 == 0) {
                     world.spawnParticle(Particle.ELECTRIC_SPARK, p, 1, 0.04, 0.04, 0.04, 0.0, null, true);
@@ -746,13 +1015,14 @@ public final class HarmonyWeapon implements Weapon {
                             "stacks are lost."),
                     new EgoLore.Ability("[Left Click] Note",
                             "Fire a powerful beam. Refreshes every",
-                            "7 seconds. Under Obsession it",
-                            "ricochets off walls."),
+                            "7 seconds — 4 under Obsession, which",
+                            "also makes it ricochet off walls."),
                     new EgoLore.Ability("[Right Click] Obsession",
                             "Change stance. Costs 10% of current",
                             "HP, and only above 10% Max HP.",
-                            "Weapon damage +30%. Rhythm can",
-                            "only be gained while it is active.")
+                            "Weapon damage +30% and the Note",
+                            "refreshes in 4s. Rhythm can only be",
+                            "gained while it is active.")
             ));
 
     // ---- lifecycle -----------------------------------------------------------------

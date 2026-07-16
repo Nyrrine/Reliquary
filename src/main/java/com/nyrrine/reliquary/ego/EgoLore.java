@@ -12,9 +12,13 @@ import java.util.List;
  * The shared tooltip for E.G.O Equipment.
  *
  * <p>Every E.G.O item reads top-to-bottom in the same order, so the roster looks like one kit: the
- * <b>weapon</b> name as the display name in the item's primary colour, the source <b>Abnormality</b> as
- * the bold title line in its secondary colour, the flavour block, then a {@code How to use:} moveset of
- * bracketed {@code [Input] Ability Name} headers with their descriptions, and the grey footer.
+ * weapon name as the display name in the item's primary colour, the source Abnormality as the title line
+ * in its secondary colour, the flavour block, then a {@code How to use:} moveset of bracketed
+ * {@code [Input] Ability Name} headers with their descriptions, and the grey footer.
+ *
+ * <p><b>Nothing here is ever bold.</b> The title line and the ability headers were, and a tooltip full of
+ * bold reads as shouting — they separate on colour alone now. {@link #line} switches bold off explicitly
+ * and offers no way to turn it on; keep it that way.
  *
  * <p>The name/title split is the rule of the house and the reason this helper exists: the display name is
  * always the weapon, the title line is always the Abnormality, and neither ever repeats the other. Callers
@@ -52,10 +56,16 @@ public final class EgoLore {
         }
     }
 
-    private static Component line(String text, TextColor color, boolean bold) {
+    /**
+     * One line of a tooltip. Italics and bold are both switched off explicitly rather than left to
+     * inherit — <b>nothing in an E.G.O tooltip is ever bold.</b> The title line and the ability headers
+     * used to be, and a screen full of them reads as shouting; they carry their weight with colour now.
+     * There is deliberately no way to ask this for bold.
+     */
+    private static Component line(String text, TextColor color) {
         return Component.text(text, color)
                 .decoration(TextDecoration.ITALIC, false)
-                .decoration(TextDecoration.BOLD, bold);
+                .decoration(TextDecoration.BOLD, false);
     }
 
     /**
@@ -77,22 +87,22 @@ public final class EgoLore {
                                   List<Ability> howLines) {
         List<Component> lore = new ArrayList<>();
 
-        lore.add(line(abnormality, secondary, true));
+        lore.add(line(abnormality, secondary));
         lore.add(Component.empty());
 
-        for (String desc : descLines) lore.add(line(desc, BODY, false));
+        for (String desc : descLines) lore.add(line(desc, BODY));
         lore.add(Component.empty());
 
-        lore.add(line(HOW_TO_USE, primary, false));
+        lore.add(line(HOW_TO_USE, primary));
         for (Ability ability : howLines) {
-            lore.add(line(ability.header(), primary, true));
-            for (String l : ability.lines()) lore.add(line(l, BODY, false));
+            lore.add(line(ability.header(), primary));
+            for (String l : ability.lines()) lore.add(line(l, BODY));
             lore.add(Component.empty()); // separates abilities, and the last one from the footer
         }
         if (howLines.isEmpty()) lore.add(Component.empty());
 
-        lore.add(line(FOOTER, FOOTER_COLOR, false));
+        lore.add(line(FOOTER, FOOTER_COLOR));
 
-        return new Tooltip(line(name, primary, false), lore);
+        return new Tooltip(line(name, primary), lore);
     }
 }

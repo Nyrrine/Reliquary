@@ -54,8 +54,26 @@ public final class EgoModels {
 
     // ---- TETH ----
     public static final Model SOLITUDE    = ranged(Material.CROSSBOW, "solitude");
-    public static final Model FRAGMENTS_FROM_SOMEWHERE = melee(Material.NETHERITE_SWORD, "fragments_from_somewhere", 6.0, 1.4);
-    public static final Model LANTERN     = melee(Material.MACE, "lantern", 6.0, 0.9);
+    // A TRIDENT, for the spear silhouette — Nyrrine, 2026-07-17: "for fragment a spear silhouette since
+    // itll have a model eventually." It was a NETHERITE_SWORD precisely because a trident's right-click
+    // throws itself, and right-click is this weapon's lunge.
+    //
+    // ⚠️ UNPROVEN IN GAME. WeaponManager.onInteract cancels the interact for any registered weapon, which
+    // is what stops Fourth Match Flame's FLINT_AND_STEEL setting the world alight on every cast — so an
+    // instant right-click use is definitely suppressed. A trident is a *charge-then-release* use, which is
+    // a different path, and nothing in this roster proves that one: the crossbows look like proof and
+    // aren't, since a crossbow with no arrows would never draw regardless. Cancelling should skip the
+    // item's use() entirely and never start the charge, but "should" is not "does".
+    //
+    // FIRST THING TO CHECK NEXT PLAYTEST: right-click Fragments and confirm the spear stays in your hand.
+    // If it flies across the room, put this back to NETHERITE_SWORD; the spear comes with the model.
+    public static final Model FRAGMENTS_FROM_SOMEWHERE = melee(Material.TRIDENT, "fragments_from_somewhere", 6.0, 1.4);
+    // Deliberately not a MACE. A mace carries a fall-slam passive that fights whatever gimmick sits on
+    // top of it, and every weapon here gets a custom model eventually, so the fallback only has to hold a
+    // sensible silhouette and otherwise stay out of the way. A hoe is a haft with a head — a lantern on a
+    // pole — and is one of the few vanilla items with no combat passive at all: no sweep, no
+    // shield-break, no smash. Penitence and Regret are the only maces left, and both are meant to be.
+    public static final Model LANTERN     = melee(Material.NETHERITE_HOE, "lantern", 6.0, 0.9);
     public static final Model FOURTH_MATCH_FLAME = ranged(Material.FLINT_AND_STEEL, "fourth_match_flame");
     public static final Model RED_EYES    = melee(Material.IRON_SWORD, "red_eyes", 6.0, 1.6);
     public static final Model REGRET      = melee(Material.MACE, "regret", 7.0, 0.9);

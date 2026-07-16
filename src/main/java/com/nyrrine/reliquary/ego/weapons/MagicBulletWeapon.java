@@ -25,6 +25,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.FallingBlock;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -81,6 +82,15 @@ public final class MagicBulletWeapon implements Weapon {
     /** The one per-wielder state bag: charge, six-shot cycle, bullet counter, marked target, ult phase. */
     private final Map<UUID, State> states = new HashMap<>();
 
+    /**
+     * Bodies currently taking something this musket threw — a shot, the orb's cleave, or the orb's kickback
+     * onto the wielder themselves. The manager dispatches {@link #onHit} for any blow whose damager is a
+     * player holding this weapon, and all three are exactly that, so this fence is what tells them from a
+     * swing. Held only across each single {@code damage()} call, in a try/finally, so it is empty between
+     * blows and can never accumulate a dead mob's id.
+     */
+    private final Set<UUID> shooting = new HashSet<>();
+
     // ---- ult shutdown-safety registries (main-thread only) -------------------------
     /** Outstanding temp-carved blocks awaiting their timed restore, keyed by location (no double-restore). */
     private final Map<Location, BlockState> pendingCarves = new LinkedHashMap<>();
@@ -92,7 +102,10 @@ public final class MagicBulletWeapon implements Weapon {
     private static final long   SHOT_COOLDOWN_MS = 13000L; // real post-shot reload before the next charge (~13s, musket-slow)
     private static final double RANGE          = 48.0;  // hitscan reach
     private static final double RAY_SIZE       = 0.6;   // entity ray fatness (forgiving aim) when unmarked
-    private static final double SHOT_DAMAGE    = 16.0;  // per shot — slow, charged, never-miss, self-costing
+    // The six normal shots are 10. The old hub note recorded a "cap 16→10" retune that this file never
+    // received — the note was right about the intent and the code simply never got it. Landed 2026-07-17
+    // on Nyrrine's ruling: ten for the normal shots, and the seventh stays devastating (ULT_DAMAGE).
+    private static final double SHOT_DAMAGE    = 10.0;  // per shot — slow, charged, never-miss, self-costing
     private static final int    MAX_BULLETS    = 7;     // meter width (the 7th slot = the Seventh Bullet)
     private static final int    NORMAL_SHOTS   = 6;     // normal shots allowed before the ult is forced
     private static final int    CYCLE          = 6;     // magic-circle cycle length
@@ -221,6 +234,23 @@ public final class MagicBulletWeapon implements Weapon {
     }
 
     // ---- input routing -------------------------------------------------------------
+
+    /**
+     * The musket fires on the vow, not on being swung at someone. Left-click begins a charge, so pointing
+     * it at a body within arm's reach would otherwise land a vanilla blow as well — and that blow, arriving
+     * first, stamps hurt-immunity that swallows the shot the charge was for. Cancelling costs nothing: Magic
+     * Bullet is a {@code ranged} model with no melee damage of its own.
+     *
+     * <p><b>The fence is not optional.</b> The manager hands this every blow whose damager is a player
+     * holding the musket — which is the shot, the orb's cleave, and the orb's kickback onto the wielder
+     * alike. Without {@link #shooting} the cancel would eat all three: the gun would deal nothing and the
+     * vow would cost nothing.
+     */
+    @Override
+    public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
+        if (shooting.contains(victim.getUniqueId())) return; // our own shot/orb/toll, not a swing
+        event.setCancelled(true);
+    }
 
     @Override
     public void onSwing(Player player) {
@@ -372,7 +402,12 @@ public final class MagicBulletWeapon implements Weapon {
             if (shieldBlocks(victim, incoming)) {
                 shieldBlockFx(victim, incoming);          // the shield eats the shot — no damage, no recoil
             } else {
-                victim.damage(SHOT_DAMAGE, player);
+                shooting.add(victim.getUniqueId());
+                try {
+                    victim.damage(SHOT_DAMAGE, player);
+                } finally {
+                    shooting.remove(victim.getUniqueId());
+                }
                 impactFx(world, impact);
                 st.lastHit = victim.getUniqueId();
                 // No self-recoil on shots 1–6 — only the Seventh Bullet's strike-back can wound the wielder.
@@ -407,10 +442,21 @@ public final class MagicBulletWeapon implements Weapon {
         w.spawnParticle(Particle.DUST, at, 8, 0.2, 0.2, 0.2, 0, LIGHT_DUST);
     }
 
-    /** Deal damage without the usual knockback — capture velocity and restore it after the hit. */
+    /**
+     * Deal damage without the usual knockback — capture velocity and restore it after the hit.
+     *
+     * <p>Fenced through {@link #shooting}: the manager hands {@link #onHit} every blow whose damager is a
+     * player holding this musket, and everything this weapon throws is exactly that. Without the fence the
+     * cancel in onHit would eat the orb's own damage.
+     */
     private void damageNoKb(LivingEntity le, double dmg, Player src) {
         Vector before = le.getVelocity();
-        le.damage(dmg, src);
+        shooting.add(le.getUniqueId());
+        try {
+            le.damage(dmg, src);
+        } finally {
+            shooting.remove(le.getUniqueId());
+        }
         le.setVelocity(before);
     }
 
@@ -1229,7 +1275,15 @@ public final class MagicBulletWeapon implements Weapon {
                 world.spawnParticle(Particle.SMOKE, head, 20, 0.4, 0.4, 0.4, 0.03);
                 world.playSound(head, Sound.ENTITY_WITHER_HURT, 1.0f, 0.6f);
                 world.playSound(head, Sound.ENTITY_GENERIC_EXPLODE, 1.2f, 0.5f);
-                shooter.damage(ULT_SELF_DAMAGE, shooter);
+                // Fenced like every other blow this musket throws: the wielder is the damager AND the
+                // victim here, so onHit sees it too, and an unfenced cancel would quietly forgive the
+                // whole toll — the vow's price is the point of the Seventh Bullet.
+                shooting.add(shooter.getUniqueId());
+                try {
+                    shooter.damage(ULT_SELF_DAMAGE, shooter);
+                } finally {
+                    shooting.remove(shooter.getUniqueId());
+                }
                 cancel();
                 return;
             }
@@ -1352,23 +1406,29 @@ public final class MagicBulletWeapon implements Weapon {
             "Der Freischütz",   // title line — always the Abnormality
             NAME,
             GLOW,
+            // Nyrrine's wording, 2026-07-17, verbatim — only the line breaks are mine.
             List.of(
-                    "It fires on the vow, not the pull.",
-                    "Inscribe the black circle —",
-                    "and never miss."
+                    "Though the original's power couldn't be",
+                    "fully extracted, the magic this holds is",
+                    "still potent.",
+                    "",
+                    "The weapon's bullets travel across the",
+                    "corridor, along the horizon."
             ),
             List.of(
                     new EgoLore.Ability("[Passive] Bullet Counter",
                             "Every shot fired is counted. After the",
                             "sixth, the normal shot is locked out and",
                             "only the Seventh Bullet remains."),
-                    new EgoLore.Ability("[Passive] Shield Block",
-                            "A raised shield facing into the shot",
-                            "blocks it — the bullet and the orb."),
+                    // "Shield Block" was listed here as a [Passive] of its own. It is not a passive and it
+                    // is not the musket's — it is what someone else does to survive it. Nyrrine, 2026-07-17:
+                    // "Do not mention shield block passives since it's a counter not a passive." The fact
+                    // still matters to whoever is aiming, so it rides the shot it applies to.
                     new EgoLore.Ability("[Left Click] Charged Shot",
                             "Begins a 2.4 second charge, then looses",
                             "one shot down the aim at full charge.",
-                            "13 second reload before the next."),
+                            "13 second reload before the next. A",
+                            "shield raised into it turns the bullet."),
                     new EgoLore.Ability("[Right Click] Target Lock",
                             "Marks the enemy you are looking at, or",
                             "the last one you struck. While the lock",
@@ -1380,7 +1440,8 @@ public final class MagicBulletWeapon implements Weapon {
                             "second wind-up inscribes four circles,",
                             "then looses a huge homing orb: it tears",
                             "a temporary hole through all it passes",
-                            "and devastates what it touches.",
+                            "and devastates what it touches. A",
+                            "shield raised into it turns the orb.",
                             "If the orb kills, it turns back on the",
                             "wielder for 8 hearts. Then 15 seconds",
                             "of downtime, and the counter resets.")
