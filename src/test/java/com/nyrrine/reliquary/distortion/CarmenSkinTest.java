@@ -68,6 +68,21 @@ class CarmenSkinTest {
     }
 
     @Test
+    void valueDeclaresTheSlimModel() {
+        // Her PNG is painted slim — 3px arms, the 4th column transparent. Declared classic, she
+        // renders with Steve's thick arms and a seam where the texture runs out. That is exactly
+        // what shipped the first time and it took a playtest to catch, because nothing errors.
+        //
+        // The model lives inside the signed payload, so fixing it means re-signing rather than
+        // editing — and a manifest with no metadata block at all means classic *by omission*, which
+        // is the quiet way back into this bug.
+        String manifest = new String(Base64.getDecoder().decode(CarmenSkin.VALUE), StandardCharsets.UTF_8);
+
+        assertTrue(manifest.replace(" ", "").contains("\"model\":\"slim\""),
+                "Carmen's skin must declare model=slim or she renders in classic: " + manifest);
+    }
+
+    @Test
     void nameFitsAProfile() {
         // Profile names are capped at 16 characters; a longer one is rejected on the way in.
         assertTrue(CarmenSkin.NAME.length() <= 16, "profile name too long: " + CarmenSkin.NAME);
