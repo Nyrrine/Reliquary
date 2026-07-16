@@ -3,6 +3,9 @@ package com.nyrrine.reliquary;
 import com.nyrrine.reliquary.core.RelicTracker;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.core.WeaponManager;
+import com.nyrrine.reliquary.data.PlayerDataListener;
+import com.nyrrine.reliquary.data.PlayerStore;
+import com.nyrrine.reliquary.data.YamlPlayerStore;
 import com.nyrrine.reliquary.extraction.ExtractionCommand;
 import com.nyrrine.reliquary.busego.weapons.FlowerBuryingWedgeReckoning;
 import com.nyrrine.reliquary.busego.weapons.FlowerBuryingWedgeWeapon;
@@ -74,9 +77,14 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
     private RelicTracker tracker;
     private ExtractionCommand extraction;
     private com.nyrrine.reliquary.extraction.Stations stations;
+    private YamlPlayerStore store;
 
     @Override
     public void onEnable() {
+        // First up: everything below may want per-player state during its own init.
+        this.store = new YamlPlayerStore(this);
+        getServer().getPluginManager().registerEvents(new PlayerDataListener(store), this);
+
         this.weapons = new WeaponManager(this);
         weapons.register(new ArayashikiWeapon(this));
         GungnirWeapon gungnir = new GungnirWeapon(this);
@@ -169,6 +177,8 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         if (weapons != null) weapons.disable();
         if (stations != null) stations.save();
         if (extraction != null) extraction.disable(); // return seated vials + reap any live Well carousel
+        // Last: anything above may have touched a record on its way out. Blocks until the writes land.
+        if (store != null) store.close();
     }
 
     public WeaponManager weapons() {
@@ -177,6 +187,11 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
 
     public RelicTracker tracker() {
         return tracker;
+    }
+
+    /** The shared per-player store — records and role grants. */
+    public PlayerStore store() {
+        return store;
     }
 
     /** True if this player's client has the server resource pack loaded (cosmetic pack models render). */
