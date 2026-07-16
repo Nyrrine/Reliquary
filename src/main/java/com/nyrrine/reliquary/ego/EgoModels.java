@@ -53,6 +53,9 @@ public final class EgoModels {
     public static final Model SODA        = ranged(Material.CROSSBOW, "soda");
 
     // ---- TETH ----
+    public static final Model SOLITUDE    = ranged(Material.CROSSBOW, "solitude");
+    public static final Model FRAGMENTS_FROM_SOMEWHERE = melee(Material.NETHERITE_SWORD, "fragments_from_somewhere", 6.0, 1.4);
+    public static final Model LANTERN     = melee(Material.MACE, "lantern", 6.0, 0.9);
     public static final Model FOURTH_MATCH_FLAME = ranged(Material.FLINT_AND_STEEL, "fourth_match_flame");
     public static final Model RED_EYES    = melee(Material.IRON_SWORD, "red_eyes", 6.0, 1.6);
     public static final Model REGRET      = melee(Material.MACE, "regret", 7.0, 0.9);
@@ -62,6 +65,7 @@ public final class EgoModels {
     public static final Model CHRISTMAS   = melee(Material.IRON_SWORD, "christmas", 6.0, 0.9);
 
     // ---- HE ----
+    public static final Model FROST_SPLINTER = melee(Material.NETHERITE_SWORD, "frost_splinter", 6.5, 1.5);
     public static final Model GRINDER_MK4 = melee(Material.NETHERITE_PICKAXE, "grinder_mk4", 5.0, 1.2);
     public static final Model CRIMSON_SCAR = melee(Material.NETHERITE_AXE, "crimson_scar", 7.0, 1.2);
     public static final Model COBALT_SCAR = melee(Material.NETHERITE_SHOVEL, "cobalt_scar", 5.0, 16.0);
@@ -71,6 +75,12 @@ public final class EgoModels {
     public static final Model LAETITIA    = ranged(Material.CROSSBOW, "laetitia");
 
     // ---- WAW ----
+    public static final Model HARMONY     = ranged(Material.CROSSBOW, "harmony");
+    // Gaze swings twice per attack, so its base sits at half the sword band — a swing totals ~7.
+    public static final Model GAZE        = melee(Material.NETHERITE_SWORD, "gaze", 3.5, 1.6);
+    public static final Model HORNET      = ranged(Material.CROSSBOW, "hornet");
+    public static final Model FAINT_AROMA = ranged(Material.CROSSBOW, "faint_aroma");
+    public static final Model DISCORD     = melee(Material.NETHERITE_SWORD, "discord", 6.5, 1.6);
     public static final Model LAMP        = ranged(Material.LANTERN, "lamp");
     public static final Model MAGIC_BULLET = ranged(Material.CROSSBOW, "magic_bullet");
     public static final Model SOLEMN_LAMENT = ranged(Material.CROSSBOW, "solemn_lament");
@@ -79,6 +89,10 @@ public final class EgoModels {
     public static final Model GREEN_STEM  = melee(Material.IRON_SWORD, "green_stem", 6.0, 1.6);
     public static final Model SCREAMING_WEDGE = ranged(Material.CROSSBOW, "screaming_wedge");
     public static final Model HEAVEN      = melee(Material.NETHERITE_SWORD, "heaven", 7.0, 1.6);
+
+    // ---- ALEPH ----
+    public static final Model JUSTITIA    = melee(Material.NETHERITE_SWORD, "justitia", 7.5, 1.0);
+    public static final Model MIMICRY     = melee(Material.NETHERITE_SWORD, "mimicry", 6.5, 1.8);
 
     // Vanilla base attributes: player attack damage = 1.0, attack speed = 4.0. An item modifier of
     // (atk - 1) / (spd - 4) makes the held weapon read exactly atk / spd.
