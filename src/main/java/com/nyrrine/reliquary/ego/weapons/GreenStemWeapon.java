@@ -18,6 +18,8 @@ import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.data.BlockData;
+import org.bukkit.damage.DamageSource;
+import org.bukkit.damage.DamageType;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -101,13 +103,20 @@ public final class GreenStemWeapon implements Weapon {
     private static final double EXECUTE_RADIUS = 5.0;
 
     /**
-     * The credited finishing blow. Kept modest on purpose: a landed {@code damage()} makes armour lose
-     * durability proportional to the hit (~damage/4 per piece), so the old 1,000-point overkill stripped a
-     * victim's whole armour set in a hit or two. This lands a normal-sized, kill-credited blow; if a
-     * heavily-armoured or Resistance-shielded body soaks it, {@link #fireThorn} finishes with
-     * {@code setHealth(0)} — no overkill number, no armour-destroying durability blast.
+     * Protection's ceiling. The server clamps the enchantment's protection factor to 20 and scales damage
+     * by {@code 1 - factor/25}, so no legal armour set can shave off more than 80% — five times what is
+     * needed to kill is therefore lethal through any of it. {@code GENERIC_KILL} is not tagged
+     * {@code bypasses_enchantments}, so this is the one reduction the thorn still has to out-muscle.
      */
-    private static final double EXECUTE_DAMAGE = 20.0;
+    private static final double PROTECTION_HEADROOM = 5.0;
+
+    /**
+     * Slack folded into the thorn before the headroom multiplies it. Covers the body's absorption hearts
+     * and the damage cooldown: a blow landing inside the victim's invulnerability window has the previous
+     * hit's damage subtracted from it, and when the thorn fires from {@link #onHit} the previous hit is
+     * the sword blow that triggered it.
+     */
+    private static final double EXECUTE_MARGIN = 40.0;
 
     /** A speared body can't be re-speared for this long (mostly matters if a hit somehow fails to kill). */
     private static final long THORN_COOLDOWN_MS = 3_000L;
@@ -208,15 +217,60 @@ public final class GreenStemWeapon implements Weapon {
         return target.getHealth() <= maxHp * EXECUTE_FRACTION;
     }
 
+    /**
+     * The thorn's damage source: {@link DamageType#GENERIC_KILL}, attributed to the wielder.
+     *
+     * <p>{@code GENERIC_KILL} is the type vanilla's own {@code kill()} builds, and of the types the server
+     * ships it is the one that actually delivers an execute: it is tagged {@code bypasses_armor},
+     * {@code bypasses_resistance} and {@code bypasses_invulnerability} (and, because
+     * {@code bypasses_shield} includes the whole {@code bypasses_armor} tag, a raised shield does not stop
+     * it either). {@code MAGIC} bypasses armour but is still cut by Resistance, so it cannot promise a
+     * kill.
+     *
+     * <p>The bypass is also what keeps the thorn honest: the server charges armour durability
+     * (~damage/4 <em>per piece</em>) inside a branch it skips outright for a {@code bypasses_armor}
+     * source, so however large this blow is, it costs the victim's gear nothing. An earlier build dealt a
+     * plain overkill <em>attack</em> instead, which carries no such tag, and stripped a victim's whole
+     * armour set in a hit or two. The damage type was the bug, not the magnitude.
+     *
+     * <p>The wielder is both the causing and the direct entity. The thorn would be the more natural direct
+     * entity, but it is only particles — there is no entity to name — and the builder rejects a causing
+     * entity without a direct one outright. That attribution is what names the wielder in the death
+     * message and hands them the drops.
+     */
+    private static DamageSource executeSource(Player wielder) {
+        return DamageSource.builder(DamageType.GENERIC_KILL)
+                .withCausingEntity(wielder)
+                .withDirectEntity(wielder)
+                .build();
+    }
+
+    /**
+     * What it takes to finish this body for certain: everything it has left to spend — health plus
+     * absorption plus {@link #EXECUTE_MARGIN} of slack — multiplied by {@link #PROTECTION_HEADROOM}.
+     *
+     * <p>Derived rather than a fixed overkill number, so it stays lethal against a body with far more
+     * health than vanilla grants without ever being an arbitrary magic constant.
+     */
+    private static double executeDamage(LivingEntity target) {
+        return (target.getHealth() + target.getAbsorptionAmount() + EXECUTE_MARGIN) * PROTECTION_HEADROOM;
+    }
+
     private boolean thornReady(UUID id, long now) {
         Long ready = thornCd.get(id);
         return ready == null || now >= ready;
     }
 
     /**
-     * The finisher: a wooden thorn spike erupts from the ground beneath the target and impales it.
-     * The killing blow is a plain {@code victim.damage(..., wielder)}, fenced by {@link #ticking} so it
-     * doesn't re-seed venom or re-proc through {@link #onHit}. Non-vanilla hit -> mild blade wear.
+     * The finisher: a wooden thorn spike erupts from the ground beneath the target and impales it. The
+     * killing blow is an armour-bypassing {@code damage()} credited to the wielder (see
+     * {@link #executeSource}), fenced by {@link #ticking} so it doesn't re-seed venom or re-proc through
+     * {@link #onHit}. Non-vanilla hit -> mild blade wear.
+     *
+     * <p>Going through {@code damage()} rather than straight to a kill is what marks the wielder as the
+     * body's last attacker, and that mark is what the server reads afterwards to award XP and
+     * player-kill drops. It matters most here: the passive scan spears bodies the wielder may never have
+     * touched, so without the {@code damage()} call the kill would credit nobody at all.
      */
     private void fireThorn(Player wielder, LivingEntity target, long now) {
         eruptThorn(target.getWorld(), target.getLocation(), target);
@@ -226,18 +280,22 @@ public final class GreenStemWeapon implements Weapon {
         thornCd.entrySet().removeIf(e -> now >= e.getValue());
 
         UUID vid = target.getUniqueId();
+        DamageSource source = executeSource(wielder);
         ticking.add(vid); // fence: the damage below re-enters onHit — don't let it loop
-        // A modest, credited hit (not a thousand-point overkill) keeps armour durability loss vanilla-sized.
+        // Armour-bypassing, credited to the wielder, and sized to be lethal outright.
         try {
-            target.damage(EXECUTE_DAMAGE, wielder);
+            target.damage(executeDamage(target), source);
         } finally {
             ticking.remove(vid);
         }
-        // Guarantee the finisher even through heavy armour or Resistance, which could soak the modest blow.
-        // setHealth(0) doesn't run the damage pipeline, so it takes no further toll on the victim's armour;
-        // the recent damage() above still credits the kill to the wielder.
+        // Belt and braces. The thorn above is lethal on its own against anything the game can legally put
+        // in its way, so reaching here means something outside this weapon intervened — another plugin
+        // editing or cancelling the damage event, most plausibly. The execute is defined as a guaranteed
+        // kill below the threshold, so honour that. kill() is setHealth(0) plus a death with our own
+        // source, which is why it reads better than a bare setHealth(0): that dies to a *generic* source
+        // and credits nobody.
         if (!target.isDead() && target.isValid() && target.getHealth() > 0.0) {
-            target.setHealth(0.0);
+            target.kill(source);
         }
 
         thornCd.put(vid, now + THORN_COOLDOWN_MS);

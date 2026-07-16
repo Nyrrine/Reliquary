@@ -16,6 +16,8 @@ import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.attribute.AttributeModifier;
+import org.bukkit.damage.DamageSource;
+import org.bukkit.damage.DamageType;
 import org.bukkit.entity.Boss;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
@@ -43,17 +45,31 @@ import java.util.concurrent.ThreadLocalRandom;
  * gimmick in {@link #onHit}: a <b>decapitation execute</b>. When a landed blow finds a foe already at the
  * end of its rope (a normal mob under 25% HP, a player under 10%, a boss under 5%) and that foe is within
  * {@link #EXECUTE_RANGE} blocks, the wielder blinks to <em>directly behind</em> the target and takes the
- * head: a modest, kill-credited finishing blow ({@link #EXECUTE_DAMAGE}) that {@code setHealth(0)} then
- * guarantees, wrapped in a clean slice, a burst of blood, and a wet crunch. True armor-bypass
- * ({@code DamageType}) is not on this compile classpath; earlier builds bought the kill with a
- * 10,000-point overkill, but that made the victim's armor lose ~2,500 durability per piece in a single hit
- * (durability toll scales with damage dealt), destroying armored gear instantly. The blow is now normal-
- * sized and the guaranteed kill comes from {@code setHealth(0)}, which takes no toll on armor at all.
+ * head, wrapped in a clean slice, a burst of blood, and a wet crunch.
  *
- * <p>That finishing blow is dealt with {@link LivingEntity#damage(double, org.bukkit.entity.Entity)},
- * which fires its own {@code EntityDamageByEntityEvent} and re-enters {@link #onHit}. A per-attacker
- * re-entrancy fence ({@link #executing}) makes the re-entrant call a no-op, so one swing lands exactly one
- * execute, never a loop.
+ * <h2>How the head comes off</h2>
+ * The finisher is a real, armour-bypassing blow: a {@link DamageSource} built on
+ * {@link DamageType#GENERIC_KILL} and credited to the wielder, sized by {@link #executeDamage} to be
+ * lethal through the worst mitigation the target can legally stack.
+ *
+ * <p>{@code GENERIC_KILL} is the type vanilla's own {@code kill()} builds, and of the types the server
+ * ships it is the one that actually delivers an execute: it is tagged {@code bypasses_armor},
+ * {@code bypasses_resistance} and {@code bypasses_invulnerability} (and, because {@code bypasses_shield}
+ * includes the whole {@code bypasses_armor} tag, a raised shield does not stop it either). {@code MAGIC}
+ * bypasses armour but is still cut by Resistance, so it cannot promise a kill.
+ *
+ * <p>The armour bypass is also what keeps the hit honest. The server charges armour durability
+ * (~damage/4 <em>per piece</em>) inside a branch it skips outright when the source is tagged
+ * {@code bypasses_armor} — so the size of this blow costs the victim's gear nothing. An earlier build
+ * dealt a plain 10,000-point <em>attack</em> instead, which carries no such tag; that stripped ~2,500
+ * durability off every piece the victim wore, in one hit. Sizing the number down was a workaround for
+ * the wrong problem: the damage type was the bug, not the magnitude.
+ *
+ * <p>That finishing blow is dealt with {@link LivingEntity#damage(double, DamageSource)}, which fires its
+ * own {@code EntityDamageByEntityEvent} and re-enters {@link #onHit}. A per-attacker re-entrancy fence
+ * ({@link #executing}) makes the re-entrant call a no-op, so one swing lands exactly one execute, never a
+ * loop. Going through {@code damage()} rather than straight to a kill is deliberate: it is what marks the
+ * wielder as the last attacker, which is what the server later reads to award XP and player-kill drops.
  *
  * <p><b>Drawback.</b> While the sword is held the wielder is diminished: a {@code -4.0} (two-heart)
  * {@link Attribute#MAX_HEALTH} modifier, keyed by {@link #HEALTH_KEY}, is applied in {@link #onTick} and
@@ -81,13 +97,20 @@ public final class LifeForADaredevilWeapon implements Weapon {
     private static final double THRESH_BOSS   = 0.05; // a boss under a twentieth
 
     /**
-     * The credited finishing blow. Kept modest on purpose: a landed {@code damage()} makes armour lose
-     * durability proportional to the hit (~damage/4 per piece), so the old 10,000-point overkill shredded
-     * a victim's whole armour set in a single execute. This lands a normal-sized, kill-credited blow; if a
-     * heavily-armoured or Resistance-shielded target soaks it, {@link #decapitate} finishes the kill with
-     * {@code setHealth(0)} — no overkill number, no armour-destroying durability blast.
+     * Protection's ceiling. The server clamps the enchantment's protection factor to 20 and scales damage
+     * by {@code 1 - factor/25}, so no legal armour set can shave off more than 80% — five times what is
+     * needed to kill is therefore lethal through any of it. {@code GENERIC_KILL} is not tagged
+     * {@code bypasses_enchantments}, so this is the one reduction the execute still has to out-muscle.
      */
-    private static final double EXECUTE_DAMAGE = 20.0;
+    private static final double PROTECTION_HEADROOM = 5.0;
+
+    /**
+     * Slack folded into the finisher before the headroom multiplies it. Covers the target's absorption
+     * hearts and the damage cooldown: a blow landing inside the victim's invulnerability window has the
+     * previous hit's damage subtracted from it, and the previous hit here is the sword swing that
+     * triggered the execute in the first place.
+     */
+    private static final double EXECUTE_MARGIN = 40.0;
 
     /** The two-heart burden borne while the blade is held. */
     private static final double HEALTH_PENALTY = -4.0;
@@ -140,8 +163,8 @@ public final class LifeForADaredevilWeapon implements Weapon {
     /**
      * Melee hit landed. The vanilla sword damage is left intact. If the struck target is within
      * {@link #EXECUTE_RANGE} and already below its HP threshold, the wielder blinks behind it and takes
-     * the head with a huge raw finishing blow. The finishing blow re-enters this method (it fires its own
-     * damage event); the {@link #executing} fence makes that re-entrant call a no-op.
+     * the head with an armour-bypassing finishing blow. The finishing blow re-enters this method (it fires
+     * its own damage event); the {@link #executing} fence makes that re-entrant call a no-op.
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
@@ -161,6 +184,32 @@ public final class LifeForADaredevilWeapon implements Weapon {
         decapitate(attacker, victim);
     }
 
+    /**
+     * The execute's damage source: {@link DamageType#GENERIC_KILL}, attributed to the wielder.
+     *
+     * <p>Both the causing and the direct entity are the wielder — they are stood at the target's back
+     * swinging the blade themselves, with nothing in between. That attribution is what names them in the
+     * death message and hands them the drops.
+     */
+    private static DamageSource executeSource(Player attacker) {
+        return DamageSource.builder(DamageType.GENERIC_KILL)
+                .withCausingEntity(attacker)
+                .withDirectEntity(attacker)
+                .build();
+    }
+
+    /**
+     * What it takes to finish this target for certain: everything it has left to spend — health plus
+     * absorption plus {@link #EXECUTE_MARGIN} of slack — multiplied by {@link #PROTECTION_HEADROOM}.
+     *
+     * <p>Derived rather than a fixed overkill number, so it stays lethal against a target with far more
+     * health than vanilla grants without ever being an arbitrary magic constant. It costs the victim's
+     * armour nothing however large it gets — see the class notes on {@code bypasses_armor}.
+     */
+    private static double executeDamage(LivingEntity victim) {
+        return (victim.getHealth() + victim.getAbsorptionAmount() + EXECUTE_MARGIN) * PROTECTION_HEADROOM;
+    }
+
     /** The HP fraction below which this target may be executed. */
     private double thresholdFor(LivingEntity victim) {
         if (isBoss(victim)) return THRESH_BOSS;
@@ -174,8 +223,9 @@ public final class LifeForADaredevilWeapon implements Weapon {
     }
 
     /**
-     * Blink the wielder to directly behind the target and take the head: FX, a wet crunch, then a huge
-     * raw finishing blow fenced against re-entrancy, and a point of non-vanilla wear on the blade.
+     * Blink the wielder to directly behind the target and take the head: FX, a wet crunch, then the
+     * armour-bypassing finishing blow fenced against re-entrancy, and a point of non-vanilla wear on the
+     * blade.
      */
     private void decapitate(Player attacker, LivingEntity victim) {
         UUID aid = attacker.getUniqueId();
@@ -194,19 +244,22 @@ public final class LifeForADaredevilWeapon implements Weapon {
 
         decapFx(attacker, victim);
 
-        // The finishing blow. Guard re-entrancy: this damage() re-fires onHit for the same attacker.
-        // A modest, credited hit (not a thousand-point overkill) keeps armour durability loss vanilla-sized.
+        // The finishing blow: armour-bypassing, credited to the wielder, and sized to be lethal outright.
+        // Guard re-entrancy — this damage() re-fires onHit for the same attacker.
+        DamageSource source = executeSource(attacker);
         executing.add(aid);
         try {
-            victim.damage(EXECUTE_DAMAGE, attacker);
+            victim.damage(executeDamage(victim), source);
         } finally {
             executing.remove(aid);
         }
-        // Guarantee the execute even through heavy armour or Resistance, which could soak the modest blow.
-        // setHealth(0) doesn't run the damage pipeline, so it takes no further toll on the victim's armour;
-        // the recent damage() above still credits the kill to the wielder.
+        // Belt and braces. The blow above is lethal on its own against anything the game can legally put in
+        // its way, so reaching here means something outside this weapon intervened — another plugin editing
+        // or cancelling the damage event, most plausibly. An execute is defined as a guaranteed kill below
+        // the threshold, so honour that. kill() is setHealth(0) plus a death with our own source, which is
+        // why it reads better than a bare setHealth(0): that dies to a *generic* source and credits nobody.
         if (!victim.isDead() && victim.isValid() && victim.getHealth() > 0.0) {
-            victim.setHealth(0.0);
+            victim.kill(source);
         }
 
         // Teleport + kill is a non-vanilla action, so wear the blade a point beyond the vanilla swing.
