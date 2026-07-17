@@ -27,8 +27,14 @@ public interface Weapon {
     /**
      * The wielder landed a melee hit on a living entity with this relic in the main hand. Fired for
      * vanilla weapon damage so a relic can add an on-hit gimmick (heal, brand, bleed, bonus damage via
-     * {@code event.setDamage(...)}, particles) without replacing the vanilla swing. Avoid calling
-     * {@code victim.damage()} in here — it re-enters this dispatch. Default: no-op.
+     * {@code event.setDamage(...)}, particles) without replacing the vanilla swing.
+     *
+     * <p>Damage dealt from in here does <b>not</b> come back to you: the manager marks this hook while it
+     * runs, so a splash or a cleave struck from within is recognised as your own and never re-dispatched.
+     * Damage dealt <b>later</b> is a different matter — a follow-up a scheduler delivers, a burst, a shot
+     * fired from a trigger — because by then this hook has returned and the blow looks exactly like a fresh
+     * swing again. Route those through {@code WeaponManager.dealing(...)} or keep a guard of your own.
+     * Default: no-op.
      */
     default void onHit(org.bukkit.entity.Player attacker,
                        org.bukkit.entity.LivingEntity victim,

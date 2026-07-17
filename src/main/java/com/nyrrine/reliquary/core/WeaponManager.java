@@ -79,6 +79,17 @@ public final class WeaponManager implements Listener {
     /** Handle to the central 2-tick task so {@link #disable()} can cancel it explicitly. */
     private BukkitTask tickTask;
 
+    /**
+     * Wielders whose relic is dealing damage of its own right now, counted by depth so nested moves unwind
+     * cleanly. The framework's answer to a hook that re-enters itself.
+     *
+     * <p>{@link #onEntityDamageByEntity} cannot tell a swing from a relic's own follow-up by looking at the
+     * damage: both arrive as a blow from a player holding the relic, which is all the event knows. So it
+     * stops guessing and asks. Damage dealt while this is marked is the relic's own doing and is never handed
+     * back to it.
+     */
+    private final Map<UUID, Integer> dealingDepth = new HashMap<>();
+
     public WeaponManager(Reliquary plugin) {
         this.plugin = plugin;
     }
@@ -183,17 +194,38 @@ public final class WeaponManager implements Listener {
         }
     }
 
+    /**
+     * Right-click: refuse the world interaction from <b>either</b> hand, but hand the ability to the
+     * main-hand relic only.
+     *
+     * <p>Those are two questions, and one guard was answering both. A relic must never do what its fallback
+     * item does, and a crossbow-model E.G.O is a real crossbow until this cancel says otherwise — so gating
+     * the whole handler on the main hand meant the off-hand never got its cancel, and every crossbow-model
+     * weapon carried in the off-hand was a plain vanilla crossbow firing live arrows, Multishot and all. The
+     * cancel now keys off {@link PlayerInteractEvent#getItem()}, the stack in whichever hand actually fired,
+     * the same way {@link #onBlockPlace} keys off the placing hand rather than a hand it assumed.
+     *
+     * <p>The dispatch below stays exactly where it was, deliberately. {@code onInteract} belongs to the
+     * main-hand relic and to nothing else: a relic in the off-hand is being <i>carried</i>, not wielded, and
+     * Lamp is built on that line — its lantern lights the world from the off-hand while its abilities stay
+     * locked to the main hand. Refusing an off-hand relic's interaction must not wake it up.
+     */
     @EventHandler
     public void onInteract(PlayerInteractEvent event) {
-        if (event.getHand() != EquipmentSlot.HAND) return;
         Action a = event.getAction();
         if (a != Action.RIGHT_CLICK_AIR && a != Action.RIGHT_CLICK_BLOCK) return;
 
         Player player = event.getPlayer();
+
+        // Either hand: the relic doesn't interact with the world.
+        if (fromItem(event.getItem()) != null) event.setCancelled(true);
+
+        // Main hand only: the relic is wielded, so it gets its ability.
+        if (event.getHand() != EquipmentSlot.HAND) return;
         Weapon weapon = fromItem(player.getInventory().getItemInMainHand());
         if (weapon == null) return;
 
-        event.setCancelled(true); // the relic doesn't interact with the world
+        event.setCancelled(true);
         engage(weapon, player.getUniqueId());
         weapon.onInteract(player, player.isSneaking());
     }
@@ -244,18 +276,64 @@ public final class WeaponManager implements Listener {
         }
     }
 
+    /** True while {@code wielder}'s relic is dealing damage of its own — so this blow is not a swing. */
+    public boolean isDealing(UUID wielder) {
+        return dealingDepth.containsKey(wielder);
+    }
+
+    /**
+     * Run {@code damage} marked as {@code wielder}'s relic dealing its own blow, so {@link Weapon#onHit} is
+     * not handed it back.
+     *
+     * <p>A relic that damages from inside its own {@code onHit} needs nothing: the dispatch marks the hook
+     * while it runs, so a splash or a cleave struck from in there is already covered. This is for the other
+     * half — the follow-up two ticks later, the burst a scheduler drives, the shot a trigger fires — where
+     * the hook has long since returned and the framework has no way to recognise the blow as yours. Wrap it
+     * and it is recognised:
+     *
+     * <pre>{@code plugin.weapons().dealing(attacker.getUniqueId(), () -> victim.damage(5.0, attacker));}</pre>
+     *
+     * <p>Until a relic does that, it must keep its own guard, and a good few do. This does not unwire them.
+     */
+    public void dealing(UUID wielder, Runnable damage) {
+        dealingDepth.merge(wielder, 1, Integer::sum);
+        try {
+            damage.run();
+        } finally {
+            dealingDepth.computeIfPresent(wielder, (id, depth) -> depth <= 1 ? null : depth - 1);
+        }
+    }
+
     /**
      * A wielder's melee hit lands: dispatch an on-hit hook to whatever relic is in their main hand so it
      * can add a gimmick on top of the vanilla swing. Cheap: one instanceof + a map lookup per melee hit.
+     *
+     * <p><b>A relic is never handed its own damage.</b> The event carries nothing that separates a swing from
+     * the relic's answer to one — both are a blow from a player holding it — so for a long time every relic
+     * that struck twice off a swing got its own hook back and had to recognise itself, privately, on the way
+     * in. Most did, each in its own way and under its own name. Crimson Scar did not: its Blood-drunk spray
+     * cut the bodies around the target, each cut came back through here as a fresh hit, and the gimmick ran
+     * again on its own spray — re-multiplying damage that was already multiplied, and re-spraying from every
+     * body it sprayed. The author had reasoned the spray through carefully; nothing about it was careless.
+     * The hook simply did not say it could be re-entered, so the trap was the framework's to close, not
+     * theirs to keep dodging.
+     *
+     * <p>The hook is marked while it runs, so anything it damages is recognised as the relic's own doing and
+     * stops here. That covers damage struck from inside the hook and nothing else: a follow-up a scheduler
+     * delivers later arrives long after this returns, looking exactly like a swing again. A relic wanting
+     * that covered too routes it through {@link #dealing}; a relic that hasn't yet keeps its own guard, which
+     * is why the private ones are still there and still load-bearing.
      */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onEntityDamageByEntity(EntityDamageByEntityEvent event) {
         if (!(event.getDamager() instanceof Player player)) return;
         if (!(event.getEntity() instanceof LivingEntity victim)) return;
+        UUID id = player.getUniqueId();
+        if (isDealing(id)) return; // the relic's own blow — never hand it back
         Weapon weapon = fromItem(player.getInventory().getItemInMainHand());
         if (weapon == null) return;
-        engage(weapon, player.getUniqueId());
-        weapon.onHit(player, victim, event);
+        engage(weapon, id);
+        dealing(id, () -> weapon.onHit(player, victim, event));
     }
 
     /**
