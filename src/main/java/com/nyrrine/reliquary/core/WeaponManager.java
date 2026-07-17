@@ -172,7 +172,7 @@ public final class WeaponManager implements Listener {
             return;
         }
 
-        // Empty main hand: give relics a chance to react to a bare left-click (e.g. Gungnir recall).
+        // Empty main hand: give relics a chance to react to a bare left-click (e.g. recalling a thrown weapon).
         if (main.getType() == Material.AIR) {
             for (Weapon w : weapons.values()) {
                 if (w.onBareSwing(player)) {

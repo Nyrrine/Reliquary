@@ -45,9 +45,6 @@ import com.nyrrine.reliquary.ego.weapons.SolitudeWeapon;
 import com.nyrrine.reliquary.ego.weapons.SwordOfTearsWeapon;
 import com.nyrrine.reliquary.ego.weapons.WristCutterWeapon;
 import com.nyrrine.reliquary.weapons.arayashiki.ArayashikiWeapon;
-import com.nyrrine.reliquary.weapons.gungnir.GungnirOffhandGuard;
-import com.nyrrine.reliquary.weapons.gungnir.GungnirVibration;
-import com.nyrrine.reliquary.weapons.gungnir.GungnirWeapon;
 import com.nyrrine.reliquary.weapons.laevateinn.LaevateinnDoubleJump;
 import com.nyrrine.reliquary.weapons.laevateinn.LaevateinnMelee;
 import com.nyrrine.reliquary.weapons.laevateinn.LaevateinnWeapon;
@@ -88,8 +85,6 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
 
         this.weapons = new WeaponManager(this);
         weapons.register(new ArayashikiWeapon(this));
-        GungnirWeapon gungnir = new GungnirWeapon(this);
-        weapons.register(gungnir);
         LaevateinnWeapon laevateinn = new LaevateinnWeapon(this);
         weapons.register(laevateinn);
 
@@ -140,8 +135,6 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         weapons.register(flowerWedge);
 
         weapons.start();
-        getServer().getPluginManager().registerEvents(new GungnirOffhandGuard(gungnir), this);
-        getServer().getPluginManager().registerEvents(new GungnirVibration(gungnir), this);
         getServer().getPluginManager().registerEvents(new LaevateinnDoubleJump(this, laevateinn), this);
         getServer().getPluginManager().registerEvents(new LaevateinnMelee(laevateinn), this);
         getServer().getPluginManager().registerEvents(new FlowerBuryingWedgeReckoning(flowerWedge), this);
@@ -298,7 +291,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
 
     /**
      * /reliquary giveall &lt;relics|egoequipment|busego&gt; [player] — hand over every weapon of a category.
-     * Relics are the bespoke weapons (Arayashiki/Gungnir/Lævateinn); E.G.O equipment is the Lobotomy Corp
+     * Relics are the bespoke weapons (Arayashiki/Lævateinn); E.G.O equipment is the Lobotomy Corp
      * roster (package {@code ego.weapons}); bus ego is the {@code busego.weapons} roster. Each item is
      * tracked + engaged like a normal give.
      */

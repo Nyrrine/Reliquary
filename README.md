@@ -45,19 +45,6 @@ All commands are **operator only** (permission `reliquary.admin`).
 
 ---
 
-### Gungnir
-
-**Status:** Complete · **Give:** `/reliquary give gungnir [player]`
-
-| Input | Effect |
-| --- | --- |
-| Left click | Loose a straight bolt that flies fast with aim-assist and buries into the first target it meets |
-| Right click | Loose a ricochet bolt that homes onto nearby mobs and bounces off the world, ping-ponging and racking up hits until recalled |
-| Empty-hand left click, or press F | Recall the spear at will |
-| Passive (buried) | A spear sunk into a body makes every strike on it land ~50% harder while it stays lodged |
-
----
-
 ### Lævateinn
 
 **Status:** Complete · **Give:** `/reliquary give laevateinn [player]`
@@ -75,6 +62,12 @@ All commands are **operator only** (permission `reliquary.admin`).
 ---
 
 ### Roadmap
+
+#### Vespas' Hwando & Gungnir
+
+| | |
+| --- | --- |
+| Status | 🔜 Planned |
 
 #### Vergilius' Gladius
 

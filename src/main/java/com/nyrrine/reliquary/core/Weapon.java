@@ -18,7 +18,7 @@ public interface Weapon {
 
     /**
      * The player left-clicked (swung) with an empty main hand. Dispatched to every weapon so a relic
-     * can react when it isn't held (e.g. Gungnir recalling its spear). Return true if handled.
+     * can react when it isn't held (e.g. recalling a thrown weapon). Return true if handled.
      */
     default boolean onBareSwing(org.bukkit.entity.Player player) { return false; }
 
@@ -53,7 +53,7 @@ public interface Weapon {
 
     /**
      * The player pressed the swap-hands key (F). Dispatched to every weapon regardless of what's
-     * held, so a relic can react even when its item has left the hand (e.g. Gungnir's recall).
+     * held, so a relic can react even when its item has left the hand (e.g. recalling a thrown weapon).
      */
     default void onSwapHands(org.bukkit.entity.Player player,
                              org.bukkit.event.player.PlayerSwapHandItemsEvent event) {}

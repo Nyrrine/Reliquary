@@ -85,7 +85,7 @@ public final class LaevateinnSkills {
     private static final double LEAP_SPEED = 1.6;
     private static final int LEAP_MAX_TICKS = 30;
     private static final double BULLSEYE_IMPACT = 10.0;   // the thrown-sword hit
-    private static final double BULLSEYE_PULLOUT = 16.0;  // pulling the blade back out (akin to Gungnir dislodge)
+    private static final double BULLSEYE_PULLOUT = 16.0;  // pulling the blade back out — the dislodge, heavier than the impact
 
     public LaevateinnSkills(Reliquary plugin, LaevateinnWeapon weapon) {
         this.plugin = plugin;

@@ -53,7 +53,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * <ul>
  *   <li><b>Right-click</b> — mark the looked-at (or nearest-ahead) foe and loose ONE wedge after it; press
  *       again to send the next, at your own pace. Each swims around the mark on its own chaotic, auto-aiming
- *       path, then folds into a fast <em>piercing</em> dive clean through the body (Gungnir's bury, not a
+ *       path, then folds into a fast <em>piercing</em> dive clean through the body (a point-first bury, not a
  *       slash), chaining to a fresh foe if the mark falls, before gliding home.</li>
  *   <li><b>Shift + right-click</b> — send every ready wedge at once.</li>
  *   <li><b>Left-click</b> — loose ONE wedge dead-straight (no auto-aim); it impales and lodges INTO the
