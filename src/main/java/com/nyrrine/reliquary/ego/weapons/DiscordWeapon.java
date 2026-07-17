@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.Blink;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -464,7 +465,7 @@ public final class DiscordWeapon implements Weapon {
         Location dest = null;
         for (double d = CYCLE_BEHIND; d >= 0.0; d -= 0.4) {
             Location cand = vLoc.clone().subtract(facing.clone().multiply(d));
-            if (canStand(cand)) { dest = cand; break; }
+            if (Blink.canStand(cand)) { dest = cand; break; }
         }
         if (dest == null) return;                 // nowhere to stand — strike from where we are
         dest.setDirection(facing);                // facing the way it faces == standing at its back
@@ -474,10 +475,6 @@ public final class DiscordWeapon implements Weapon {
         vanishFx(dest);
     }
 
-    /** True if a player's body (feet + head) fits here without clipping into a solid block. */
-    private static boolean canStand(Location feet) {
-        return feet.getBlock().isPassable() && feet.clone().add(0, 1, 0).getBlock().isPassable();
-    }
 
     /**
      * One cut. The mark is still live at this point, so the blow carries its amplification; the

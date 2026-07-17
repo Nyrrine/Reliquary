@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.Blink;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -62,9 +63,9 @@ import java.util.concurrent.ThreadLocalRandom;
  *       or not).</li>
  *   <li><b>Nothing There</b> ({@link #onInteract}, shift + right-click) — the downswing. Empties the
  *       reservoir as one cleave around the wielder, dealing {@link #RELEASE_FRACTION} of the pooled total
- *       — never more than {@link #RELEASE_CAP} — to everything inside {@link #releaseRadius}. Past
- *       {@link #RESERVOIR_FULL} the cleave stops hitting harder and stops reaching further; it only keeps
- *       getting <em>bigger</em>.</li>
+ *       — never more than {@link #RELEASE_CAP} — to everything inside {@link #cleaveRadius}. Past
+ *       {@link #RESERVOIR_FULL} it stops hitting harder; it keeps reaching further, and keeps looking it,
+ *       until {@link #RELEASE_RADIUS_MAX}.</li>
  *   <li><b>Onrush</b> ({@link #onInteract}, right-click) — a rush onto the foe the wielder last struck.
  *       If that foe is already faltering (a player under {@link #THRESH_PLAYER}, a mob under
  *       {@link #THRESH_MOB}, a boss under {@link #THRESH_BOSS}) Mimicry arrives at its back and finishes
@@ -79,25 +80,28 @@ import java.util.concurrent.ThreadLocalRandom;
  * final damage of zero and banks nothing: there is no wound to remember. The hook is read-only (it runs at
  * monitor priority, so writing the event would lie to every listener that already read its final values).
  *
- * <h2>Power is capped. Spectacle is not. They are different numbers.</h2>
- * The two used to be welded together: one figure decided both how hard the cleave hit and how big it looked,
- * so making it look absurd made it hit absurdly, and capping the hit capped the look. They are now split,
- * and the split is the whole design of this weapon:
+ * <h2>How hard it hits and how far it reaches are different questions. What it cuts and what it draws are not.</h2>
+ * Two caps, one radius, and the difference between those sentences is the design:
  *
  * <ul>
- *   <li><b>What it does</b> is bounded. Per body, one cast deals at most {@link #RELEASE_CAP}, and reaches
- *       at most {@link #RELEASE_RADIUS_MAX}. Both saturate at {@link #RESERVOIR_FULL} pooled and never move
- *       again.</li>
- *   <li><b>What it looks like</b> is not. {@link #slashRadius} reads the true pool with no ceiling, so a
- *       wielder who banked four figures throws an arc that leaves the render distance. It simply does not
- *       hit any harder than the one that banked {@link #RESERVOIR_FULL}.</li>
+ *   <li><b>Weight is capped early.</b> Per body, one cast deals at most {@link #RELEASE_CAP}, saturating at
+ *       {@link #RESERVOIR_FULL} pooled and never moving again. Bank ten times that and every body still
+ *       takes the same.</li>
+ *   <li><b>Reach keeps growing, honestly, and the picture grows with it</b> — one {@link #cleaveRadius},
+ *       asked by the scan and by the drawing, so they cannot disagree. It stops at
+ *       {@link #RELEASE_RADIUS_MAX}, because {@link #RELEASE_CAP} is per body and capped damage across an
+ *       uncapped body count is not a capped ability, and because the scan is the one cost here that tracks
+ *       reach.</li>
  * </ul>
  *
- * <p><b>The clamp therefore lives at the release, not at the intake</b> — {@link #bank} takes everything and
- * {@link #nothingThere} clamps what it spends. Clamping the pool instead would be the obvious move and it is
- * wrong: the spectacle is drawn from the pool, so a pool that stops at {@link #RESERVOIR_FULL} is an arc that
- * stops at {@link #RESERVOIR_FULL}, and the drama dies with the damage. Keeping one honest, uncapped counter
- * and bounding it where it is <em>spent</em> is what lets both halves be true at once.
+ * <p>It was built the other way first — the cut bounded, the arc unbounded — and it read as cheating,
+ * because it was: past a big pool the blade was drawn eighteen blocks and bit eight, and no amount of
+ * arguing that the lie ran toward mercy made it look like anything but a weapon that missed. Two numbers
+ * describing one thing drift; one number cannot.
+ *
+ * <p><b>The clamp lives at the release, not at the intake</b> — {@link #bank} takes every wound and
+ * {@link #nothingThere} clamps what it spends. Clamping the pool would throw away the honest record of what
+ * the wielder survived, which is the one thing this weapon is actually about.
  *
  * <p>The gauge is built to teach exactly this: the bar is scaled to {@link #RESERVOIR_FULL}, so a full bar
  * means "this is as hard as it will ever hit", while the number beside it goes on climbing to say "…and it
@@ -180,18 +184,22 @@ public final class MimicryWeapon implements Weapon {
 
     /**
      * Radius of the cut, at an empty pool and at {@link #RESERVOIR_FULL} respectively. One scan, one strike
-     * per body inside it. See {@link #releaseRadius}.
+     * per body inside it. See {@link #cleaveRadius}.
      *
-     * <p>The reach <em>does</em> grow — that is the "aoe keeps getting bigger" half of the brief — but it is
-     * clamped, and the clamp is the deliberate part. An unbounded hit radius is a power increase wearing a
-     * cosmetic's clothes: a capped 60 per body means nothing if the body count is unbounded, and a 50-block
-     * cleave catching forty players is 2,400 damage delivered from one keypress no matter how modest each
-     * slice reads. It would also break the perf promise outright, since the entity scan is the one cost here
-     * that genuinely tracks the radius. So reach saturates with damage, at 8: a 4.1× volume over the old
-     * flat 5 — a knot of bodies rather than a duel — and a scan box that is fixed-cost at its worst.
+     * <p>The reach grows well past the point the damage stops — that is the "aoe and slash keep getting
+     * bigger" half of the brief, and both halves of it, since one curve now serves the cut and the drawing
+     * alike. It reaches sixteen: three times the bare five, thirty-three times the volume, a room rather
+     * than a duel, and it takes roughly 750 banked wounds to get there.
+     *
+     * <p>It is a real ceiling, and the ceiling is the deliberate part. An unbounded hit radius is a power
+     * increase wearing a cosmetic's clothes: a capped 60 per body means nothing if the body count is
+     * unbounded, and a 50-block cleave catching forty players is 2,400 damage from one keypress however
+     * modest each slice reads. It would break the perf promise too, since the entity scan is the one cost
+     * here that genuinely tracks the radius — at sixteen the scan box is fixed at its worst and cheap.
+     * Growth that never stops is not drama, it is an exploit that takes a while.
      */
     private static final double RELEASE_RADIUS_BASE = 5.0;
-    private static final double RELEASE_RADIUS_MAX = 8.0;
+    private static final double RELEASE_RADIUS_MAX = 16.0;
 
     /** Below this the pool isn't worth a cast — the wielder keeps it rather than spending nothing. */
     private static final double RELEASE_MIN = 1.0;
@@ -252,7 +260,7 @@ public final class MimicryWeapon implements Weapon {
     // Nothing in this block feeds a damage number or an entity scan. It is safe to make any of it more
     // absurd; it is not safe to let anything above read from it.
 
-    /** The arc a bare pool would throw, before {@link #slashRadius} grows it. */
+    /** The reach a bare pool has, before {@link #cleaveRadius} grows it. */
     private static final double SLASH_BASE_RADIUS = 3.0;
 
     /** The pool at which the downswing has doubled its base reach. Growth is {@code sqrt} and never stops. */
@@ -557,7 +565,7 @@ public final class MimicryWeapon implements Weapon {
     // ---- Nothing There: give back every wound at once --------------------------------
 
     /**
-     * Bring the blade down. Everything living inside {@link #releaseRadius} takes {@link #RELEASE_FRACTION}
+     * Bring the blade down. Everything living inside {@link #cleaveRadius} takes {@link #RELEASE_FRACTION}
      * of the pooled total, capped at {@link #RELEASE_CAP}. One {@code getNearbyEntities} scan for the whole
      * cast, one blow per body.
      *
@@ -584,7 +592,7 @@ public final class MimicryWeapon implements Weapon {
 
         // The two clamped reads. Everything the victim actually feels is decided on these two lines.
         double perTarget = Math.min(amount * RELEASE_FRACTION, RELEASE_CAP);
-        double radius = releaseRadius(amount);
+        double radius = cleaveRadius(amount);
 
         // Spend the pool first: whatever happens below, this cast owns it and nothing can double-dip it.
         reservoirs.remove(id);
@@ -618,21 +626,27 @@ public final class MimicryWeapon implements Weapon {
     }
 
     /**
-     * How far the cleave actually cuts, given what is in the pool. <b>Bounded, unlike the arc that draws
-     * it</b> — {@link #RELEASE_RADIUS_BASE} at nothing, {@link #RELEASE_RADIUS_MAX} at {@link #RESERVOIR_FULL}
-     * and forever after. {@code sqrt} so the early pool is felt at once, matching {@link #slashRadius}'s
-     * curve so the reach and the picture grow in step over the range where both still move.
+     * How far the cleave reaches — <b>and how far it is drawn.</b> One curve, asked by both, which is the
+     * whole point of it.
      *
-     * <p>Past {@link #RESERVOIR_FULL} the drawn arc outruns this and the cleave visibly over-claims its
-     * reach. That is a deliberate lie, and {@link #slashRadius} is floored against this method to keep it a
-     * <b>one-directional</b> one: the blade is never drawn shorter than it cuts, so the exaggeration can only
-     * ever spare someone who expected to be hit, and can never kill someone who could see they were clear. A
-     * lie that resolves in the victim's favour is the affordable kind, and it is the price of the drama being
-     * uncapped at all.
+     * <p>There were two. The cut was bounded and the picture was not, so past a big enough pool the blade
+     * was drawn eighteen blocks and bit eight, and Nyrrine looked at it and said it looked like cheating.
+     * She was right, and the earlier reading of her words was wrong: <i>"let the size just make the weapons
+     * aoe <b>and</b> slash keep getting bigger"</i> asked for both to grow. Capping one and letting the
+     * other run inverted her sentence, and the lie — even aimed at mercy — was still a lie a player could
+     * see. Two numbers describing one thing will always drift; there is one number now and nothing to
+     * reconcile. <b>The cleave cuts exactly what it draws, at every pool, forever.</b>
+     *
+     * <p>It grows from {@link #RELEASE_RADIUS_BASE} and stops at {@link #RELEASE_RADIUS_MAX}, which is a
+     * real ceiling and is here for two reasons that agree. The scan is the one cost in this weapon that
+     * genuinely tracks reach, so an unbounded radius is an unbounded {@code getNearbyEntities} on a
+     * hundred-player box. And {@link #RELEASE_CAP} is per <em>body</em> — capped damage across an uncapped
+     * body count is not a capped ability, it is the same absurdity through a side door. {@code sqrt} so the
+     * first wounds are felt immediately and the last ones taper.
      */
-    private static double releaseRadius(double amount) {
-        double t = Math.min(Math.max(0.0, amount), RESERVOIR_FULL) / RESERVOIR_FULL;
-        return RELEASE_RADIUS_BASE + (RELEASE_RADIUS_MAX - RELEASE_RADIUS_BASE) * Math.sqrt(t);
+    private static double cleaveRadius(double amount) {
+        double grown = SLASH_BASE_RADIUS * (1.0 + Math.sqrt(Math.max(0.0, amount) / SLASH_REF));
+        return Math.min(RELEASE_RADIUS_MAX, Math.max(RELEASE_RADIUS_BASE, grown));
     }
 
     // ---- Onrush: the rush you don't see coming --------------------------------------
@@ -804,7 +818,7 @@ public final class MimicryWeapon implements Weapon {
      * The first spot from {@code want} back toward {@code anchor} where a player actually fits, or null.
      */
     private Location wallSafe(Location want, Location anchor) {
-        if (fits(want)) return want;
+        if (Blink.canStand(want)) return want;
 
         Vector back = anchor.toVector().subtract(want.toVector());
         double span = back.length();
@@ -813,21 +827,13 @@ public final class MimicryWeapon implements Weapon {
             for (double d = 0.35; d <= span; d += 0.35) {
                 Location probe = want.clone().add(back.clone().multiply(d));
                 probe.setDirection(want.getDirection());
-                if (fits(probe)) return probe;
+                if (Blink.canStand(probe)) return probe;
             }
         }
 
         Location last = anchor.clone();
         last.setDirection(want.getDirection());
-        return fits(last) ? last : null;
-    }
-
-    /** True if a player-sized body stands clear here — feet and head both in passable blocks. */
-    private boolean fits(Location at) {
-        World world = at.getWorld();
-        if (world == null) return false;
-        return world.getBlockAt(at).isPassable()
-                && world.getBlockAt(at.clone().add(0, 1, 0)).isPassable();
+        return Blink.canStand(last) ? last : null;
     }
 
     // ---- tick ------------------------------------------------------------------------
@@ -988,32 +994,6 @@ public final class MimicryWeapon implements Weapon {
         }.runTaskTimer(plugin, 0L, 1L);
     }
 
-    /**
-     * How far the cleave is <b>drawn</b>, given what is in the pool — not how far it cuts, which is
-     * {@link #releaseRadius}. <b>Unbounded on purpose:</b> a wielder who has banked four figures gets an arc
-     * that leaves the render distance, and it is exactly as lethal as the one that banked
-     * {@link #RESERVOIR_FULL}. Growth is {@code sqrt} so the early pool is felt immediately and an absurd one
-     * still lands somewhere drawable: 40 pooled reads 6 blocks, 1,000 reads 18, 10,000 reads 50, 100,000
-     * reads 153.
-     *
-     * <p><b>Never let a damage or scan number read from this.</b> It is safe to make more absurd only for as
-     * long as it feeds nothing but particles; the moment reach follows it, the cap above becomes decorative.
-     *
-     * <p>The floor against {@link #releaseRadius} is the honesty half of the bargain, and it is what makes
-     * the lie one-directional. The bare curve starts at {@link #SLASH_BASE_RADIUS} — <em>under</em> the five
-     * blocks the cleave has always cut — so a small pool used to draw a blade shorter than its own reach and
-     * kill people who could see they were clear of it. Held to at least the true reach, the arc is honest
-     * across the whole range where this weapon is still growing teeth, and only begins to over-claim at
-     * {@link #RESERVOIR_FULL} — the exact moment power saturates and the cut becomes theatre. From there it
-     * exaggerates freely, which is the ask. The floor costs nothing at the ceiling and a handful of points
-     * below it: {@link #slashPoints} still bottoms out at {@link #SLASH_POINTS_MIN} and still tops out at
-     * {@link #SLASH_POINTS_MAX}.
-     */
-    private static double slashRadius(double amount) {
-        return Math.max(SLASH_BASE_RADIUS * (1.0 + Math.sqrt(Math.max(0.0, amount) / SLASH_REF)),
-                releaseRadius(amount));
-    }
-
     /** How wide the blade is drawn. Clamped, and {@link #SLASH_THICK_MAX} says why. */
     private static float slashThickness(double amount) {
         return (float) Math.min(SLASH_THICK_MAX,
@@ -1107,7 +1087,7 @@ public final class MimicryWeapon implements Weapon {
         Location feet = player.getLocation();
         Location pivot = feet.clone().add(0, 1.2, 0);
 
-        final double radius = slashRadius(amount);
+        final double radius = cleaveRadius(amount);
         float thick = slashThickness(amount);
         int points = slashPoints(radius);
 
