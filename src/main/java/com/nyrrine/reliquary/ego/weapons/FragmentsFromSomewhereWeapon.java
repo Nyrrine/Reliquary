@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.Blink;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -456,16 +457,12 @@ public final class FragmentsFromSomewhereWeapon implements Weapon {
         for (double dy : RETURN_PROBE_Y) {
             for (double[] off : RETURN_PROBE_XZ) {
                 Location cand = anchor.clone().add(off[0], dy, off[1]);
-                if (canStand(cand)) return cand;
+                if (Blink.canStand(cand)) return cand;
             }
         }
         return null;
     }
 
-    /** True if a player's body (feet + head) fits at {@code feet} without clipping into a solid block. */
-    private static boolean canStand(Location feet) {
-        return feet.getBlock().isPassable() && feet.clone().add(0, 1, 0).getBlock().isPassable();
-    }
 
     // ---- the echo: a refracted after-image standing where you were -------------------
 

@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.Blink;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -115,6 +116,9 @@ public final class LifeForADaredevilWeapon implements Weapon {
     /** How far a target may be and still be blinked-to and executed. */
     private static final double EXECUTE_RANGE = 9.0;
     private static final double EXECUTE_RANGE_SQ = EXECUTE_RANGE * EXECUTE_RANGE;
+
+    /** How far past the victim's back the wielder arrives — a step, not a stride. */
+    private static final double BEHIND_DISTANCE = 1.2;
 
     /** HP-fraction thresholds below which a struck target qualifies for the decapitation. */
     private static final double THRESH_MOB    = 0.25; // a normal mob under a quarter
@@ -390,17 +394,21 @@ public final class LifeForADaredevilWeapon implements Weapon {
         UUID aid = attacker.getUniqueId();
 
         // Step behind the target — one step past its back, turned to look at the nape.
-        Location vLoc = victim.getLocation();
-        Vector facing = vLoc.getDirection().setY(0);
-        if (facing.lengthSquared() < 1.0e-6) {
-            facing = attacker.getLocation().toVector().subtract(vLoc.toVector()).setY(0);
-        }
-        if (facing.lengthSquared() < 1.0e-6) facing = new Vector(0, 0, 1);
-        facing.normalize();
-        Location behind = vLoc.clone().subtract(facing.clone().multiply(1.2));
-        behind.setDirection(facing);                          // face the same way the victim does = at its back
+        //
+        // This used to teleport blind, and it was the only player-moving blink in the vault that did: it
+        // would happily bury its wielder in a wall if the victim had their back to one, which is exactly
+        // where a cornered thing puts its back. Blink.behind answers whether a body fits there and shuffles
+        // if it nearly does. When there is genuinely nowhere, the execute still lands — the blade reaches
+        // the nape from where it stands. Refusing to kill because the scenery is inconvenient would be a
+        // worse bug than the one being fixed, and this is a weapon whose whole identity is that the killing
+        // blow arrives.
         Location from = attacker.getLocation().clone();       // remembered so the blink has a departure to read
-        attacker.teleport(behind);
+        Location behind = Blink.behind(victim.getLocation(), BEHIND_DISTANCE);
+        if (behind != null) {
+            attacker.teleport(behind);
+        } else {
+            behind = from;                                    // nowhere to stand; take its head from here
+        }
 
         blinkFx(attacker.getWorld(), from, behind);
         decapFx(attacker, victim);

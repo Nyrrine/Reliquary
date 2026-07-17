@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.Blink;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -549,17 +550,13 @@ public final class JustitiaWeapon implements Weapon {
             Location spot = at.clone().subtract(facing.clone().multiply(dist));
             spot.setYaw(at.getYaw()); // shoulder to shoulder with their facing — you are behind them
             spot.setPitch(0f);
-            if (isClear(spot)) return spot;
+            if (Blink.canStand(spot)) return spot;
         }
         Location fallback = at.clone();
         fallback.setPitch(0f);
         return fallback;
     }
 
-    /** True if a body fits here — feet and head both passable. */
-    private static boolean isClear(Location l) {
-        return l.getBlock().isPassable() && l.clone().add(0, 1, 0).getBlock().isPassable();
-    }
 
     /** Root a countered striker for {@link #ROOT_TICKS}, cutting mob AI for the hold. */
     private void rootStriker(LivingEntity striker) {

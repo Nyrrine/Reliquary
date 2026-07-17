@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.Blink;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -204,7 +205,7 @@ public final class OurGalaxyWeapon implements Weapon {
         Location dest = null;
         for (double d = maxTravel; d >= 0.5; d -= 0.5) {
             Location cand = base.clone().add(dir.clone().multiply(d));
-            if (canStand(cand)) { dest = cand; break; }
+            if (Blink.canStand(cand)) { dest = cand; break; }
         }
         if (dest == null) {
             // Nowhere to land — pressed against a wall. Don't burn the cooldown.
@@ -238,10 +239,6 @@ public final class OurGalaxyWeapon implements Weapon {
         player.sendActionBar(EgoHud.cooldown("Blink", BLINK_COOLDOWN_MS, AZURE));
     }
 
-    /** True if the player's body (feet + head) fits at {@code feet} without clipping into a solid block. */
-    private static boolean canStand(Location feet) {
-        return feet.getBlock().isPassable() && feet.clone().add(0, 1, 0).getBlock().isPassable();
-    }
 
     // ---- the homing comet ---------------------------------------------------------
 
