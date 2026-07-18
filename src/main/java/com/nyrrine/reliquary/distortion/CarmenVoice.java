@@ -44,15 +44,19 @@ final class CarmenVoice {
      */
     static Component line(Component name, Component message) {
         return Component.text()
-                .append(Component.text("[A beautiful voice] ", VOICE).decorate(TextDecoration.ITALIC))
+                // No italic anywhere in the line — Nyrrine's call on the 2026-07-18 playtest sheet
+                // (§4.2). Setting it false on the root makes upright the default the whole tree
+                // inherits; a message that arrives already italic still keeps it, same ifAbsent spirit
+                // as the colour below.
+                .decoration(TextDecoration.ITALIC, false)
+                .append(Component.text("[A beautiful voice] ", VOICE))
                 .append(Component.text("<", BRACKET))
                 .append(name.colorIfAbsent(NAME))
                 .append(Component.text("> ", BRACKET))
                 .append(Component.text(">> ", VOICE))
-                // ifAbsent, not outright: a message that already carries its own colour or format
-                // keeps it. We're dressing what she says, not overruling it.
-                .append(message.colorIfAbsent(SPOKEN)
-                        .decorationIfAbsent(TextDecoration.ITALIC, TextDecoration.State.TRUE))
+                // ifAbsent, not outright: a message that already carries its own colour keeps it.
+                // We're dressing what she says, not overruling it.
+                .append(message.colorIfAbsent(SPOKEN))
                 .build();
     }
 
