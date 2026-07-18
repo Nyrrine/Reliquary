@@ -9,7 +9,6 @@ import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
-import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
@@ -18,13 +17,11 @@ import org.bukkit.World;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.ItemDisplay;
-import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
 import org.joml.Quaternionf;
@@ -65,9 +62,8 @@ import java.util.concurrent.ThreadLocalRandom;
  *       {@value #LUNGE_COOLDOWN_MS}ms cooldown (the "faster lunge cooldown" of the moveset). Before the
  *       impulse lands it <b>records the spot the wielder stood on at the instant of the click</b> and
  *       leaves a refracted after-image standing there — an echo — for
- *       {@value #REFRACTION_WINDOW_MS}ms. The point goes first: the lunge runs through the first living
- *       thing in reach for a modest {@link #LUNGE_DAMAGE} (see {@link #thrust}), which is a gap-closer
- *       that happens to be sharp rather than an opener in its own right.</li>
+ *       {@value #REFRACTION_WINDOW_MS}ms. The lunge deals no damage of its own — it is a pure
+ *       gap-closer; the wielder's damage is the swing they follow it with.</li>
  *   <li><b>Sneak + right-click — Refraction.</b> Only inside that window. The wielder snaps back into
  *       their own after-image at the recorded spot, then Refraction goes dark for
  *       {@value #REFRACTION_COOLDOWN_MS}ms. Outside the window it does nothing but sigh at them.</li>
@@ -120,20 +116,6 @@ public final class FragmentsFromSomewhereWeapon implements Weapon {
 
     /** Floor on the lunge's vertical component so the thrust skims over ground instead of digging in. */
     private static final double LUNGE_MIN_LIFT = 0.22;
-
-    /**
-     * What the spear leaves in whatever it lunges through. Modest and deliberately so: this is a
-     * gap-closer that happens to be sharp, not an opener — the wielder's real damage is the swing they
-     * follow it with. Well inside the single-instance band (netherite + Sharpness V ~ 11), and on a
-     * {@value #LUNGE_COOLDOWN_MS}ms cooldown it can't be leaned on. Flagged for playtest.
-     */
-    private static final double LUNGE_DAMAGE = 4.0;
-
-    /** How far ahead the thrust reaches, in blocks — an arm and a spear, not a ranged poke. */
-    private static final double LUNGE_REACH = 3.6;
-
-    /** Entity ray fatness for the thrust: forgiving, since the wielder is moving fast when it resolves. */
-    private static final double LUNGE_RAY_SIZE = 0.5;
 
     // ---- tuning: refraction -------------------------------------------------------
 
@@ -311,8 +293,6 @@ public final class FragmentsFromSomewhereWeapon implements Weapon {
 
         if (remaining(refractionReadyAt, id, now) <= 0) openWindow(player);
 
-        thrust(player); // the point goes first, then the wielder follows it
-
         Vector vel = player.getEyeLocation().getDirection().multiply(LUNGE_POWER);
         if (vel.getY() < LUNGE_MIN_LIFT) vel.setY(LUNGE_MIN_LIFT);
         player.setVelocity(vel);
@@ -321,43 +301,6 @@ public final class FragmentsFromSomewhereWeapon implements Weapon {
         EgoDurability.wearMainHand(player); // non-vanilla motion — the melee swing wears on its own
 
         lungeFx(player);
-    }
-
-    /**
-     * The spear's point, thrown out along the look line the instant the lunge begins: the first living
-     * thing within {@value #LUNGE_REACH} blocks is run through for {@link #LUNGE_DAMAGE}. Walls stop the
-     * point exactly where they stop the wielder, so nobody is skewered through stone.
-     *
-     * <p>Resolved once, at the cast, rather than tracked along the glide — the lunge is a thrust, not a
-     * charge, and a spear that kept stabbing everything it drifted past for the next second would be a
-     * different move entirely. The damage goes through {@code victim.damage(...)} so other plugins can
-     * cancel it; nothing here re-enters, since this weapon has no on-hit gimmick of its own.
-     */
-    private void thrust(Player player) {
-        World world = player.getWorld();
-        Location eye = player.getEyeLocation();
-        Vector dir = eye.getDirection().normalize();
-
-        double reach = LUNGE_REACH;
-        RayTraceResult wall = world.rayTraceBlocks(eye, dir, LUNGE_REACH, FluidCollisionMode.NEVER, true);
-        if (wall != null && wall.getHitPosition() != null) {
-            reach = eye.toVector().distance(wall.getHitPosition()); // the point stops where the wall does
-        }
-
-        RayTraceResult hit = world.rayTraceEntities(eye, dir, reach, LUNGE_RAY_SIZE,
-                e -> e instanceof LivingEntity && !e.getUniqueId().equals(player.getUniqueId()));
-        if (hit == null || !(hit.getHitEntity() instanceof LivingEntity victim)) return;
-
-        victim.damage(LUNGE_DAMAGE, player);
-        thrustFx(world, hit.getHitPosition().toLocation(world));
-    }
-
-    /** The point going in: a bright violet star at the wound and a short rose spray off it. */
-    private void thrustFx(World world, Location at) {
-        world.playSound(at, Sound.ITEM_TRIDENT_HIT, 0.7f, 1.3f + jitter());
-        world.spawnParticle(Particle.CRIT, at, 6, 0.12, 0.12, 0.12, 0.15);
-        world.spawnParticle(Particle.DUST, at, 5, 0.14, 0.14, 0.14, 0.0, ROSE_DUST);
-        world.spawnParticle(Particle.END_ROD, at, 2, 0.06, 0.06, 0.06, 0.02);
     }
 
     /** Record the wielder's current spot and stand a refracted after-image on it. Replaces any older one. */
