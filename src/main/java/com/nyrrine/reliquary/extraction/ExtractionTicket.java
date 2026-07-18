@@ -108,8 +108,11 @@ public final class ExtractionTicket {
                 .decoration(TextDecoration.ITALIC, true));
         meta.lore(lore);
         meta.setEnchantmentGlintOverride(true);
+        // Once a ticket carries an apex pool (WAW or ALEPH) it wears the upgraded model; a plain ZAYIN..HE
+        // ticket keeps the base one. The pack maps each string to its own texture.
+        boolean apex = pools.contains("WAW") || pools.contains("ALEPH");
         var cmd = meta.getCustomModelDataComponent();
-        cmd.setStrings(List.of("extraction/ticket"));
+        cmd.setStrings(List.of(apex ? "extraction/ticket/waw" : "extraction/ticket"));
         meta.setCustomModelDataComponent(cmd);
     }
 }
