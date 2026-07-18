@@ -13,9 +13,9 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.entity.Enemy;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
-import org.bukkit.entity.Monster;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -193,9 +193,10 @@ public final class SodaWeapon implements Weapon {
 
     /**
      * Drench every ally in the spray cone. An ally is any living entity that is <b>not</b> the wielder and
-     * <b>not</b> a hostile {@link Monster} — so other players and passive/tamed creatures qualify, while
-     * zombies, skeletons and the like are ignored. The wielder is excluded by UUID, so Soda can never heal
-     * or buff its own bearer even standing in the middle of its own spray.
+     * <b>not</b> a hostile {@link Enemy} — so other players and passive/tamed creatures qualify, while
+     * zombies, skeletons, the Ender Dragon and every other hostile are ignored. ({@code Enemy} is the wider
+     * net: it catches bosses like the dragon that are hostile without being {@code Monster}.) The wielder is
+     * excluded by UUID, so Soda can never heal or buff its own bearer even standing in its own spray.
      */
     private void healAllies(Player wielder, Location eye, Vector dir) {
         World world = wielder.getWorld();
@@ -203,7 +204,7 @@ public final class SodaWeapon implements Weapon {
         for (Entity e : world.getNearbyEntities(eye, SPRAY_RANGE, SPRAY_RANGE, SPRAY_RANGE)) {
             if (!(e instanceof LivingEntity ally)) continue;
             if (ally.getUniqueId().equals(self)) continue;   // NEVER the wielder
-            if (ally instanceof Monster) continue;           // hostiles are not allies
+            if (ally instanceof Enemy) continue;             // hostiles are not allies
 
             Vector to = ally.getLocation().add(0, ally.getHeight() * 0.5, 0).toVector().subtract(eye.toVector());
             double dist = to.length();
