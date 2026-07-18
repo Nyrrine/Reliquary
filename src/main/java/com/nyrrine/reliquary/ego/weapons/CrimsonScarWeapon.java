@@ -608,9 +608,10 @@ public final class CrimsonScarWeapon implements Weapon {
         world.spawnParticle(Particle.DUST_COLOR_TRANSITION, around, 8, 0.5, 0.6, 0.5, 0,
                 new Particle.DustTransition(RED_BRIGHT, RED_DEEP, 1.3f));
 
-        // A heavy heartbeat / growl edge under the frenzy.
-        world.playSound(attacker.getLocation(), Sound.ENTITY_WARDEN_HEARTBEAT, 0.9f, 0.6f + rng.nextFloat() * 0.1f);
-        world.playSound(attacker.getLocation(), Sound.ENTITY_RAVAGER_ROAR, 0.35f, 1.4f + rng.nextFloat() * 0.2f);
+        // A heavy heartbeat / growl edge under the frenzy — kept low so a sustained blood-drunk fight
+        // stays an undertone, not a wall of sound every swing (playtest §1.3: "tone down the sound fx a bunch").
+        world.playSound(attacker.getLocation(), Sound.ENTITY_WARDEN_HEARTBEAT, 0.3f, 0.6f + rng.nextFloat() * 0.1f);
+        world.playSound(attacker.getLocation(), Sound.ENTITY_RAVAGER_ROAR, 0.15f, 1.4f + rng.nextFloat() * 0.2f);
     }
 
     // ---- lifecycle -----------------------------------------------------------------
