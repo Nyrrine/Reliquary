@@ -167,6 +167,7 @@ public final class ArayashikiSkills {
                     if (!hit.add(e.getUniqueId())) continue;
                     weapon.markErased(target, player);
                     target.damage(8.0, player);
+                    weapon.rollHeartStrip(target, player); // RC: 1/5 to erase a heart, once per dash per body
                     target.setVelocity(target.getVelocity().add(dir.clone().multiply(0.5).setY(0.2)));
                     // slash effect on the struck entity
                     Location tl = target.getLocation().add(0, 1, 0);
@@ -222,6 +223,7 @@ public final class ArayashikiSkills {
                     if (e == player || !(e instanceof LivingEntity target)) continue;
                     weapon.markErased(target, player);
                     target.damage(4.0, player);
+                    weapon.rollHeartStrip(target, player); // shift-RC: 1/5 to erase a heart per storm-tick struck
                     Location tl = target.getLocation().add(0, 1, 0);
                     world.spawnParticle(Particle.SWEEP_ATTACK, tl, 2, 0.3, 0.3, 0.3, 0);
                     target.setVelocity(target.getVelocity().multiply(0.55).setY(0.1));

@@ -62,6 +62,7 @@ public final class ArayashikiWeapon implements Weapon {
     private final ArayashikiSkills skills;
     private final ArayashikiWielder wielder;
     private final ArayashikiErasure erasure;
+    private final ArayashikiHeartStrip heartStrip;
 
     public ArayashikiWeapon(Reliquary plugin) {
         this.plugin = plugin;
@@ -71,6 +72,12 @@ public final class ArayashikiWeapon implements Weapon {
         this.skills = new ArayashikiSkills(plugin, this);
         this.wielder = new ArayashikiWielder(plugin, this);
         this.erasure = new ArayashikiErasure(plugin, this);
+        this.heartStrip = new ArayashikiHeartStrip(plugin, this);
+    }
+
+    /** A dash/storm strike landed on {@code victim}: roll to temporarily erase one of its hearts. */
+    public void rollHeartStrip(LivingEntity victim, Player attacker) {
+        heartStrip.roll(victim, attacker);
     }
 
     // ---- Weapon interface ----------------------------------------------------------
@@ -97,12 +104,24 @@ public final class ArayashikiWeapon implements Weapon {
 
     @Override
     public void onEntityDeath(EntityDeathEvent event) {
+        heartStrip.restore(event.getEntity().getUniqueId()); // return erased hearts before the body's gone
         erasure.onEntityDeath(event);
     }
 
     @Override
     public void onPlayerDeath(PlayerDeathEvent event) {
+        heartStrip.restore(event.getEntity().getUniqueId()); // so the respawn comes back at full hearts
         erasure.onPlayerDeath(event);
+    }
+
+    @Override
+    public void onJoin(Player player) {
+        heartStrip.onJoin(player);
+    }
+
+    @Override
+    public void onDisable() {
+        heartStrip.restoreAll();
     }
 
     // ---- use-time / erasure charge -------------------------------------------------
@@ -293,6 +312,7 @@ public final class ArayashikiWeapon implements Weapon {
         trueWielders.remove(id);
         skills.clear(id);
         wielder.clear(id);
+        heartStrip.restore(id); // a logging-out victim keeps its real max health
     }
 
     public NamespacedKey bladeKey() {
