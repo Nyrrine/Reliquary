@@ -90,6 +90,8 @@ public final class LaevateinnWeapon implements Weapon {
     private final LaevateinnCombat combat;
     private final LaevateinnSkills skills;
     private final LaevateinnWielder wielder;
+    /** Ridiculous Grit — the totem passive. Self-registers as a listener; owns its own cooldown map. */
+    private final LaevateinnGrit grit;
 
     public LaevateinnWeapon(Reliquary plugin) {
         this.plugin = plugin;
@@ -99,6 +101,7 @@ public final class LaevateinnWeapon implements Weapon {
         this.combat = new LaevateinnCombat(plugin, this);
         this.skills = new LaevateinnSkills(plugin, this);
         this.wielder = new LaevateinnWielder(plugin, this);
+        this.grit = new LaevateinnGrit(plugin, this);
     }
 
     // ---- Weapon interface ----------------------------------------------------------
@@ -501,6 +504,9 @@ public final class LaevateinnWeapon implements Weapon {
         }
         lines.add(List.of());
         lines.add(List.of(new Seg("Passive — ", FAINT, true), new Seg("Ridiculous Grit", PURPLE, true)));
+        lines.add(List.of(new Seg("A killing blow can't put you down: grit", FAINT, true)));
+        lines.add(List.of(new Seg("through it at a sliver of health, lit like", FAINT, true)));
+        lines.add(List.of(new Seg("a totem. Once an hour.", FAINT, true)));
         lines.add(List.of());
         lines.add(List.of(new Seg("Out of the fight, its seals close again.", FAINT, true)));
 
@@ -526,6 +532,7 @@ public final class LaevateinnWeapon implements Weapon {
     @Override
     public void onDisable() {
         skills.onDisable();
+        grit.clearAll();
     }
 
     /** Drop a player's per-player state when they leave, so the maps don't grow over time. */
@@ -548,5 +555,6 @@ public final class LaevateinnWeapon implements Weapon {
         trueFormSince.remove(id);
         skills.clear(id);
         wielder.clear(id);
+        grit.clear(id);
     }
 }
