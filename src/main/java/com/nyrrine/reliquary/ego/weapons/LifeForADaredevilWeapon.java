@@ -220,13 +220,13 @@ public final class LifeForADaredevilWeapon implements Weapon {
     private static final double DASH_MIN_ROOM    = 1.2;
 
     /**
-     * Afterimage length. Perf ceiling: {@value #DASH_TRAIL_TICKS} ticks of {@value #DASH_TRAIL_DUST} dust +
-     * {@value #DASH_TRAIL_STARS} stars = 8 particles a tick, 48 for the whole dash, once per wielder per
+     * Afterimage length. Perf ceiling: {@value #DASH_TRAIL_TICKS} ticks of {@value #DASH_TRAIL_DUST} red dust +
+     * {@value #DASH_TRAIL_DARK} black dust = 8 particles a tick, 48 for the whole dash, once per wielder per
      * seven seconds. Nothing here scales with the number of players nearby.
      */
     private static final int DASH_TRAIL_TICKS = 6;
     private static final int DASH_TRAIL_DUST  = 6;
-    private static final int DASH_TRAIL_STARS = 2;
+    private static final int DASH_TRAIL_DARK  = 2;
 
     /**
      * Right-click: dash. Sneaking is not a separate move — a wielder mid-fight is often crouched, and the
@@ -308,8 +308,8 @@ public final class LifeForADaredevilWeapon implements Weapon {
                     return;
                 }
                 Location c = player.getLocation().add(0, 1.0, 0);
-                world.spawnParticle(Particle.DUST, c, DASH_TRAIL_DUST, 0.3, 0.5, 0.3, 0, TRAIL);
-                world.spawnParticle(Particle.END_ROD, c, DASH_TRAIL_STARS, 0.2, 0.3, 0.2, 0.01);
+                world.spawnParticle(Particle.DUST, c, DASH_TRAIL_DUST, 0.3, 0.5, 0.3, 0, DASH_RED);
+                world.spawnParticle(Particle.DUST, c, DASH_TRAIL_DARK, 0.2, 0.3, 0.2, 0, DASH_BLACK);
             }
         }.runTaskTimer(plugin, 0L, 1L);
     }
@@ -640,11 +640,15 @@ public final class LifeForADaredevilWeapon implements Weapon {
     // Particle colours, kept apart from the lore palette so tuning one never disturbs the other.
     private static final Color     SLICE = Color.fromRGB(0xED, 0xEF, 0xF2); // the clean slice — near-white
     private static final Color     BLOOD = Color.fromRGB(0x8A, 0x0F, 0x12); // decapitation blood — dark red
-    private static final Color     STEEL = Color.fromRGB(0x8F, 0xA6, 0xBE); // the dash/blink smear — the blade
+    private static final Color     STEEL = Color.fromRGB(0x8F, 0xA6, 0xBE); // the blink smear — the blade
 
     private static final Particle.DustOptions TRAIL      = new Particle.DustOptions(STEEL, 1.0f);
     private static final Particle.DustOptions BLOOD_FAT  = new Particle.DustOptions(BLOOD, 1.6f);
     private static final Particle.DustOptions BLOOD_FINE = new Particle.DustOptions(BLOOD, 1.0f);
+
+    // The dash wears its own colours — black and red (playtest §3.5), kept off TRAIL so the execute blink stays steel.
+    private static final Particle.DustOptions DASH_RED   = new Particle.DustOptions(Color.fromRGB(0xC4, 0x12, 0x12), 1.0f);
+    private static final Particle.DustOptions DASH_BLACK = new Particle.DustOptions(Color.fromRGB(0x0A, 0x0A, 0x0A), 1.0f);
 
     private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
             "Life for a Daredevil",   // display name — always the weapon
