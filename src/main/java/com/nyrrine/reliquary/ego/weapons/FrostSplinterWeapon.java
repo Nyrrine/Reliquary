@@ -596,9 +596,9 @@ public final class FrostSplinterWeapon implements Weapon {
      * survives a reset velocity), re-applies a crushing Slowness with a few ticks of headroom, keeps the
      * cosmetic frost topped up below the damage threshold, and walks the ice shell onto the body.
      *
-     * <p>For mobs it also cuts {@link Mob#setAI(boolean) AI} for the duration and restores it on the way out
-     * — guarded so the AI comes back even if the target dies mid-hold, and reaped by {@link #onDisable} so a
-     * mob sealed at reload-time is never left mindless.
+     * <p>For mobs it also suspends AI for the duration through {@code plugin.weapons().suspendAi} and hands it
+     * back with {@code restoreAi} on the way out. The framework owns the safety net: it restores the mark on
+     * chunk unload, reload, and disable, so a mob sealed when its chunk unloads is never left mindless.
      *
      * <p><b>Platform limit:</b> a player cannot be truly frozen server-side without movement packets. For
      * players this is a best-effort root — per-tick velocity zero plus Slowness VII — exactly as
@@ -607,7 +607,6 @@ public final class FrostSplinterWeapon implements Weapon {
     private final class IceRoot extends BukkitRunnable {
         private final LivingEntity target;
         private final BlockDisplay shell;
-        private final boolean restoreAi;
         private int remaining;
         private int afterSlownessTicks;
 
@@ -616,12 +615,9 @@ public final class FrostSplinterWeapon implements Weapon {
             this.remaining = durationTicks;
             this.afterSlownessTicks = afterSlownessTicks;
 
-            boolean hadAi = false;
             if (target instanceof Mob mob) {
-                hadAi = mob.hasAI();
-                mob.setAI(false);
+                plugin.weapons().suspendAi(mob);
             }
-            this.restoreAi = hadAi;
             this.shell = spawnShell(target);
         }
 
@@ -670,14 +666,14 @@ public final class FrostSplinterWeapon implements Weapon {
             cancel();
         }
 
-        /** Drop the shell and hand a still-living mob its AI back. Safe to call twice. */
+        /** Drop the shell and hand a suspended mob its AI back through the framework. Safe to call twice. */
         private void release() {
             if (shell != null && shell.isValid()) shell.remove();
-            // Restore AI for any mob that isn't actually dead. isValid() was wrong here: it is also false for a
-            // chunk-unloaded mob — which is precisely the one that would otherwise persist to disk mindless
-            // (NoAI:1). A dead mob is gone and never saved, so isDead() is the only case that must be skipped.
-            if (restoreAi && target instanceof Mob mob && !target.isDead()) {
-                mob.setAI(true);
+            // The framework restores the AI here on the normal timer, and also on chunk unload, reload, or
+            // disable, so an unload mid-hold can no longer leave the mob frozen. restoreAi is a no-op on a mob
+            // we never suspended and is guarded on isDead() inside, so this is safe to call unconditionally.
+            if (target instanceof Mob mob) {
+                plugin.weapons().restoreAi(mob);
             }
         }
     }

@@ -546,12 +546,10 @@ public final class JustitiaWeapon implements Weapon {
         UUID id = striker.getUniqueId();
         if (!rooted.add(id)) return; // already held — don't stack tasks or double-touch the AI flag
 
-        boolean hadAi = false;
         if (striker instanceof Mob mob) {
-            hadAi = mob.hasAI();
-            mob.setAI(false);
+            plugin.weapons().suspendAi(mob);
         }
-        RootTask task = new RootTask(striker, hadAi);
+        RootTask task = new RootTask(striker);
         activeRoots.add(task);
         task.runTaskTimer(plugin, 0L, 1L);
     }
@@ -562,17 +560,16 @@ public final class JustitiaWeapon implements Weapon {
      *
      * <p><b>Platform limit, flagged:</b> a player cannot be truly frozen server-side without movement
      * packets, so against players this is a best-effort root — per-tick velocity zero + Slowness VII. A
-     * determined player can still nudge themselves, barely. Mobs additionally lose AI for the duration,
-     * restored on the way out (guarded, so it restores even if they die mid-hold).
+     * determined player can still nudge themselves, barely. Mobs additionally have their AI suspended for the
+     * duration through {@code plugin.weapons().suspendAi} and restored on the way out; the framework restores
+     * it on chunk unload, reload, and disable too, so an unload mid-hold can never leave them mindless.
      */
     private final class RootTask extends BukkitRunnable {
         private final LivingEntity target;
-        private final boolean restoreAi;
         private int ticks = 0;
 
-        private RootTask(LivingEntity target, boolean restoreAi) {
+        private RootTask(LivingEntity target) {
             this.target = target;
-            this.restoreAi = restoreAi;
         }
 
         @Override
@@ -603,7 +600,7 @@ public final class JustitiaWeapon implements Weapon {
         }
 
         private void restoreAi() {
-            if (restoreAi && target instanceof Mob mob && target.isValid()) mob.setAI(true);
+            if (target instanceof Mob mob) plugin.weapons().restoreAi(mob);
         }
     }
 
