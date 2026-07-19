@@ -36,10 +36,30 @@ class HeartLedgerTest {
         HeartLedger l = new HeartLedger();
         UUID v = UUID.randomUUID();
 
+        // Spaced past the per-victim cooldown, so each erase is allowed to land.
+        long gap = HeartLedger.STRIP_COOLDOWN_MS;
         assertEquals(-2.0, l.strip(v, 20.0, 0L));
-        assertEquals(-4.0, l.strip(v, 18.0, 0L));
-        assertEquals(-6.0, l.strip(v, 16.0, 0L));
+        assertEquals(-4.0, l.strip(v, 18.0, gap));
+        assertEquals(-6.0, l.strip(v, 16.0, gap * 2));
         assertEquals(3, l.count(v), "three hearts erased");
+    }
+
+    /** The nerf: once a body loses a heart it is immune to losing another until the cooldown elapses. */
+    @Test
+    void perVictimCooldownThrottlesRapidStrips() {
+        HeartLedger l = new HeartLedger();
+        UUID v = UUID.randomUUID();
+
+        assertEquals(-2.0, l.strip(v, 20.0, 0L), "the first erase lands");
+
+        // A flurry of further hits inside the window take nothing, however many arrive.
+        assertTrue(Double.isNaN(l.strip(v, 18.0, 500L)), "still immune half a second later");
+        assertTrue(Double.isNaN(l.strip(v, 18.0, HeartLedger.STRIP_COOLDOWN_MS - 1)), "immune right up to the edge");
+        assertEquals(1, l.count(v), "no heart lost while on cooldown");
+
+        // Once the window passes, the next hit can erase again.
+        assertEquals(-4.0, l.strip(v, 18.0, HeartLedger.STRIP_COOLDOWN_MS), "the cooldown has elapsed");
+        assertEquals(2, l.count(v));
     }
 
     /** The floor: a body at two hearts loses one; a body at one heart keeps it and is never even tracked. */

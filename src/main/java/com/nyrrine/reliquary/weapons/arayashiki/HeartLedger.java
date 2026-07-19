@@ -27,10 +27,17 @@ final class HeartLedger {
     static final double FLOOR = 2.0;
     /** How long a stripped body may go unstruck by Arayashiki before its hearts are returned. */
     static final long COMBAT_TIMEOUT_MS = 8000L;
+    /**
+     * PLACEHOLDER (nerf tuning): once a body loses a heart it cannot lose another for this long, however
+     * many hits land in between — the per-victim throttle Nyrrine asked for on the shift-RC storm shred.
+     * Picked to be felt, not final; tune with the rest of the numbers next wave.
+     */
+    static final long STRIP_COOLDOWN_MS = 3000L;
 
     private static final class Entry {
         int count;
         long lastCombatMs;
+        long lastStripMs;
     }
 
     private final Map<UUID, Entry> table = new HashMap<>();
@@ -59,14 +66,18 @@ final class HeartLedger {
     /**
      * Erase one more heart from a body whose current effective max-HP is {@code effectiveMax}.
      *
-     * @return the new total modifier amount to apply (negative), or {@link Double#NaN} when the floor
-     *         blocks it — the body already sits at one heart and keeps it.
+     * @return the new total modifier amount to apply (negative), or {@link Double#NaN} when the erase is
+     *         refused — either the body sits at the one-heart {@link #FLOOR}, or it lost a heart less than
+     *         {@link #STRIP_COOLDOWN_MS} ago and is still immune. Both read the same to the caller: no strip.
      */
     double strip(UUID id, double effectiveMax, long nowMs) {
-        if (effectiveMax - HEART < FLOOR) return Double.NaN; // one heart always survives
-        Entry e = table.computeIfAbsent(id, k -> new Entry());
+        Entry e = table.get(id);
+        if (e != null && nowMs - e.lastStripMs < STRIP_COOLDOWN_MS) return Double.NaN; // per-victim cooldown
+        if (effectiveMax - HEART < FLOOR) return Double.NaN;                            // one heart always survives
+        if (e == null) { e = new Entry(); table.put(id, e); }
         e.count++;
         e.lastCombatMs = nowMs;
+        e.lastStripMs = nowMs;
         return -HEART * e.count;
     }
 

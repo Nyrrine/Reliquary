@@ -300,20 +300,17 @@ public final class MimicryWeapon implements Weapon {
     private static final int SLASH_POINTS_MIN = 40;
     private static final int SLASH_POINTS_MAX = 120;
 
-    /** Ticks for the blade to fall, and ticks each point of it lingers after being cut. */
+    /** Ticks after the downswing gash opens before its ground-impact rings out. */
     private static final int DOWNSWING_REVEAL = 4;
-    private static final int DOWNSWING_FADE = 3;
 
     /** The impact ring: a fixed budget, pushed out to the reach of the cut but never past this. */
     private static final int SHOCKWAVE_POINTS = 48;
     private static final double SHOCKWAVE_RADIUS_MAX = 24.0;
     private static final int IMPACT_SWEEPS = 6;
 
-    /** An M1 arc, and the heavier one that ends the four-beat chain. */
+    /** Points in an M1 gash, and in the heavier one that ends the four-beat chain. */
     private static final int M1_POINTS = 18;
     private static final int M1_POINTS_HEAVY = 26;
-    private static final int M1_REVEAL = 3;
-    private static final int M1_FADE = 3;
 
     /**
      * PLACEHOLDER (feel, not balance): the forward step the finisher beat throws the wielder into its cut.
@@ -321,6 +318,25 @@ public final class MimicryWeapon implements Weapon {
      * wave.
      */
     private static final double FINISHER_LUNGE = 0.55;
+
+    /**
+     * PLACEHOLDER (feel, not balance): the least a swing may follow the last <em>drawn</em> one before the
+     * blade is too heavy to leave a mark — the anti-spam cadence gate (Nyrrine §1.2). Deliberately an
+     * independent feel value, <b>not</b> derived from {@code EgoModels.MIMICRY.spd}, so retuning her one
+     * speed dial next wave never silently drags this with it (rail #3). Raise it for more commitment.
+     */
+    private static final long MIN_SWING_INTERVAL_MS = 300L;
+
+    /** How rarely the swallowed-swing strain cue may sound, so mashing can't machine-gun it. */
+    private static final long RESIST_CUE_THROTTLE_MS = 220L;
+
+    /**
+     * Mimicry's cut is a wound that snaps open, not a blade that travels: the whole crescent is revealed in
+     * {@link #GASH_REVEAL} ticks (near-instant, unlike Arayashiki's slow trace) and bleeds dark over
+     * {@link #GASH_FADE}. This is the timing half of what makes the slice read as Mimicry's own.
+     */
+    private static final int GASH_REVEAL = 2;
+    private static final int GASH_FADE = 5;
 
     /** The chain forgets itself after this long, and the next swing starts from the first beat again. */
     private static final long COMBO_RESET_MS = 1_200L;
@@ -407,10 +423,11 @@ public final class MimicryWeapon implements Weapon {
     /** The foe a wielder last struck, by id (never a hard entity reference) and when. */
     private record Mark(UUID victimId, long atMs) {}
 
-    /** Where a wielder is in the M1 chain, and when they last swung. Purely an animation. */
+    /** Where a wielder is in the M1 chain, when they last swung, and when the heavy-resist cue last fired. */
     private static final class Combo {
         private int beat;
         private long lastMs;
+        private long lastResistMs;
     }
 
     /**
@@ -462,6 +479,7 @@ public final class MimicryWeapon implements Weapon {
         double dealt = event.getFinalDamage();
         if (dealt <= 0.0) return;
 
+        hitSplashFx(attacker, victim);   // the cut is felt where it lands, not only drawn in the air
         mark(aid, victim, now);
         drink(attacker, dealt, now);
     }
@@ -587,7 +605,18 @@ public final class MimicryWeapon implements Weapon {
         long now = System.currentTimeMillis();
 
         Combo c = combos.get(id);
-        if (c == null || now - c.lastMs > COMBO_RESET_MS) {
+        long sinceLast = c == null ? Long.MAX_VALUE : now - c.lastMs;
+
+        // The blade is heavy: spam-clicking cannot force a flurry of light slashes out of it. A swing that
+        // arrives before the cadence has recovered is swallowed to a grunt of strain — no new cut, no beat
+        // advanced, so reaching the finisher takes four committed swings, not four mashed ones. This is the
+        // in-file weight lever (Nyrrine §1.2); the real attack rate stays EgoModels.MIMICRY.spd, untouched.
+        if (sinceLast < MIN_SWING_INTERVAL_MS) {
+            heavyResistFx(player, c);
+            return;
+        }
+
+        if (c == null || sinceLast > COMBO_RESET_MS) {
             c = new Combo();
             combos.put(id, c);
         }
@@ -903,7 +932,7 @@ public final class MimicryWeapon implements Weapon {
         Long readyAt = onrushReadyAt.get(id);
         Component onrush = (readyAt != null && now < readyAt)
                 ? EgoHud.cooldown("Onrush", readyAt - now, RUST)     // whole seconds, never milliseconds
-                : EgoHud.ready("Onrush", BONE);
+                : EgoHud.ready("Onrush", MIST);
 
         Component label = plain("Hello.  " + (long) Math.round(amount))
                 .append(plain("  ")).append(onrush);
@@ -1005,55 +1034,17 @@ public final class MimicryWeapon implements Weapon {
         striking.clear();
     }
 
-    // ---- the slash vocabulary ------------------------------------------------------------
+    // ---- the movement wake -----------------------------------------------------------------
     //
-    // Arayashiki is the house's slash language and the named reference, so this is its grammar rather than
-    // a second one invented alongside it: a parametric arc whose points are given staggered birth ticks so
-    // the blade visibly travels its cut, each point lingering a few ticks and shrinking as it goes, with a
-    // sparse END_ROD leading tip. What differs is the accent — Arayashiki cuts in white, Mimicry cuts in
-    // bone bleeding to dried red — and the weight: every arc here starts thicker than Arayashiki's widest.
+    // Mimicry's SLICES are the gash above — its own deep-red language, not Arayashiki's. What is left here is
+    // only the Onrush wake ({@link #rushFx}): a travelling streak whose points are given staggered birth
+    // ticks so the eye follows something crossing the gap, each point lingering a few ticks and shrinking as
+    // it goes. It is recoloured to Mimicry red like everything else, with a crimson leading edge, no white.
 
     /**
-     * Lay down one arc. The cut lives in the plane spanned by {@code u} and {@code v}, swinging {@code
-     * sweep} radians about {@code aMid}; {@code reverse} flips which end the blade starts from.
-     *
-     * <p>{@code force} is passed on every particle here, unconditionally: a large enough reservoir throws an
-     * arc a hundred blocks across, and everything past ~32 blocks is culled client-side without it. The cost
-     * is paid only by casts big enough to need it, because a small arc's points are all inside the radius
-     * anyway.
-     */
-    private void arc(World world, Location pivot, Vector u, Vector v,
-                     double radius, double sweep, double aMid, boolean reverse,
-                     float thickness, int points, int reveal, int fade, boolean tip) {
-        ThreadLocalRandom rng = ThreadLocalRandom.current();
-        final Location[] pts = new Location[points + 1];
-        final int[] birth = new int[points + 1];
-
-        // Hand-jitter, proportional to the cut so a huge one doesn't look laser-ruled, capped so it stays a
-        // waver rather than a cloud.
-        double jitter = Math.min(0.30, 0.02 * radius);
-
-        for (int i = 0; i <= points; i++) {
-            double f = (double) i / points;
-            double a = aMid - sweep / 2.0 + sweep * f;
-            Vector radial = u.clone().multiply(Math.cos(a) * radius)
-                    .add(v.clone().multiply(Math.sin(a) * radius));
-            Location p = pivot.clone().add(radial);
-            p.add((rng.nextDouble() - 0.5) * jitter,
-                  (rng.nextDouble() - 0.5) * jitter,
-                  (rng.nextDouble() - 0.5) * jitter);
-            pts[i] = p;
-            int order = reverse ? (points - i) : i;
-            birth[i] = Math.round((float) reveal * order / points);
-        }
-
-        animateArc(world, pts, birth, thickness, reveal, fade, tip);
-    }
-
-    /**
-     * Reveal an arc point by point and let it fade. Holds only the point array and the world — never an
-     * entity — so a cut still hanging in the air when its wielder dies or logs out pins nothing, and cancels
-     * itself on a tick count rather than on anything's liveness.
+     * Reveal a travelling streak point by point and let it fade. Holds only the point array and the world —
+     * never an entity — so a wake still hanging in the air when its wielder dies or logs out pins nothing,
+     * and cancels itself on a tick count rather than on anything's liveness.
      */
     private void animateArc(World world, Location[] pts, int[] birth, float thickness,
                             int reveal, int fade, boolean tip) {
@@ -1061,8 +1052,9 @@ public final class MimicryWeapon implements Weapon {
         // age, and at up to SLASH_POINTS_MAX points a tick the difference is real garbage.
         final Particle.DustTransition[] byAge = new Particle.DustTransition[fade];
         for (int a = 0; a < fade; a++) {
-            byAge[a] = new Particle.DustTransition(BONE_C, BLOOD_C, thickness * (1.0f - 0.5f * a / fade));
+            byAge[a] = new Particle.DustTransition(MIM_CORE, MIM_DARK, thickness * (1.0f - 0.5f * a / fade));
         }
+        final Particle.DustOptions edge = new Particle.DustOptions(MIM_CORE, thickness * 0.7f);
 
         new BukkitRunnable() {
             int t = 0;
@@ -1074,8 +1066,8 @@ public final class MimicryWeapon implements Weapon {
                     int age = t - birth[i];
                     if (age < 0 || age >= fade) continue;
                     world.spawnParticle(Particle.DUST_COLOR_TRANSITION, pts[i], 1, 0, 0, 0, 0, byAge[age], true);
-                    if (tip && age == 0 && i % 5 == 0) {   // the glowing leading edge, sparse on purpose
-                        world.spawnParticle(Particle.END_ROD, pts[i], 1, 0, 0, 0, 0, (Object) null, true);
+                    if (tip && age == 0 && i % 5 == 0) {   // the hot leading edge, crimson not white, sparse
+                        world.spawnParticle(Particle.DUST, pts[i], 1, 0, 0, 0, 0, edge, true);
                     }
                 }
                 t++;
@@ -1097,6 +1089,121 @@ public final class MimicryWeapon implements Weapon {
      */
     private static int slashPoints(double radius) {
         return Math.max(SLASH_POINTS_MIN, Math.min(SLASH_POINTS_MAX, (int) Math.round(radius * 8.0)));
+    }
+
+    // ---- Mimicry's own cut: the gash -----------------------------------------------------
+    //
+    // Arayashiki draws a thin white line that travels its arc; Mimicry does NOT (Nyrrine §1.5, greenfield).
+    // Its cut is a WOUND: a thick, deep-red crescent that snaps open all at once, bleeds to dark, carries a
+    // hot crimson leading edge, and blinks watching eyes open along its length. Same per-point budget as the
+    // arc — everything that makes it Mimicry's own is colour, timing, width, and eyes, not particle count.
+
+    /**
+     * Lay one gash. The crescent lives in the plane spanned by {@code u} and {@code v}, opening {@code
+     * sweep} radians about {@code aMid}; {@code eyes} watching eyes blink open evenly along it.
+     */
+    private void gash(World world, Location pivot, Vector u, Vector v,
+                      double radius, double sweep, double aMid, boolean reverse,
+                      float thickness, int points, int eyes) {
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        final Location[] pts = new Location[points + 1];
+        final int[] birth = new int[points + 1];
+        double jitter = Math.min(0.28, 0.02 * radius);
+        for (int i = 0; i <= points; i++) {
+            double f = (double) i / points;
+            double a = aMid - sweep / 2.0 + sweep * f;
+            Vector radial = u.clone().multiply(Math.cos(a) * radius)
+                    .add(v.clone().multiply(Math.sin(a) * radius));
+            Location p = pivot.clone().add(radial);
+            p.add((rng.nextDouble() - 0.5) * jitter,
+                  (rng.nextDouble() - 0.5) * jitter,
+                  (rng.nextDouble() - 0.5) * jitter);
+            pts[i] = p;
+            int order = reverse ? (points - i) : i;
+            birth[i] = Math.round((float) GASH_REVEAL * order / points);
+        }
+        animateGash(world, pts, birth, thickness);
+
+        for (int k = 0; k < eyes && points > 0; k++) {
+            int idx = (int) Math.round((k + 1.0) / (eyes + 1.0) * points);
+            mimEye(world, pts[Math.min(points, idx)], Math.max(1.0f, thickness * 0.6f));
+        }
+    }
+
+    /**
+     * Reveal a gash: deep red, thick, near-instant, bleeding to dark. Like {@link #animateArc} it holds only
+     * the point array and the world — never an entity — so a cut still hanging when its wielder dies pins
+     * nothing, and it cancels on a tick count rather than on anything's liveness.
+     */
+    private void animateGash(World world, Location[] pts, int[] birth, float thickness) {
+        final Particle.DustTransition[] byAge = new Particle.DustTransition[GASH_FADE];
+        for (int a = 0; a < GASH_FADE; a++) {
+            byAge[a] = new Particle.DustTransition(MIM_CORE, MIM_DARK, thickness * (1.0f - 0.45f * a / GASH_FADE));
+        }
+        final Particle.DustOptions core = new Particle.DustOptions(MIM_CORE, thickness * 0.6f);
+        new BukkitRunnable() {
+            int t = 0;
+
+            @Override
+            public void run() {
+                if (t > GASH_REVEAL + GASH_FADE) { cancel(); return; }
+                for (int i = 0; i < pts.length; i++) {
+                    int age = t - birth[i];
+                    if (age < 0 || age >= GASH_FADE) continue;
+                    // Count two with a little spread so the wound reads filled and fleshy, not a dotted line.
+                    world.spawnParticle(Particle.DUST_COLOR_TRANSITION, pts[i], 2, 0.05, 0.05, 0.05, 0.0, byAge[age], true);
+                    if (age == 0) world.spawnParticle(Particle.DUST, pts[i], 1, 0, 0, 0, 0, core, true);
+                }
+                t++;
+            }
+        }.runTaskTimer(plugin, 0L, 1L);
+    }
+
+    /** A single watching eye: a white sclera cluster around one black pupil (Nyrrine §1.5). */
+    private void mimEye(World world, Location at, float size) {
+        world.spawnParticle(Particle.DUST, at, 5, 0.07, 0.07, 0.07, 0.0,
+                new Particle.DustOptions(EYE_SCLERA, size), true);
+        world.spawnParticle(Particle.DUST, at, 1, 0.0, 0.0, 0.0, 0.0,
+                new Particle.DustOptions(EYE_PUPIL, size * 0.55f), true);
+    }
+
+    /**
+     * The splash felt where a swing lands (Nyrrine §1.2) — not just a trail in the air. A short red gash is
+     * torn across the struck body with a visceral spray of blood; the vanilla swing under it is untouched.
+     * Fenced out of ability damage by {@link #onHit}'s {@link #striking} guard, so only real swings splash.
+     */
+    private void hitSplashFx(Player attacker, LivingEntity victim) {
+        World world = victim.getWorld();
+        Location body = victim.getLocation().add(0, Math.max(0.6, victim.getHeight()) * 0.55, 0);
+
+        Vector across = victim.getLocation().toVector().subtract(attacker.getLocation().toVector()).setY(0);
+        if (across.lengthSquared() < 1.0e-6) across = new Vector(0, 0, 1);
+        across.normalize();
+        Vector side = across.clone().crossProduct(new Vector(0, 1, 0));
+        if (side.lengthSquared() < 1.0e-6) side = new Vector(1, 0, 0);
+        side.normalize();
+        gash(world, body, side, new Vector(0, 1, 0), 1.15, Math.toRadians(150),
+                Math.toRadians(20), ThreadLocalRandom.current().nextBoolean(), 2.3f, 12, 1);
+
+        world.spawnParticle(Particle.DUST, body, 16, 0.28, 0.32, 0.28, 0.0,
+                new Particle.DustOptions(BLOOD_C, 1.5f), true);
+        world.spawnParticle(Particle.DUST_COLOR_TRANSITION, body, 8, 0.3, 0.32, 0.3, 0.0,
+                new Particle.DustTransition(MIM_CORE, MIM_DARK, 1.6f), true);
+        world.spawnParticle(Particle.SWEEP_ATTACK, body, 1, 0.0, 0.0, 0.0, 0.0);
+
+        world.playSound(body, Sound.ENTITY_PLAYER_ATTACK_CRIT, 0.9f, 0.7f);
+        world.playSound(body, Sound.ENTITY_HOGLIN_ATTACK, 0.5f, 0.6f);
+    }
+
+    /** A swing swallowed by the cadence gate: a low grunt of strain and a wisp of dark red — the blade's weight. */
+    private void heavyResistFx(Player player, Combo c) {
+        long now = System.currentTimeMillis();
+        if (now - c.lastResistMs < RESIST_CUE_THROTTLE_MS) return;
+        c.lastResistMs = now;
+        Location at = player.getEyeLocation().add(player.getEyeLocation().getDirection().multiply(0.9));
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_HOGLIN_STEP, 0.35f, 0.5f);
+        player.getWorld().spawnParticle(Particle.DUST, at, 3, 0.12, 0.12, 0.12, 0.0,
+                new Particle.DustOptions(MIM_DARK, 1.0f), true);
     }
 
     // ---- SFX / VFX -----------------------------------------------------------------------
@@ -1128,23 +1235,25 @@ public final class MimicryWeapon implements Weapon {
 
         switch (beat) {
             case 0, 1 -> {
-                // Two heavy crescent sweeps rolled opposite ways — the wide, deliberate Gebura arc, thicker
-                // and slower-reading than Arayashiki's, so the chain opens with weight rather than speed.
+                // Two heavy red crescent wounds torn opposite ways — Gebura's weight, snapping open thick and
+                // deep-red with a watching eye, nothing of Arayashiki's slow white line about it.
                 double roll = (beat == 0 ? 0.85 : -0.85) + rng.nextDouble(-0.15, 0.15);
                 Vector v = up.clone().multiply(Math.cos(roll)).add(right.clone().multiply(Math.sin(roll)));
-                arc(world, pivot, dir.clone(), v, 2.7 + rng.nextDouble() * 0.4,
+                gash(world, pivot, dir.clone(), v, 2.7 + rng.nextDouble() * 0.4,
                         Math.toRadians(185), rng.nextDouble(-0.2, 0.2), beat == 1,
-                        2.1f, M1_POINTS, M1_REVEAL, M1_FADE, true);
-                world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.9f, 1.05f + rng.nextFloat() * 0.2f);
-                world.playSound(eye, Sound.ITEM_TRIDENT_RIPTIDE_1, 0.5f, 0.8f + rng.nextFloat() * 0.2f);
+                        2.4f, M1_POINTS, 1);
+                world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.9f, 0.9f + rng.nextFloat() * 0.15f);
+                world.playSound(eye, Sound.ITEM_TRIDENT_RIPTIDE_1, 0.5f, 0.7f + rng.nextFloat() * 0.15f);
+                world.playSound(eye, Sound.ENTITY_RAVAGER_ROAR, 0.18f, 0.6f);
             }
             case 2 -> {
-                // A rising uppercut crescent — the blade dragged up through the foe before the overhead fall.
-                arc(world, pivot, dir.clone(), up.clone(), 2.6 + rng.nextDouble() * 0.3,
+                // A rising uppercut wound — the blade dragged up through the foe before the overhead fall.
+                gash(world, pivot, dir.clone(), up.clone(), 2.6 + rng.nextDouble() * 0.3,
                         Math.toRadians(170), Math.toRadians(-35), true,
-                        2.1f, M1_POINTS, M1_REVEAL, M1_FADE, true);
-                world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.9f, 0.85f);
-                world.playSound(eye, Sound.ITEM_TRIDENT_RETURN, 0.45f, 1.2f);
+                        2.4f, M1_POINTS, 1);
+                world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.9f, 0.8f);
+                world.playSound(eye, Sound.ITEM_TRIDENT_RETURN, 0.45f, 1.1f);
+                world.playSound(eye, Sound.ENTITY_RAVAGER_ROAR, 0.18f, 0.65f);
             }
             default -> m1Finisher(player, world, eye, pivot, dir);
         }
@@ -1160,16 +1269,17 @@ public final class MimicryWeapon implements Weapon {
         if (fwd.lengthSquared() < 1.0e-6) fwd = new Vector(0, 0, 1);
         fwd.normalize();
 
-        arc(world, pivot, new Vector(0, 1, 0), fwd,
+        gash(world, pivot, new Vector(0, 1, 0), fwd,
                 3.2, Math.toRadians(195), Math.toRadians(55), false,
-                2.6f, M1_POINTS_HEAVY, M1_REVEAL + 2, M1_FADE + 1, true);
+                3.0f, M1_POINTS_HEAVY, 3);
 
-        world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_STRONG, 1.0f, 0.65f);
-        world.playSound(eye, Sound.ITEM_TRIDENT_RIPTIDE_3, 0.7f, 0.9f);
-        world.playSound(eye, Sound.ENTITY_HOGLIN_ATTACK, 0.4f, 0.6f);
-        world.playSound(eye, Sound.BLOCK_ANVIL_LAND, 0.22f, 1.6f);
+        world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_STRONG, 1.0f, 0.6f);
+        world.playSound(eye, Sound.ITEM_TRIDENT_RIPTIDE_3, 0.7f, 0.8f);
+        world.playSound(eye, Sound.ENTITY_HOGLIN_ATTACK, 0.5f, 0.55f);
+        world.playSound(eye, Sound.ENTITY_RAVAGER_ROAR, 0.3f, 0.55f);
+        world.playSound(eye, Sound.BLOCK_ANVIL_LAND, 0.22f, 1.5f);
 
-        // The fleshy signature: blood, bone fangs, and a watching eye, out ahead where the edge comes down.
+        // The fleshy signature: a spray of blood and a watching eye, out ahead where the edge comes down.
         fleshyBurst(world, eye.clone().add(dir.clone().multiply(2.0)), 1.0f);
 
         // Step into the swing — a velocity nudge, wall-safe by vanilla collision, never a teleport.
@@ -1178,20 +1288,18 @@ public final class MimicryWeapon implements Weapon {
     }
 
     /**
-     * The ALEPH accent shared by Mimicry's heaviest moments: a spray of blood, a scatter of bone-white
-     * fangs, and a single watching green eye bleeding to red as it fades. A fixed budget scaled by
-     * {@code scale}, so even the largest cast cannot let it run away with the frame.
+     * The ALEPH accent shared by Mimicry's heaviest moments: a thick spray of blood bleeding hot-crimson to
+     * dark, and a single watching eye (white sclera, black pupil) opening in the middle of it. All red, no
+     * light (Nyrrine §1.2). A fixed budget scaled by {@code scale}, so even the largest cast cannot let it
+     * run away with the frame.
      */
     private void fleshyBurst(World world, Location at, float scale) {
-        int blood = Math.max(6, Math.round(14 * scale));
-        world.spawnParticle(Particle.DUST, at, blood, 0.35, 0.4, 0.35, 0.0,
-                new Particle.DustOptions(BLOOD_C, 1.4f), true);
-        world.spawnParticle(Particle.DUST, at, 6, 0.4, 0.3, 0.4, 0.0,
-                new Particle.DustOptions(BONE_C, 1.1f), true);              // bone fangs
-        world.spawnParticle(Particle.DUST, at, 1, 0.05, 0.1, 0.05, 0.0,
-                new Particle.DustOptions(EYE_C, 1.7f), true);              // the iris
-        world.spawnParticle(Particle.DUST_COLOR_TRANSITION, at, 3, 0.18, 0.2, 0.18, 0.0,
-                new Particle.DustTransition(EYE_C, BLOOD_C, 1.2f), true);   // the eye, weeping shut
+        int blood = Math.max(8, Math.round(18 * scale));
+        world.spawnParticle(Particle.DUST, at, blood, 0.38, 0.42, 0.38, 0.0,
+                new Particle.DustOptions(BLOOD_C, 1.6f), true);
+        world.spawnParticle(Particle.DUST_COLOR_TRANSITION, at, Math.max(4, Math.round(6 * scale)), 0.34, 0.36, 0.34, 0.0,
+                new Particle.DustTransition(MIM_CORE, MIM_DARK, 1.5f), true);
+        mimEye(world, at, 1.8f);   // the eye set in the flesh, watching from the wound
     }
 
     /**
@@ -1235,10 +1343,12 @@ public final class MimicryWeapon implements Weapon {
             world.playSound(feet, Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 0.55f * bigness, 0.65f);
         }
 
-        // Up and back, over the top, down through the front: -40 degrees to +150.
-        arc(world, pivot, new Vector(0, 1, 0), fwd, radius,
+        // Up and back, over the top, down through the front: one vast red wound tearing open, watched by a
+        // row of eyes that grows with the cut. -40 degrees to +150.
+        int eyes = Math.min(6, 2 + Math.round(bigness * 4));
+        gash(world, pivot, new Vector(0, 1, 0), fwd, radius,
                 Math.toRadians(190), Math.toRadians(55), false,
-                thick, points, DOWNSWING_REVEAL, DOWNSWING_FADE, true);
+                thick, points, eyes);
 
         // The impact, on the frame the edge reaches the ground.
         new BukkitRunnable() {
@@ -1263,7 +1373,7 @@ public final class MimicryWeapon implements Weapon {
 
         // The shockwave. Fixed point count, so its cost never tracks the size of the cut.
         double ring = Math.min(radius, SHOCKWAVE_RADIUS_MAX);
-        Particle.DustTransition bleed = new Particle.DustTransition(BONE_C, BLOOD_C, 2.0f + bigness * 3.0f);
+        Particle.DustTransition bleed = new Particle.DustTransition(MIM_CORE, MIM_DARK, 2.0f + bigness * 3.0f);
         for (int i = 0; i < SHOCKWAVE_POINTS; i++) {
             double a = (Math.PI * 2 * i) / SHOCKWAVE_POINTS;
             Location p = feet.clone().add(Math.cos(a) * ring, 0.3, Math.sin(a) * ring);
@@ -1328,19 +1438,19 @@ public final class MimicryWeapon implements Weapon {
         world.playSound(body, Sound.BLOCK_ANVIL_LAND, 0.3f, 1.5f);
         world.playSound(body, Sound.ENTITY_HOGLIN_ATTACK, 0.4f, 0.6f + (rng.nextFloat() - 0.5f) * 0.1f);
 
-        // A real cut across the body, in the same grammar as everything else this weapon does.
+        // A red wound torn across the body, in Mimicry's own grammar.
         Vector across = victim.getLocation().toVector().subtract(attacker.getLocation().toVector()).setY(0);
         if (across.lengthSquared() < 1.0e-6) across = new Vector(0, 0, 1);
         across.normalize();
         Vector side = across.clone().crossProduct(new Vector(0, 1, 0));
         if (side.lengthSquared() < 1.0e-6) side = new Vector(1, 0, 0);
         side.normalize();
-        arc(world, body, side, new Vector(0, 1, 0), 1.9, Math.toRadians(150),
-                Math.toRadians(20), rng.nextBoolean(), 2.1f, 16, 2, 3, true);
+        gash(world, body, side, new Vector(0, 1, 0), 1.9, Math.toRadians(150),
+                Math.toRadians(20), rng.nextBoolean(), 2.5f, 16, 1);
 
         world.spawnParticle(Particle.SWEEP_ATTACK, body, 2, 0.3, 0.2, 0.3, 0.0);
         world.spawnParticle(Particle.DUST, body, 18, 0.3, 0.3, 0.3, 0.0,
-                new Particle.DustOptions(BLOOD_C, 1.3f));
+                new Particle.DustOptions(BLOOD_C, 1.5f), true);
     }
 
     /** The finish: a crisp sweep at the nape, a wet crunch, and a spray that fades from bone to blood. */
@@ -1360,37 +1470,45 @@ public final class MimicryWeapon implements Weapon {
         side = side.crossProduct(new Vector(0, 1, 0));
         if (side.lengthSquared() < 1.0e-6) side = new Vector(1, 0, 0);
         side.normalize();
-        arc(world, neck, side, new Vector(0, 1, 0), 1.3, Math.toRadians(120), 0.0,
-                false, 1.8f, 12, 1, 3, true);
+        gash(world, neck, side, new Vector(0, 1, 0), 1.3, Math.toRadians(120), 0.0,
+                false, 2.1f, 12, 0);
 
         world.spawnParticle(Particle.CRIT, neck, 12, 0.2, 0.2, 0.2, 0.3);
         world.spawnParticle(Particle.DUST_COLOR_TRANSITION, neck, 24, 0.25, 0.2, 0.25, 0.0,
-                new Particle.DustTransition(BONE_C, BLOOD_C, 1.4f));
-        world.spawnParticle(Particle.DUST, neck, 1, 0.05, 0.1, 0.05, 0.0,
-                new Particle.DustOptions(EYE_C, 1.6f), true);   // one last eye, watching from the nape
+                new Particle.DustTransition(MIM_CORE, MIM_DARK, 1.4f), true);
+        mimEye(world, neck, 1.6f);   // one last eye, watching from the nape
     }
 
     // ---- lore --------------------------------------------------------------------------
 
-    /** Bone-white — the shape the thing wears. */
-    private static final TextColor BONE = TextColor.color(0xD6D2C8);
-    /** Dried blood — what is underneath it. */
+    /** The Red Mist — bright and readable, nothing light about it (Nyrrine §1.2: red, not light, throughout). */
+    private static final TextColor MIST = TextColor.color(0xE0454E);
+    /** Dried blood — the darker red underneath it. */
     private static final TextColor RUST = TextColor.color(0x8E2B27);
 
-    private static final Color BONE_C  = Color.fromRGB(0xD6, 0xD2, 0xC8);
-    private static final Color BLOOD_C = Color.fromRGB(0x8E, 0x2B, 0x27);
-    /** The green iris of the eyes set into the blade — the thing that watches from the flesh. */
-    private static final Color EYE_C   = Color.fromRGB(0x4F, 0xC8, 0x5C);
+    // Mimicry cuts in deep red end to end — no bone, no pale, nothing light anywhere in a slash (Nyrrine
+    // §1.2: "mimicry red and not light at all all throughout"). The lone exception is the eye set in the
+    // flesh, which watches in white with a black pupil (§1.5).
+    /** The hot leading edge / core of a fresh cut. */
+    private static final Color MIM_CORE   = Color.fromRGB(0xE0, 0x14, 0x22);
+    /** The body of the wound — Mimicry red. */
+    private static final Color BLOOD_C    = Color.fromRGB(0x9A, 0x16, 0x20);
+    /** The dark it bleeds down to as it fades. */
+    private static final Color MIM_DARK   = Color.fromRGB(0x3E, 0x06, 0x0A);
+    /** The watching eye: white sclera... */
+    private static final Color EYE_SCLERA = Color.fromRGB(0xF2, 0xEC, 0xE4);
+    /** ...and a black pupil at its centre. */
+    private static final Color EYE_PUPIL  = Color.fromRGB(0x0A, 0x05, 0x06);
 
     /** A small non-italic action-bar fragment in the blade's bone tone. */
     private static Component plain(String text) {
-        return Component.text(text).color(BONE).decoration(TextDecoration.ITALIC, false);
+        return Component.text(text).color(MIST).decoration(TextDecoration.ITALIC, false);
     }
 
     private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
             "Mimicry",
             "Nothing There",
-            BONE,
+            MIST,
             RUST,
             List.of(
                     "The yearning to imitate the human",
@@ -1408,8 +1526,12 @@ public final class MimicryWeapon implements Weapon {
             ),
             List.of(
                     new EgoLore.Ability("[Passive] Is That the Red Mist?!?",
-                            "Heal 25% of the damage you deal,",
-                            "at most once every 5 seconds."),
+                            "The Red Mist keeps you alive: heal",
+                            "25% of the damage you deal, once",
+                            "every 5s, and while the blade is",
+                            "held your max health doubles to",
+                            "40 — two heart-rows, gone the",
+                            "moment you sheathe it."),
                     new EgoLore.Ability("[Passive] Hello.",
                             "Damage dealt TO you pools in the",
                             "blade, and the pool itself has no",
@@ -1417,10 +1539,6 @@ public final class MimicryWeapon implements Weapon {
                             "120 — the point past which it can",
                             "buy no more. The pool empties",
                             "after 5 minutes without a wound."),
-                    new EgoLore.Ability("[Passive] Two heart-rows",
-                            "While Mimicry is held your max",
-                            "health doubles to 40. It drops the",
-                            "instant the blade is sheathed."),
                     new EgoLore.Ability("[Shift + Right-click] Nothing There",
                             "Bring the blade down. Everything",
                             "nearby takes half the pooled total,",
