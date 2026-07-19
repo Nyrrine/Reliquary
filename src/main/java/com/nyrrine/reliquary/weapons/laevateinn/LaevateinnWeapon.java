@@ -506,7 +506,7 @@ public final class LaevateinnWeapon implements Weapon {
         lines.add(List.of(new Seg("Passive — ", FAINT, true), new Seg("Ridiculous Grit", PURPLE, true)));
         lines.add(List.of(new Seg("A killing blow can't put you down: grit", FAINT, true)));
         lines.add(List.of(new Seg("through it at a sliver of health, lit like", FAINT, true)));
-        lines.add(List.of(new Seg("a totem. Once an hour.", FAINT, true)));
+        lines.add(List.of(new Seg("a totem. Every 15 minutes.", FAINT, true)));
         lines.add(List.of());
         lines.add(List.of(new Seg("Out of the fight, its seals close again.", FAINT, true)));
 

@@ -15,8 +15,6 @@ import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -29,15 +27,15 @@ import java.util.UUID;
  *
  * <p>When a blow would drop the wielder to nothing and the blade is in their hand, the blow is eaten:
  * they're left on a sliver of health with the totem's own kit (Regeneration II, Fire Resistance,
- * Absorption II) under a custom awakening — a big purple-and-white burst, its own sound, not the
- * vanilla totem pop. Then it sleeps for an hour, per player — spend
+ * Absorption II) under a custom awakening — a big purple-and-white dust burst, its own sound, not the
+ * vanilla totem pop. Then it sleeps for fifteen minutes, per player — spend
  * the save and the next lethal hit lands for real until the clock comes back around. Nothing is
- * persisted: a restart is a fresh hour, same as every other bit of this blade's state.
+ * persisted: a restart is a fresh window, same as every other bit of this blade's state.
  */
 final class LaevateinnGrit implements Listener {
 
-    /** One hour between saves, per player. Kept in step with the tooltip's "once an hour". */
-    private static final long COOLDOWN_MS = 3_600_000L;
+    /** Fifteen minutes between saves, per player. Kept in step with the tooltip's "every 15 minutes". */
+    private static final long COOLDOWN_MS = 15L * 60L * 1000L;
 
     /** Health the save leaves the wielder on — a sliver, ~1 heart (clamped to their real max). */
     private static final double REVIVE_HEALTH = 2.0;
@@ -50,8 +48,8 @@ final class LaevateinnGrit implements Listener {
 
     private final LaevateinnWeapon weapon;
 
-    /** Per-player: when Grit is ready again (ms epoch). Absent = ready now. Cleared on quit and disable. */
-    private final Map<UUID, Long> readyAt = new HashMap<>();
+    /** The revive's gate. Arms itself the moment a save is authorised, so no save can skip its lockout. */
+    private final GritCooldown cooldown = new GritCooldown(COOLDOWN_MS);
 
     LaevateinnGrit(Reliquary plugin, LaevateinnWeapon weapon) {
         this.weapon = weapon;
@@ -76,13 +74,14 @@ final class LaevateinnGrit implements Listener {
         // sword lives by.
         if (!weapon.matches(player.getInventory().getItemInMainHand())) return;
 
+        // Authorise the save and arm the lockout in one atomic step, up front. Everything below can be
+        // skipped by a throw or slipped by a re-entrant hit — the cooldown can't, because it's already
+        // recorded by the time we get here. One lethal hit, one save, then locked out for the window.
         UUID id = player.getUniqueId();
-        long now = System.currentTimeMillis();
-        Long until = readyAt.get(id);
-        if (until != null && now < until) return; // still cooling — no save; the blow lands for real
+        if (!cooldown.tryConsume(id, System.currentTimeMillis())) return; // still cooling — the blow lands
 
         // Grit through it. Cancel the blow outright so no death fires, drop them to a sliver, hand them
-        // the totem kit, and light it up. Then start the hour.
+        // the totem kit, and light it up.
         event.setCancelled(true);
         player.setFireTicks(0);
         player.setHealth(Math.min(REVIVE_HEALTH, maxHealth(player)));
@@ -91,35 +90,35 @@ final class LaevateinnGrit implements Listener {
         player.addPotionEffect(FIRE_RES);
         player.addPotionEffect(ABSORPTION);
         awakeningBurst(player);
-
-        readyAt.put(id, now + COOLDOWN_MS);
     }
 
     /**
      * The revive's show — a custom awakening in place of the vanilla totem pop (§2.1). Layered,
-     * resonant sound for the wake; a big purple-and-white explosion for the burst, bigger than a
-     * totem's own. Cosmetic only — the save above is what actually happens.
+     * resonant sound for the wake; a big purple-and-white <b>dust</b> burst for the light — no
+     * explosion particles, she doesn't want the TNT look. Cosmetic only — the save above is what
+     * actually happens.
      */
     private static void awakeningBurst(Player player) {
         World world = player.getWorld();
         Location at = player.getLocation();
         Location core = at.clone().add(0, 1.0, 0);
 
-        // The awakening: a deep beacon swell for the wake, a conduit shimmer riding over it, and a low
-        // explosion to land the blast. Layered on purpose — no single vanilla sound reads as "awakening".
+        // The awakening: a deep beacon swell for the wake, a conduit shimmer riding over it, and a deep
+        // bell toll over a resurrection-anchor resonance for the punch — a resonant boom, no explosion in
+        // it. Layered on purpose — no single vanilla sound reads as "awakening".
         world.playSound(at, Sound.BLOCK_BEACON_ACTIVATE, 1.4f, 0.7f);
         world.playSound(at, Sound.BLOCK_CONDUIT_ACTIVATE, 1.0f, 1.1f);
-        world.playSound(at, Sound.ENTITY_GENERIC_EXPLODE, 1.0f, 0.8f);
+        world.playSound(at, Sound.BLOCK_BELL_USE, 1.2f, 0.55f);
+        world.playSound(at, Sound.BLOCK_RESPAWN_ANCHOR_CHARGE, 0.8f, 0.8f);
 
-        // The burst: explosion cores for the blast shape and a flash for the light, then a wide sphere
-        // of dust in the relic's own purple and white — denser and broader than a totem's swirl.
-        world.spawnParticle(Particle.EXPLOSION_EMITTER, core, 1);
-        world.spawnParticle(Particle.EXPLOSION, core, 8, 0.7, 0.6, 0.7, 0.0);
-        world.spawnParticle(Particle.FLASH, core, 2);
-        Particle.DustOptions purple = new Particle.DustOptions(LaevateinnVfx.PURPLE, 1.5f);
-        Particle.DustOptions white = new Particle.DustOptions(LaevateinnVfx.WHITE, 1.4f);
-        world.spawnParticle(Particle.DUST, core, 150, 1.2, 1.3, 1.2, 0.0, purple);
-        world.spawnParticle(Particle.DUST, core, 110, 1.2, 1.3, 1.2, 0.0, white);
+        // The burst, dust only: a wide purple cloud with a deep-purple shadow for body, then a tighter
+        // bright-white core inside it. Big and soft, no explosion smoke.
+        Particle.DustOptions purple = new Particle.DustOptions(LaevateinnVfx.PURPLE, 1.7f);
+        Particle.DustOptions purpleDeep = new Particle.DustOptions(LaevateinnVfx.PURPLE_DEEP, 1.4f);
+        Particle.DustOptions white = new Particle.DustOptions(LaevateinnVfx.WHITE, 1.3f);
+        world.spawnParticle(Particle.DUST, core, 160, 1.3, 1.4, 1.3, 0.0, purple);
+        world.spawnParticle(Particle.DUST, core, 90, 1.0, 1.1, 1.0, 0.0, purpleDeep);
+        world.spawnParticle(Particle.DUST, core, 120, 0.7, 0.9, 0.7, 0.0, white);
     }
 
     private static double maxHealth(Player player) {
@@ -129,11 +128,11 @@ final class LaevateinnGrit implements Listener {
 
     /** Drop one player's cooldown (they left). */
     void clear(UUID id) {
-        readyAt.remove(id);
+        cooldown.clear(id);
     }
 
     /** Drop every cooldown (plugin shutdown / reload). */
     void clearAll() {
-        readyAt.clear();
+        cooldown.clearAll();
     }
 }
