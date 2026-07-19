@@ -448,27 +448,15 @@ public final class DiscordWeapon implements Weapon {
     }
 
     /**
-     * Step out of the world and back in at the target's back. Wall-safe: the ideal spot behind it is tried
-     * first, then progressively closer spots, and if the target is flush against geometry with nowhere to
-     * stand the wielder simply doesn't move — the cut still lands from where they are, because the cycle
-     * does not stop for architecture.
+     * Step out of the world and back in at the target's back, via {@link Blink#behind}: the ideal spot
+     * behind it, shuffled to somewhere a body actually fits, facing the way the target faces. If the target
+     * is flush against geometry with nowhere to stand, {@code behind} returns null and the wielder simply
+     * doesn't move — the cut still lands from where they are, because the cycle does not stop for
+     * architecture.
      */
     private void appearBehind(Player owner, LivingEntity victim) {
-        Location vLoc = victim.getLocation();
-        Vector facing = vLoc.getDirection().setY(0);
-        if (facing.lengthSquared() < 1.0e-6) {
-            facing = vLoc.toVector().subtract(owner.getLocation().toVector()).setY(0);
-        }
-        if (facing.lengthSquared() < 1.0e-6) facing = new Vector(0, 0, 1);
-        facing.normalize();
-
-        Location dest = null;
-        for (double d = CYCLE_BEHIND; d >= 0.0; d -= 0.4) {
-            Location cand = vLoc.clone().subtract(facing.clone().multiply(d));
-            if (Blink.canStand(cand)) { dest = cand; break; }
-        }
+        Location dest = Blink.behind(victim.getLocation(), CYCLE_BEHIND);
         if (dest == null) return;                 // nowhere to stand — strike from where we are
-        dest.setDirection(facing);                // facing the way it faces == standing at its back
 
         vanishFx(owner.getLocation());
         owner.teleport(dest);

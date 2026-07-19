@@ -849,7 +849,11 @@ public final class HarmonyWeapon implements Weapon {
     private void humFx(Player player, Performance perf) {
         World world = player.getWorld();
         Location at = player.getEyeLocation().add(player.getEyeLocation().getDirection().multiply(0.8));
-        world.playSound(at, Sound.BLOCK_NOTE_BLOCK_DIDGERIDOO, 0.16f, chordPitch(perf.rhythm) * 0.5f);
+        // The drone climbs with Rhythm through the clamped voice() helper. The old octave-down (* 0.5f) drove
+        // stacks 0-3 under the client's 0.5 pitch floor, where they all flattened to one note — the low half of
+        // the climb the drone exists to voice was inaudible. Dropping it lets every stack sound distinct.
+        world.playSound(at, Sound.BLOCK_NOTE_BLOCK_DIDGERIDOO, 0.16f,
+                voice(CHORD_ROOT_NOTE + perf.rhythm * CHORD_STEP, 1.0f));
         world.spawnParticle(Particle.DUST, at, 1, 0.14, 0.14, 0.14, 0.0, RUST_FINE, true);
         if (perf.rhythm >= MAX_RHYTHM) {
             world.spawnParticle(Particle.ELECTRIC_SPARK, at, 1, 0.12, 0.12, 0.12, 0.0, null, true);

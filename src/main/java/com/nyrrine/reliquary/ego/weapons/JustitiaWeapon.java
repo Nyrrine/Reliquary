@@ -212,8 +212,8 @@ public final class JustitiaWeapon implements Weapon {
     /** A striker further than this is out of the scales' jurisdiction (blocks) — no cross-map counters. */
     private static final double COUNTER_RANGE = 16.0;
 
-    /** How far behind the striker the bearer appears, and the shorter fallbacks if that spot is walled. */
-    private static final double[] COUNTER_BEHIND_DISTANCES = {1.6, 1.1, 0.6};
+    /** How far behind the striker the bearer appears; {@link Blink#behind} shuffles it to somewhere it fits. */
+    private static final double COUNTER_BEHIND_DISTANCE = 1.6;
 
     // ---- the scales: geometry ------------------------------------------------------
 
@@ -530,32 +530,15 @@ public final class JustitiaWeapon implements Weapon {
 
         Location from = player.getLocation();
         rootStriker(striker);
-        player.teleport(behindOf(striker));
+        // At the striker's back if a body fits there; if every spot is walled, Blink declines and the bearer
+        // stays put rather than being filed into geometry — the counter still lands from where they are.
+        Location behind = Blink.behind(striker.getLocation(), COUNTER_BEHIND_DISTANCE);
+        if (behind != null) player.teleport(behind);
         applyIndifference(striker); // "This counter move triggers Indifference"
 
         counterFx(from, player, striker);
     }
 
-    /**
-     * The spot at the striker's back, facing the way they face. Walked inward through
-     * {@link #COUNTER_BEHIND_DISTANCES} until a spot with clear head and feet is found, so the counter
-     * never files the bearer into a wall; if every candidate is walled, their own footprint is used.
-     */
-    private Location behindOf(LivingEntity striker) {
-        Location at = striker.getLocation();
-        Vector facing = at.getDirection().setY(0);
-        facing = facing.lengthSquared() < 1.0e-6 ? new Vector(0, 0, 1) : facing.normalize();
-
-        for (double dist : COUNTER_BEHIND_DISTANCES) {
-            Location spot = at.clone().subtract(facing.clone().multiply(dist));
-            spot.setYaw(at.getYaw()); // shoulder to shoulder with their facing — you are behind them
-            spot.setPitch(0f);
-            if (Blink.canStand(spot)) return spot;
-        }
-        Location fallback = at.clone();
-        fallback.setPitch(0f);
-        return fallback;
-    }
 
 
     /** Root a countered striker for {@link #ROOT_TICKS}, cutting mob AI for the hold. */

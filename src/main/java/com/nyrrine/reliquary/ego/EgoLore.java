@@ -72,7 +72,7 @@ public final class EgoLore {
      * Build an E.G.O tooltip.
      *
      * @param name        the weapon's name — becomes the display name, in {@code primary}
-     * @param abnormality the source Abnormality — becomes the bold title line, in {@code secondary}
+     * @param abnormality the source Abnormality — becomes the title line, in {@code secondary}
      * @param primary     the item's primary colour (name, {@code How to use:}, ability headers)
      * @param secondary   the item's secondary colour (the Abnormality title line)
      * @param descLines   the flavour block, pre-wrapped. An empty string renders as a blank line, which

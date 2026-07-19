@@ -673,8 +673,11 @@ public final class FrostSplinterWeapon implements Weapon {
         /** Drop the shell and hand a still-living mob its AI back. Safe to call twice. */
         private void release() {
             if (shell != null && shell.isValid()) shell.remove();
-            if (restoreAi && target instanceof Mob mob && target.isValid()) {
-                mob.setAI(true); // guarded: only if the mob is still around to restore
+            // Restore AI for any mob that isn't actually dead. isValid() was wrong here: it is also false for a
+            // chunk-unloaded mob — which is precisely the one that would otherwise persist to disk mindless
+            // (NoAI:1). A dead mob is gone and never saved, so isDead() is the only case that must be skipped.
+            if (restoreAi && target instanceof Mob mob && !target.isDead()) {
+                mob.setAI(true);
             }
         }
     }

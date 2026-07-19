@@ -54,9 +54,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * Everything below is state kept beside the item, never on it.
  *
  * <ul>
- *   <li><b>Is That the Red Mist?!?</b> ({@link #onHit}, passive) — a landed blow mends the wielder for
+ *   <li><b>Lifesteal</b> ({@link #onHit}, passive) — a landed blow mends the wielder for
  *       {@link #LIFESTEAL_FRACTION} of the damage it dealt, throttled to once per
- *       {@link #LIFESTEAL_THROTTLE_MS}.</li>
+ *       {@link #LIFESTEAL_THROTTLE_MS}. The four-beat chain's finisher drinks deeper
+ *       ({@link #FINISHER_LIFESTEAL_FRACTION}) and ignores the throttle, so its payoff always lands.</li>
  *   <li><b>The reservoir</b>, shown to the wielder as <b>"Hello."</b> ({@link #onDamaged}, passive) — every
  *       point of damage that <em>lands on</em> the wielder pools in the blade. It is the wounds it
  *       remembers, not the wounds it gave. The pool itself is never clamped; what it can <em>buy</em> is
@@ -159,6 +160,13 @@ public final class MimicryWeapon implements Weapon {
     /** Fraction of a landed blow's damage the weapon drinks back into its wielder. */
     private static final double LIFESTEAL_FRACTION = 0.25;
 
+    /**
+     * PLACEHOLDER (feel, not balance): the deeper drink the M1 chain's finisher earns — a bigger fraction
+     * than {@link #LIFESTEAL_FRACTION}, and it ignores the throttle so the payoff always lands (Nyrrine's
+     * ask: the 4th strike heals a bit more). She tunes the magnitude in her number wave.
+     */
+    private static final double FINISHER_LIFESTEAL_FRACTION = 0.50;
+
     /** The drink is throttled to once per this window — it mends a quarter of a wound, not of every wound. */
     private static final long LIFESTEAL_THROTTLE_MS = 5_000L;
 
@@ -191,8 +199,9 @@ public final class MimicryWeapon implements Weapon {
     private static final double RELEASE_CAP = RESERVOIR_FULL * RELEASE_FRACTION;
 
     /**
-     * Radius of the cut, at an empty pool and at {@link #RESERVOIR_FULL} respectively. One scan, one strike
-     * per body inside it. See {@link #cleaveRadius}.
+     * Radius of the cut: its floor at an empty pool, and the hard ceiling it climbs to — reached at roughly
+     * 750 banked wounds, <em>not</em> at {@link #RESERVOIR_FULL}, where the cut is only ~8.2. One scan, one
+     * strike per body inside it. See {@link #cleaveRadius}.
      *
      * <p>The reach grows well past the point the damage stops — that is the "aoe and slash keep getting
      * bigger" half of the brief, and both halves of it, since one curve now serves the cut and the drawing
@@ -208,6 +217,15 @@ public final class MimicryWeapon implements Weapon {
      */
     private static final double RELEASE_RADIUS_BASE = 5.0;
     private static final double RELEASE_RADIUS_MAX = 16.0;
+
+    /**
+     * The curve {@link #cleaveRadius} grows the reach along — mechanical inputs to the kill radius and the
+     * entity scan, not cosmetics, which is why they live here beside the ceiling they answer to and not in
+     * the "show" block. {@code SLASH_BASE_RADIUS} is the bare reach the {@code sqrt} growth scales from;
+     * {@code SLASH_REF} is the pool at which that growth has doubled it.
+     */
+    private static final double SLASH_BASE_RADIUS = 3.0;
+    private static final double SLASH_REF = 40.0;
 
     /** Below this the pool isn't worth a cast — the wielder keeps it rather than spending nothing. */
     private static final double RELEASE_MIN = 1.0;
@@ -270,21 +288,17 @@ public final class MimicryWeapon implements Weapon {
 
     // ---- tuning: the show ----------------------------------------------------------
     //
-    // This block is where the uncapped half of the weapon lives, and every number in it is a ceiling on
-    // COST rather than on SIZE — that is the trick that makes an unbounded spectacle affordable at ~100
-    // players and ~13 TPS. The rule throughout: the pool scales the arc's SIZE and THICKNESS without limit,
-    // and its POINT COUNT not at all past SLASH_POINTS_MAX. A 153-block cleave and a 12-block one cost the
-    // server the same packets; the big one just spreads them further apart and draws them fatter, which is
-    // exactly where the drama lives anyway.
+    // This block is the cosmetic half of the weapon, and every number in it is a ceiling on COST rather than
+    // on SIZE — the trick that keeps a large spectacle affordable at ~100 players and ~13 TPS. The rule: the
+    // pool scales the arc's THICKNESS and how far its points spread, its POINT COUNT not at all past
+    // SLASH_POINTS_MAX. The biggest cleave and a small one cost the server the same packets; the big one just
+    // spaces them further apart and draws them fatter, which is exactly where the drama lives.
     //
-    // Nothing in this block feeds a damage number or an entity scan. It is safe to make any of it more
-    // absurd; it is not safe to let anything above read from it.
-
-    /** The reach a bare pool has, before {@link #cleaveRadius} grows it. */
-    private static final double SLASH_BASE_RADIUS = 3.0;
-
-    /** The pool at which the downswing has doubled its base reach. Growth is {@code sqrt} and never stops. */
-    private static final double SLASH_REF = 40.0;
+    // Everything below is inert: no number here feeds a damage figure or an entity scan, so any of it is safe
+    // to make more absurd. The two constants that DO feed the kill radius — SLASH_BASE_RADIUS and SLASH_REF —
+    // deliberately live up in the reservoir block beside the RELEASE_RADIUS_* ceiling they answer to, NOT
+    // here, so that bumping a show number can never silently widen what the blade actually cuts. It could
+    // once: they used to live in this block, under this very comment, and that is how the two radii drifted.
 
     /** Starting blade width — already thicker than Arayashiki's 1.1-1.6, which is the brief. */
     private static final float SLASH_THICK_BASE = 2.0f;
@@ -437,6 +451,8 @@ public final class MimicryWeapon implements Weapon {
         private int beat;
         private long lastMs;
         private long lastResistMs;
+        /** True when the last drawn swing was the finisher — the next landing hit drinks deeper, once. */
+        private boolean finisherPrimed;
     }
 
     /**
@@ -490,7 +506,15 @@ public final class MimicryWeapon implements Weapon {
 
         hitSplashFx(attacker, victim);   // the cut is felt where it lands, not only drawn in the air
         mark(aid, victim, now);
-        drink(attacker, dealt, now);
+
+        // The finisher's landing blow drinks deeper, once. A normal swing takes the ordinary throttled sip.
+        Combo combo = combos.get(aid);
+        if (combo != null && combo.finisherPrimed) {
+            combo.finisherPrimed = false;
+            drink(attacker, dealt, now, FINISHER_LIFESTEAL_FRACTION, true);
+        } else {
+            drink(attacker, dealt, now);
+        }
     }
 
     /**
@@ -565,20 +589,31 @@ public final class MimicryWeapon implements Weapon {
     }
 
     /**
-     * Is That the Red Mist?!? — mend the wielder for a quarter of the wound, at most once per
+     * Lifesteal — mend the wielder for a quarter of the wound, at most once per
      * {@link #LIFESTEAL_THROTTLE_MS}, and never past their own max health.
      */
     private void drink(Player attacker, double dealt, long now) {
+        drink(attacker, dealt, now, LIFESTEAL_FRACTION, false);
+    }
+
+    /**
+     * The drink, with the fraction and throttle spelled out. The finisher's deeper draw ({@link
+     * #FINISHER_LIFESTEAL_FRACTION}) passes {@code bypassThrottle} so its payoff always lands; it still
+     * stamps the throttle, so the swings around it cannot also drink.
+     */
+    private void drink(Player attacker, double dealt, long now, double fraction, boolean bypassThrottle) {
         UUID aid = attacker.getUniqueId();
-        Long last = lastDrinkAt.get(aid);
-        if (last != null && now - last < LIFESTEAL_THROTTLE_MS) return;
+        if (!bypassThrottle) {
+            Long last = lastDrinkAt.get(aid);
+            if (last != null && now - last < LIFESTEAL_THROTTLE_MS) return;
+        }
 
         AttributeInstance maxAttr = attacker.getAttribute(Attribute.MAX_HEALTH);
         double max = maxAttr != null ? maxAttr.getValue() : 20.0;
         double health = attacker.getHealth();
         if (health >= max) return;                       // already whole — don't burn the throttle on nothing
 
-        double healed = Math.min(max, health + dealt * LIFESTEAL_FRACTION);
+        double healed = Math.min(max, health + dealt * fraction);
         if (healed <= health) return;
         attacker.setHealth(healed);
         lastDrinkAt.put(aid, now);
@@ -632,6 +667,7 @@ public final class MimicryWeapon implements Weapon {
         c.lastMs = now;
         int beat = c.beat;
         c.beat = (c.beat + 1) % 4;
+        c.finisherPrimed = beat == 3; // the finisher swing earns the deeper drink on the blow it lands
 
         m1Fx(player, beat);
     }
@@ -643,10 +679,12 @@ public final class MimicryWeapon implements Weapon {
      * of the pooled total, capped at {@link #RELEASE_CAP}. One {@code getNearbyEntities} scan for the whole
      * cast, one blow per body.
      *
-     * <p>Both mechanical numbers are read here and both saturate at {@link #RESERVOIR_FULL}: past that, a
-     * bigger pool buys a bigger <em>picture</em> ({@link #nothingThereFx}, which reads the raw amount and has
-     * no ceiling) and nothing else. This is the only method where the two halves are visible side by side —
-     * {@code perTarget} and {@code radius} are clamped, {@code amount} is handed to the FX untouched.
+     * <p>Both mechanical numbers are read here, and they saturate at different pools: the damage
+     * ({@code perTarget}) caps at {@link #RELEASE_CAP} once the pool reaches {@link #RESERVOIR_FULL}, while the
+     * reach ({@code radius}) keeps climbing well past that to its own ceiling ({@link #RELEASE_RADIUS_MAX},
+     * ~750 banked). Past both, a bigger pool buys only a bigger <em>picture</em> ({@link #nothingThereFx},
+     * which reads the raw amount and has no ceiling). This is the only method where all three are visible side
+     * by side — {@code perTarget} and {@code radius} are clamped, {@code amount} is handed to the FX untouched.
      *
      * <p>The pool is spent whether or not anything was standing there — the weapon gives it back either way,
      * and the wielder does not get to bank a fortune and cast it repeatedly by finding an empty field.
@@ -920,9 +958,9 @@ public final class MimicryWeapon implements Weapon {
      * only {@link #RESERVOIR_DECAY_MS} without a fresh wound empties it.
      *
      * <p><b>The bar is scaled to {@link #RESERVOIR_FULL} rather than to some larger display number, and that
-     * is the whole tell.</b> It saturates exactly when the damage and the reach do, so a full bar reads "this
-     * is as hard as it will ever hit" — while the honest, unclamped count beside it goes on climbing to say
-     * the blade will nonetheless keep getting bigger. The gauge teaches the split; no tooltip has to.
+     * is the whole tell.</b> It saturates exactly when the damage does, so a full bar reads "this is as hard
+     * as it will ever hit" — while the honest, unclamped count beside it goes on climbing to say the reach
+     * will nonetheless keep growing past it. The gauge teaches the split; no tooltip has to.
      */
     @Override
     public boolean onTick(Player player, long tick) {
@@ -1317,9 +1355,10 @@ public final class MimicryWeapon implements Weapon {
      *
      * <p><b>This is the uncapped half of the weapon, and it is uncapped precisely because it is inert.</b>
      * Nothing in here scans, spawns, or damages; it is one arc and one impact. The {@code amount} it is
-     * handed is the raw pool, never the clamped release, so the picture goes on growing long after
-     * {@link #RELEASE_CAP} and {@link #RELEASE_RADIUS_MAX} have stopped moving — which is the entire ask.
-     * The cost of that is bounded by {@link #slashPoints} no matter how absurd the number gets.
+     * handed is the raw pool, never the clamped release, so the picture goes on growing after
+     * {@link #RELEASE_CAP} has stopped the damage — its reach climbing on to {@link #RELEASE_RADIUS_MAX} and
+     * its blade drawing ever thicker — which is the entire ask. The cost of that is bounded by
+     * {@link #slashPoints} no matter how absurd the number gets.
      *
      * <p>The blow itself has already landed by the time the blade finishes falling. That is deliberate: the
      * alternative is holding the damage for {@link #DOWNSWING_REVEAL} ticks, which means re-validating every
@@ -1531,18 +1570,17 @@ public final class MimicryWeapon implements Weapon {
                     "human."
             ),
             List.of(
-                    new EgoLore.Ability("[Passive] Is That the Red Mist?!?",
-                            "The Red Mist keeps you alive: heal",
-                            "25% of the damage you deal, once",
-                            "every 5s, and while the blade is",
-                            "held your max health doubles to",
-                            "40 — two heart-rows, gone the",
-                            "moment you sheathe it."),
+                    new EgoLore.Ability("[Passive] While Held",
+                            "Your max health doubles to 40, two",
+                            "heart-rows that fall away the moment",
+                            "you sheathe. Landing a hit heals you",
+                            "for 25% of the damage dealt, once",
+                            "every 5s; the finisher heals more."),
                     new EgoLore.Ability("[Passive] Hello.",
                             "Damage dealt TO you pools in the",
                             "blade, and the pool itself has no",
                             "ceiling. The gauge reads full at",
-                            "120 — the point past which it can",
+                            "120, the point past which it can",
                             "buy no more. The pool empties",
                             "after 5 minutes without a wound."),
                     new EgoLore.Ability("[Shift + Right-click] Nothing There",
@@ -1560,6 +1598,6 @@ public final class MimicryWeapon implements Weapon {
                             "finish it: player <25%, mob <50%,",
                             "boss <10% HP. Free if it lands.",
                             "Otherwise rush to its face and",
-                            "strike hard — 45 second cooldown.")
+                            "strike hard, then a 45 second cooldown.")
             ));
 }

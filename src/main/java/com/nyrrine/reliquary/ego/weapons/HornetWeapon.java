@@ -268,15 +268,6 @@ public final class HornetWeapon implements Weapon {
     // ---- input: left-click fires the open chamber ------------------------------------
 
     /**
-     * Left-click (arm swing) — <b>fire</b>. One swing is one shot, gated by the open chamber's cadence
-     * ({@value #RIFLE_COOLDOWN_MS}ms rifle / {@value #SHOTGUN_COOLDOWN_MS}ms shotgun).
-     *
-     * <p>There is no hold-to-spray window here, unlike the faster E.G.O guns: Hornet's cadence is a whole
-     * second at its quickest, and Bukkit does not reliably repeat ARM_SWING while left-click is held in air.
-     * A swing-refreshed window long enough to bridge a 1s gap would keep firing after the wielder had already
-     * let go — a phantom extra shot out of an unforgiving magazine. One click, one round.
-     */
-    /**
      * A gun does not punch. Left-clicking a body at arm's length used to do both — the vanilla melee blow
      * landed <em>and</em> the trigger pulled — and the melee won, because it stamped hurt-immunity on the
      * victim a fraction before the round arrived, so the shot was swallowed whole. From the wielder's side
@@ -298,6 +289,15 @@ public final class HornetWeapon implements Weapon {
         event.setCancelled(true);
     }
 
+    /**
+     * Left-click (arm swing) — <b>fire</b>. One swing is one shot, gated by the open chamber's cadence
+     * ({@value #RIFLE_COOLDOWN_MS}ms rifle / {@value #SHOTGUN_COOLDOWN_MS}ms shotgun).
+     *
+     * <p>There is no hold-to-spray window here, unlike the faster E.G.O guns: Hornet's cadence is a whole
+     * second at its quickest, and Bukkit does not reliably repeat ARM_SWING while left-click is held in air.
+     * A swing-refreshed window long enough to bridge a 1s gap would keep firing after the wielder had already
+     * let go — a phantom extra shot out of an unforgiving magazine. One click, one round.
+     */
     @Override
     public void onSwing(Player player) {
         if (!matches(player.getInventory().getItemInMainHand())) return;
@@ -859,8 +859,9 @@ public final class HornetWeapon implements Weapon {
                             "Each keeps its own magazine."),
                     new EgoLore.Ability("[Left-Click] Hornet [Rifle]",
                             "One spore round. 1s between shots."),
-                    new EgoLore.Ability("[Left-Click V2] Hornet [Shotgun]",
-                            "A buckshot cone. 3s between shots.")
+                    new EgoLore.Ability("[Left-Click] Hornet [Shotgun]",
+                            "A buckshot cone; each pellet",
+                            "pierces 3 bodies. 3s between shots.")
             ));
 
     // ---- lifecycle -----------------------------------------------------------------------

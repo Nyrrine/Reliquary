@@ -128,12 +128,6 @@ public final class FragmentsFromSomewhereWeapon implements Weapon {
     /** Fall-damage waiver after a lunge or a return — neither should be paid for on landing. */
     private static final long FALL_GRACE_MS = 1_500L;
 
-    /** Vertical offsets tried when the recorded spot no longer holds a body, nearest first. */
-    private static final double[] RETURN_PROBE_Y = {0.0, 1.0, -1.0, 2.0};
-
-    /** Horizontal nudges tried at each probe height — a tight lattice; a shuffle, never a relocation. */
-    private static final double[][] RETURN_PROBE_XZ = {{0.0, 0.0}, {0.6, 0.0}, {-0.6, 0.0}, {0.0, 0.6}, {0.0, -0.6}};
-
     // ---- tuning: the echo ---------------------------------------------------------
 
     /** Scoreboard tag on every echo display — the handle the disable-time orphan sweep grabs. */
@@ -232,7 +226,8 @@ public final class FragmentsFromSomewhereWeapon implements Weapon {
             List.of(
                     new EgoLore.Ability("[Right Click] Universal",
                             "Spear Lunge. Faster lunge cooldown.",
-                            "Marks where you stood for 6s."),
+                            "Marks where you stood for 6s —",
+                            "only when Refraction is ready."),
                     new EgoLore.Ability("[Shift + Right-click] Refraction",
                             "Only within 6s of a lunge: snap back",
                             "to the marked spot. 7s cooldown.")
@@ -370,7 +365,7 @@ public final class FragmentsFromSomewhereWeapon implements Weapon {
             return;
         }
 
-        Location dest = safeReturn(anchor.where());
+        Location dest = Blink.near(anchor.where());
         if (dest == null) {
             player.sendActionBar(EgoHud.status("The echo is buried…", FAINT));
             denyFx(player);
@@ -390,20 +385,6 @@ public final class FragmentsFromSomewhereWeapon implements Weapon {
         arriveFx(dest.clone().add(0, 1.0, 0));
 
         player.sendActionBar(EgoHud.cooldown("Refraction", REFRACTION_COOLDOWN_MS, FAINT));
-    }
-
-    /**
-     * The recorded spot if it will still hold a body, else the nearest spot in a tight lattice around it
-     * that will, else null. Six seconds is long enough for the world to close over a footprint.
-     */
-    private static Location safeReturn(Location anchor) {
-        for (double dy : RETURN_PROBE_Y) {
-            for (double[] off : RETURN_PROBE_XZ) {
-                Location cand = anchor.clone().add(off[0], dy, off[1]);
-                if (Blink.canStand(cand)) return cand;
-            }
-        }
-        return null;
     }
 
 

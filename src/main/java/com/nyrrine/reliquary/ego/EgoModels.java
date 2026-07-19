@@ -90,6 +90,8 @@ public final class EgoModels {
     public static final Model HARVEST     = melee(Material.NETHERITE_HOE, "harvest", 4.0, 1.0);
     public static final Model LIFE_FOR_A_DAREDEVIL = melee(Material.NETHERITE_SWORD, "life_for_a_daredevil", 7.0, 1.6);
     public static final Model LAETITIA    = ranged(Material.CROSSBOW, "laetitia");
+    public static final Model GREEN_STEM  = melee(Material.IRON_SWORD, "green_stem", 6.0, 1.6);
+    public static final Model SCREAMING_WEDGE = ranged(Material.CROSSBOW, "screaming_wedge");
 
     // ---- WAW ----
     public static final Model HARMONY     = ranged(Material.CROSSBOW, "harmony");
@@ -105,8 +107,6 @@ public final class EgoModels {
     public static final Model SOLEMN_LAMENT = ranged(Material.CROSSBOW, "solemn_lament");
     public static final Model LOVE_AND_HATE = ranged(Material.BREEZE_ROD, "love_and_hate");
     public static final Model SWORD_OF_TEARS = melee(Material.IRON_SWORD, "sword_of_tears", 7.0, 1.6);
-    public static final Model GREEN_STEM  = melee(Material.IRON_SWORD, "green_stem", 6.0, 1.6);
-    public static final Model SCREAMING_WEDGE = ranged(Material.CROSSBOW, "screaming_wedge");
     public static final Model HEAVEN      = melee(Material.NETHERITE_SWORD, "heaven", 7.0, 1.6);
 
     // ---- ALEPH ----

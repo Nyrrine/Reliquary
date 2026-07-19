@@ -257,9 +257,10 @@ public final class GazeWeapon implements Weapon {
     // ---- [Left Click] Constant Surveillance -----------------------------------------
 
     /**
-     * A melee hit landed. The vanilla swing is hit one — we only scale it by the wielder's Delight (the
-     * base 3.5 is intentionally half a sword; see the class docs) — and hit two is scheduled as an
-     * identical scripted strike a couple of ticks behind it. The attack then feeds the watcher one stack.
+     * A melee hit landed. The vanilla swing is hit one — we only scale it by the wielder's Delight (the base
+     * is the E.G.O's own stamped damage, deliberately below a sword's; see the class docs) — and hit two is
+     * scheduled a couple of ticks behind it as a scripted {@link #BARE_CUT} strike: the blade's own damage,
+     * carrying no enchantment, <em>not</em> a copy of hit one. The attack then feeds the watcher one stack.
      *
      * <p>The multiplier is snapshotted <em>before</em> this attack's own stack lands, so both halves of a
      * swing hit for the same number and a stack earned here pays out from the next attack on. Our own
@@ -559,8 +560,9 @@ public final class GazeWeapon implements Weapon {
                             "per stack, up to 20). Decays if you go",
                             "3 seconds without landing a hit."),
                     new EgoLore.Ability("[Left Click] Constant Surveillance",
-                            "Attacks hit 2 times. Each attack",
-                            "contributes a stack of Delight."),
+                            "Attacks hit 2 times — the second is",
+                            "the blade's bare cut, unenchanted.",
+                            "Each attack stacks Delight."),
                     new EgoLore.Ability("[Right Click] Fixed Stare",
                             "For 5 seconds, your Delight cannot",
                             "decay and builds twice as fast.",

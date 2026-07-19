@@ -87,6 +87,10 @@ public final class WeaponSignatures {
     // enough pride against the gloom to graze the Pride✕Gloom bridge. Half a step past a calm extraction.
     public static final WeaponSpec FROST_SPLINTER = reg("frost_splinter", "Frost Splinter", HE,
             SinProfile.builder().add(GLOOM, 48).add(ENVY, 24).add(SLOTH, 16).add(PRIDE, 12).build());
+    public static final WeaponSpec GREEN_STEM = reg("green_stem", "Green Stem", HE,
+            SinProfile.builder().add(GLUTTONY, 38).add(ENVY, 34).add(LUST, 18).add(SLOTH, 10).build());
+    public static final WeaponSpec SCREAMING_WEDGE = reg("screaming_wedge", "Screaming Wedge", HE,
+            SinProfile.builder().add(GLOOM, 48).add(WRATH, 26).add(SLOTH, 18).add(ENVY, 8).build());
 
     // ---- WAW ----
     public static final WeaponSpec LAMP = reg("lamp", "Lamp", WAW,
@@ -99,10 +103,6 @@ public final class WeaponSignatures {
             SinProfile.builder().add(LUST, 36).add(ENVY, 34).add(WRATH, 12).add(GLOOM, 10).add(PRIDE, 8).build());
     public static final WeaponSpec SWORD_OF_TEARS = reg("sword_of_tears", "Sword of Sharpened Tears", WAW,
             SinProfile.builder().add(GLOOM, 42).add(PRIDE, 24).add(ENVY, 16).add(SLOTH, 10).add(WRATH, 8).build());
-    public static final WeaponSpec GREEN_STEM = reg("green_stem", "Green Stem", HE,
-            SinProfile.builder().add(GLUTTONY, 38).add(ENVY, 34).add(LUST, 18).add(SLOTH, 10).build());
-    public static final WeaponSpec SCREAMING_WEDGE = reg("screaming_wedge", "Screaming Wedge", HE,
-            SinProfile.builder().add(GLOOM, 48).add(WRATH, 26).add(SLOTH, 18).add(ENVY, 8).build());
     public static final WeaponSpec HEAVEN = reg("heaven", "Heaven", WAW,
             SinProfile.builder().add(PRIDE, 62).add(WRATH, 16).add(GLUTTONY, 8).add(LUST, 8).add(SLOTH, 6).build());
     // Art is a devil's gift, born from despair and suffering: the artist's pride set against the despair that
