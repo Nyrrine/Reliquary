@@ -39,8 +39,9 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <ul>
  *   <li><b>Right-click</b> — fire a wobbling maroon toy shot (a lightweight {@link Bolt} runnable, not an
- *       Arrow). It weaves along its flight, deals {@value #DAMAGE} on contact / block-hit / after
- *       {@value #MAX_LIFETIME} ticks. If the caster has a live, nearby playmate it gently homes onto
+ *       Arrow). It weaves along its flight, dealing {@value #DAMAGE} on contact only — a block-hit or reaching
+ *       {@value #MAX_LIFETIME} ticks ends it harmlessly, in particles and sound. If the caster has a live,
+ *       nearby playmate it gently homes onto
  *       them; otherwise it flies nearly straight. A raised shield facing the shot blocks it entirely.
  *       Each shot wears the toy a little (durability). Fire cooldown {@value #COOLDOWN_MS} ms.</li>
  *   <li><b>Sneak + right-click</b> — mark a playmate: the living body under the crosshair (or the

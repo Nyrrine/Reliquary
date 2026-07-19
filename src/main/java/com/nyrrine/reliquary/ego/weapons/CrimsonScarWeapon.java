@@ -44,7 +44,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * forms and <b>SHIFT + right-click</b> snaps between them:
  *
  * <ul>
- *   <li><b>Melee form</b> — a woodsman's axe ({@link EgoModels#CRIMSON_SCAR}, NETHERITE_AXE 7.0/0.9). The
+ *   <li><b>Melee form</b> — a woodsman's axe ({@link EgoModels#CRIMSON_SCAR}, NETHERITE_AXE 7.0/1.2). The
  *       vanilla chop is left uncancelled; on-hit it squelches wetly and, below half HP, goes
  *       <b>blood-drunk</b>: the chop hits harder and splashes everything near the wielder (allies and
  *       other players included — the frenzy is indiscriminate, and that is the drawback).</li>

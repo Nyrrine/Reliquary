@@ -95,7 +95,7 @@ public final class GreenStemWeapon implements Weapon {
 
     /** Anything at or below this fraction of its max health is a candidate for the thorn. */
     private static final double EXECUTE_FRACTION = 0.05;
-    private static final int EXECUTE_FRACTION_PCT = 5; // for docs / the action-bar cue
+    private static final int EXECUTE_FRACTION_PCT = 5; // for the {@value} javadoc references only
 
     /** How near the wielder a low body must be for the thorn to reach it. */
     private static final double EXECUTE_RADIUS = 5.0;

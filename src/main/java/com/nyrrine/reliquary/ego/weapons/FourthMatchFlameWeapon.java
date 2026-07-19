@@ -62,16 +62,20 @@ import java.util.concurrent.ThreadLocalRandom;
  * durability ({@link EgoDurability#wearMainHand(Player)}); FLINT_AND_STEEL's 64 points last a long time at
  * this cadence.
  *
- * <p>All state is a single in-memory UUID-&gt;last-shot-time map, cleared on quit. No world edits (no fire
- * blocks placed), no per-tick work for non-wielders — one bounded {@code getNearbyEntities} scan plus a
- * brief particle draw. The wielder is skipped in the scan, so their own fire never touches them.
+ * <p>State is two in-memory collections: a UUID-&gt;last-shot-time map that gates the cooldown (cleared on
+ * quit) and a set of the block-ember flights currently in the air ({@link #onDisable} reaps any still live
+ * on reload). No world edits — the right-click is cancelled in either hand, so the FLINT_AND_STEEL fallback
+ * never lights a fire. The per-shot scan is one bounded {@code getNearbyEntities} plus a brief particle draw,
+ * and each thrown ember runs a light per-tick teleport-and-transform for the length of its flight and then
+ * cancels itself; a player not holding the weapon pays nothing per tick. The wielder is skipped in the scan,
+ * so their own fire never touches them.
  */
 public final class FourthMatchFlameWeapon implements Weapon {
 
     private final Reliquary plugin;
     private final NamespacedKey key;
 
-    /** Wielder -> epoch-millis of their last shot. The only state this weapon keeps. */
+    /** Wielder -> epoch-millis of their last shot; gates the cooldown. Cleared on quit. */
     private final Map<UUID, Long> lastShot = new HashMap<>();
 
     /**

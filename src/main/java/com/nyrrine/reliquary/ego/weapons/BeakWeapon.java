@@ -295,7 +295,7 @@ public final class BeakWeapon implements Weapon {
 
     // ---- presentation --------------------------------------------------------------
 
-    /** A quick chirpy pew, pitched high and jittered — one per trigger. */
+    /** A quick chirpy pew, pitched high and jittered — one per shot, so a Multishot burst chirps once per peck. */
     private void muzzleSound(Player player) {
         ThreadLocalRandom rng = ThreadLocalRandom.current();
         World world = player.getWorld();
