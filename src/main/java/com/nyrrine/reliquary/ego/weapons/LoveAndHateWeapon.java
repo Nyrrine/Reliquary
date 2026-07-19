@@ -112,7 +112,7 @@ public final class LoveAndHateWeapon implements Weapon {
     private static final int    LASER_DMG_PERIOD = 8;    // tick-damage cadence (respects i-frames)
     private static final double LASER_DAMAGE   = 4.0;    // per pulse, no knockback
     private static final int    LASER_MAX_TARGETS = 12;
-    private static final int    CARVE_MAX      = 600;    // hard cap on temp-carved blocks per cast
+    private static final int    CARVE_MAX      = 600;    // cap on concurrently-open temp-carved blocks; restores free slots as they expire
     private static final long   CARVE_TTL_MS   = 3000L;  // a carved block pops back ~3s after the beam passes
 
     // ---- palette ------------------------------------------------------------------

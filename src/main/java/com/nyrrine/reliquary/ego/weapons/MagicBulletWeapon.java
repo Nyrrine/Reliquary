@@ -46,7 +46,7 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Magic Bullet — "Der Freischütz" (Lobotomy Corp E.G.O, WAW).
  *
- * <p>A long blue marksman's musket whose whole theme is <b>a huge black arcane magic circle inscribed in
+ * <p>A long blue marksman's musket whose whole theme is <b>a huge blue arcane magic circle inscribed in
  * mid-air</b>, its rim lit with light-blue glow, summoned down the aim as the shot charges. It does not
  * fire on the pull — it fires on the <em>vow</em>. Each left-click begins a slow, deliberate charge; the
  * sigil is <i>hand-drawn</i> across the charge (an arc sweeps closed, spokes fill in, runes settle last)
@@ -106,7 +106,6 @@ public final class MagicBulletWeapon implements Weapon {
     // received — the note was right about the intent and the code simply never got it. Landed 2026-07-17
     // on Nyrrine's ruling: ten for the normal shots, and the seventh stays devastating (ULT_DAMAGE).
     private static final double SHOT_DAMAGE    = 10.0;  // per shot — slow, charged, never-miss, self-costing
-    private static final int    MAX_BULLETS    = 7;     // meter width (the 7th slot = the Seventh Bullet)
     private static final int    NORMAL_SHOTS   = 6;     // normal shots allowed before the ult is forced
     private static final int    CYCLE          = 6;     // magic-circle cycle length
     private static final long   DOWNTIME_MS    = 15_000L; // post-ult lockout before the counter resets
@@ -888,7 +887,7 @@ public final class MagicBulletWeapon implements Weapon {
                 state.downtimeUntil = System.currentTimeMillis() + DOWNTIME_MS; // then the counter resets
             }
             cancel();
-            // Carved blocks restore on their own ~5s timers (they should linger visibly for a beat).
+            // Carved blocks restore on their own ~12.5s timers (they should linger visibly for a beat).
         }
 
         /**
@@ -911,7 +910,7 @@ public final class MagicBulletWeapon implements Weapon {
         }
     }
 
-    /** Restore a temp-carved block after ~5s, unless a shutdown flush already handled it. */
+    /** Restore a temp-carved block after ~12.5s, unless a shutdown flush already handled it. */
     private void scheduleUltRestore(Location keyLoc, BlockState saved) {
         long delay = ULT_RESTORE_TICKS + ThreadLocalRandom.current().nextInt(30);
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> {

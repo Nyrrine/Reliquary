@@ -66,8 +66,9 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <p>State is a single UUID-&gt;magazine map cleared on quit. Nothing is ever placed in the off-hand: the
  * gun fires regardless of what the wielder holds off-hand. No world edits from firing: each volley is a
- * handful of raytraces plus short, capped particle bursts. The only world entity it spawns is the meme
- * "True…" image of the admin variant, which is non-persistent, tracked, and swept on quit/disable.
+ * handful of raytraces plus short, capped particle bursts. The world entities it spawns are short-lived
+ * flying images down the aim — small butterfly "fly" images for the base weapon, the big "True…" photos
+ * for the admin variant — each non-persistent, tracked, and swept on quit/disable.
  */
 public final class SolemnLamentWeapon implements Weapon {
 
@@ -328,9 +329,9 @@ public final class SolemnLamentWeapon implements Weapon {
      * muzzle-position jitter). Each is a PAPER display item mapped by the pack ({@code cmd}) to the flat
      * model, scaled to {@code scale}, full-bright, non-persistent, tagged {@link #TRUE_MEME_TAG}, and tracked
      * in {@link #memeDisplays}. A per-image self-cancelling runnable teleports it forward {@value #MEME_SPEED}
-     * blocks/tick and removes it once it has flown ~{@link #RANGE} blocks or hit the {@value #MEME_LIFE_TICKS}
-     * -tick lifetime cap, whichever first — untracking it on removal so the set can never grow unbounded, and
-     * it can never leak on quit/disable.
+     * blocks/tick and removes it at the {@value #MEME_LIFE_TICKS}-tick lifetime cap — ~14 blocks at this
+     * speed, always short of the {@link #RANGE}-block cap, which stands as an unreachable backstop —
+     * untracking it on removal so the set can never grow unbounded, and it can never leak on quit/disable.
      *
      * <p>General over BOTH image types: the base Solemn Lament calls this with the small {@link #FLY_CMD}
      * butterfly image, the True admin variant with the big {@link #TRUE_CMD} "True…" photo. The only per-type
@@ -367,7 +368,7 @@ public final class SolemnLamentWeapon implements Weapon {
                 d.setBrightness(new Display.Brightness(15, 15));    // full-bright, ignores world light
                 d.setTransformation(new Transformation(
                         new Vector3f(), new Quaternionf(),
-                        new Vector3f(scale, scale, scale),          // per-type size (fly 0.8, True 1.25)
+                        new Vector3f(scale, scale, scale),          // per-type size (fly 0.27, True 1.25)
                         new Quaternionf()));
                 d.setPersistent(false);                             // a crash can never leave it on disk
                 d.addScoreboardTag(TRUE_MEME_TAG);
@@ -550,7 +551,7 @@ public final class SolemnLamentWeapon implements Weapon {
         }
     }
 
-    /** {@code [L] 24/24   [R] 24/24} — funereal white, the empty side flushing red. */
+    /** {@code [L] 12/12   [R] 12/12} — funereal white, the empty side flushing red. */
     private Component dualReadout(Mag mag) {
         return sidePart("L", mag.left)
                 .append(plain("   ", FRAME))
