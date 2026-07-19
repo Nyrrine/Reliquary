@@ -45,8 +45,9 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <p>The stasis is driven by a self-cancelling {@link StasisTask}: each tick it zeroes the target's
  * velocity (killing walk, sprint <b>and</b> jump — nothing survives a reset velocity) and re-applies a
- * crushing Slowness, then paints the eye. For mobs it also cuts {@link Mob#setAI(boolean) AI} for the
- * duration and restores it on completion — guarded so the AI is restored even if the target dies mid-hold.
+ * crushing Slowness, then paints the eye. For mobs it suspends {@link Mob#setAI(boolean) AI} for the
+ * duration through the framework's {@code suspendAi}/{@code restoreAi}, which always undoes the hold — on
+ * completion, on death, and on a chunk unload or plugin disable, so a mob can never be left saved mindless.
  * Players cannot be fully frozen server-side without movement packets, so for players the stasis is a
  * best-effort root: per-tick velocity zero + Slowness 6 + the same heavy VFX. A determined player can
  * still nudge themselves, but only barely.
@@ -163,7 +164,8 @@ public final class HeavenWeapon implements Weapon {
     /**
      * The per-tick hold. Zeroes velocity (killing walk/sprint/jump alike), re-applies crushing Slowness,
      * and paints the crimson-and-eye VFX. Self-cancels after {@link #STASIS_TICKS} ticks or once the
-     * target is gone, restoring a mob's AI on the way out — guarded so it restores even if the target died.
+     * target is gone, handing a mob's AI back through the framework's {@code restoreAi} — which restores it
+     * whether the target died, unloaded, or the plugin disabled.
      */
     private final class StasisTask extends BukkitRunnable {
         private final LivingEntity target;
