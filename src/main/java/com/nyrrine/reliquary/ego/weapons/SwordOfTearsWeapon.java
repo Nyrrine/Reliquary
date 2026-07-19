@@ -652,8 +652,7 @@ public final class SwordOfTearsWeapon implements Weapon {
             if (!alive || victim.isDead() || !victim.isValid()) return false;
             int i = firstReady();
             if (i < 0) return false;
-            launchDart(owner, i, victim, false); // strike and come home
-            return true;
+            return launchDart(owner, i, victim, false); // strike and come home — false if the blade had already gone
         }
 
         /** Send one ready blade to duel {@code mark} until it falls or is called back. */
@@ -661,18 +660,20 @@ public final class SwordOfTearsWeapon implements Weapon {
             if (!alive || mark.isDead() || !mark.isValid()) return false;
             int i = firstReady();
             if (i < 0) return false;
-            launchDart(owner, i, mark, true); // strike and STAY
-            return true;
+            return launchDart(owner, i, mark, true); // strike and STAY — false if the blade had already gone
         }
 
         /**
          * A blade leaves the fan for {@code mark}: the slow tip-leading glide-in, then the fast stab. What
          * happens after the stab is the whole difference between the kit's two orders — {@code stay} hands the
          * blade to the duel loop; otherwise it glides home. One flight, two endings.
+         *
+         * @return true if a blade actually left the fan; false if the chosen slot's display was already gone,
+         *         so the caller reports (and charges) nothing for a sortie that never launched.
          */
-        private void launchDart(Player owner, final int i, final LivingEntity mark, final boolean stay) {
+        private boolean launchDart(Player owner, final int i, final LivingEntity mark, final boolean stay) {
             final ItemDisplay b = blades[i];
-            if (b == null || !b.isValid()) return;
+            if (b == null || !b.isValid()) return false;
             state[i] = BladeState.FLIGHT;
             b.setTeleportDuration(3); // smooth the slow glide-in
             owner.getWorld().playSound(owner.getLocation(), Sound.ITEM_TRIDENT_THROW, 0.6f, stay ? 1.5f : 1.7f);
@@ -739,6 +740,7 @@ public final class SwordOfTearsWeapon implements Weapon {
                     blade.teleport(next);
                 }
             }.runTaskTimer(plugin, 0L, 1L);
+            return true;
         }
 
         /**
