@@ -150,14 +150,12 @@ public final class HeavenWeapon implements Weapon {
         if (!stunned.add(id)) return; // already held — don't stack tasks or double-touch the AI flag
 
         // Cut AI for the duration so mobs don't path/attack while pinned. Restored on task completion.
-        boolean hadAi = false;
         if (victim instanceof Mob mob) {
-            hadAi = mob.hasAI();
-            mob.setAI(false);
+            plugin.weapons().suspendAi(mob);
         }
 
         openSfx(victim.getLocation());
-        StasisTask task = new StasisTask(victim, hadAi);
+        StasisTask task = new StasisTask(victim);
         activeStasis.add(task); // tracked so onDisable can restore a frozen mob's AI on reload
         task.runTaskTimer(plugin, 0L, 1L);
     }
@@ -169,12 +167,10 @@ public final class HeavenWeapon implements Weapon {
      */
     private final class StasisTask extends BukkitRunnable {
         private final LivingEntity target;
-        private final boolean restoreAi;
         private int ticks = 0;
 
-        StasisTask(LivingEntity target, boolean restoreAi) {
+        StasisTask(LivingEntity target) {
             this.target = target;
-            this.restoreAi = restoreAi;
         }
 
         @Override
@@ -194,8 +190,8 @@ public final class HeavenWeapon implements Weapon {
 
         private void finish() {
             stunned.remove(target.getUniqueId());
-            if (restoreAi && target instanceof Mob mob && target.isValid()) {
-                mob.setAI(true); // guarded: only if the mob is still around to restore
+            if (target instanceof Mob mob) {
+                plugin.weapons().restoreAi(mob);
             }
             activeStasis.remove(this);
             cancel();
@@ -203,8 +199,8 @@ public final class HeavenWeapon implements Weapon {
 
         /** Disable-time reap: restore a still-frozen mob's AI and cancel; the caller clears the tracking set. */
         void shutdown() {
-            if (restoreAi && target instanceof Mob mob && target.isValid()) {
-                mob.setAI(true);
+            if (target instanceof Mob mob) {
+                plugin.weapons().restoreAi(mob);
             }
             cancel();
         }
