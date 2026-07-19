@@ -932,7 +932,7 @@ public final class MimicryWeapon implements Weapon {
         Long readyAt = onrushReadyAt.get(id);
         Component onrush = (readyAt != null && now < readyAt)
                 ? EgoHud.cooldown("Onrush", readyAt - now, RUST)     // whole seconds, never milliseconds
-                : EgoHud.ready("Onrush", MIST);
+                : EgoHud.ready("Onrush", BONE);
 
         Component label = plain("Hello.  " + (long) Math.round(amount))
                 .append(plain("  ")).append(onrush);
@@ -1481,9 +1481,9 @@ public final class MimicryWeapon implements Weapon {
 
     // ---- lore --------------------------------------------------------------------------
 
-    /** The Red Mist — bright and readable, nothing light about it (Nyrrine §1.2: red, not light, throughout). */
-    private static final TextColor MIST = TextColor.color(0xE0454E);
-    /** Dried blood — the darker red underneath it. */
+    /** Bone-white — the shape the thing wears. The UI text stays light; only the VFX are red (Nyrrine: vfx only). */
+    private static final TextColor BONE = TextColor.color(0xD6D2C8);
+    /** Dried blood — what is underneath it. */
     private static final TextColor RUST = TextColor.color(0x8E2B27);
 
     // Mimicry cuts in deep red end to end — no bone, no pale, nothing light anywhere in a slash (Nyrrine
@@ -1502,13 +1502,13 @@ public final class MimicryWeapon implements Weapon {
 
     /** A small non-italic action-bar fragment in the blade's bone tone. */
     private static Component plain(String text) {
-        return Component.text(text).color(MIST).decoration(TextDecoration.ITALIC, false);
+        return Component.text(text).color(BONE).decoration(TextDecoration.ITALIC, false);
     }
 
     private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
             "Mimicry",
             "Nothing There",
-            MIST,
+            BONE,
             RUST,
             List.of(
                     "The yearning to imitate the human",
