@@ -511,7 +511,7 @@ public final class LampWeapon implements Weapon {
                             "You, nearby players and tamed pets",
                             "within 5 blocks are kept under",
                             "Resistance I. Burns in either hand.",
-                            "A Gaze-marked foe is excluded."),
+                            "A " + ABILITY_NAME + "-marked foe is excluded."),
                     new EgoLore.Ability("[Right Click] Slam",
                             "Drives the lantern onto a body within",
                             "5 blocks: heavy knockback, half a",
