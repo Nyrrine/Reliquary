@@ -18,6 +18,7 @@ import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
@@ -56,11 +57,15 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li><b>Is That the Red Mist?!?</b> ({@link #onHit}, passive) — a landed blow mends the wielder for
  *       {@link #LIFESTEAL_FRACTION} of the damage it dealt, throttled to once per
  *       {@link #LIFESTEAL_THROTTLE_MS}.</li>
- *   <li><b>The reservoir</b> ({@link #onDamaged}, passive) — every point of damage that <em>lands on</em>
- *       the wielder pools in the blade. It is the wounds it remembers, not the wounds it gave. The pool
- *       itself is never clamped; what it can <em>buy</em> is (see below). It evaporates after
- *       {@link #RESERVOIR_DECAY_MS} without a fresh wound (whether the wielder is logged in for that lull
- *       or not).</li>
+ *   <li><b>The reservoir</b>, shown to the wielder as <b>"Hello."</b> ({@link #onDamaged}, passive) — every
+ *       point of damage that <em>lands on</em> the wielder pools in the blade. It is the wounds it
+ *       remembers, not the wounds it gave. The pool itself is never clamped; what it can <em>buy</em> is
+ *       (see below). It evaporates after {@link #RESERVOIR_DECAY_MS} without a fresh wound (whether the
+ *       wielder is logged in for that lull or not).</li>
+ *   <li><b>Two heart-rows</b> ({@link #applyHold}, passive) — while the blade is held the wielder's max
+ *       health doubles by {@link #HOLD_MAX_HEALTH_BONUS}, a keyed {@link Attribute#MAX_HEALTH} modifier
+ *       lent on equip and taken back the instant the blade is sheathed, on death, on join, and on plugin
+ *       disable — so no wielder outlives the blade at two heart-rows.</li>
  *   <li><b>Nothing There</b> ({@link #onInteract}, shift + right-click) — the downswing. Empties the
  *       reservoir as one cleave around the wielder, dealing {@link #RELEASE_FRACTION} of the pooled total
  *       — never more than {@link #RELEASE_CAP} — to everything inside {@link #cleaveRadius}. Past
@@ -145,6 +150,9 @@ public final class MimicryWeapon implements Weapon {
 
     /** PDC key marking an ItemStack as Mimicry. */
     private final NamespacedKey key;
+
+    /** Keys the doubled-max-health modifier Mimicry lays on its wielder while the blade is held. */
+    private final NamespacedKey holdHealthKey;
 
     // ---- tuning: the passive drink -------------------------------------------------
 
@@ -236,7 +244,7 @@ public final class MimicryWeapon implements Weapon {
     private static final double ONRUSH_DAMAGE = 16.0;
 
     /** Silence after an Onrush that failed to find an executable foe. */
-    private static final long ONRUSH_COOLDOWN_MS = 180_000L; // 3 minutes
+    private static final long ONRUSH_COOLDOWN_MS = 45_000L; // 45 seconds
 
     /** How far in front of / behind the target the wielder lands. */
     private static final double ONRUSH_GAP = 1.4;
@@ -247,6 +255,18 @@ public final class MimicryWeapon implements Weapon {
      */
     private static final Set<EntityType> BOSS_TYPES = EnumSet.of(
             EntityType.ENDER_DRAGON, EntityType.WITHER, EntityType.WARDEN);
+
+    // ---- tuning: the hold ----------------------------------------------------------
+
+    /**
+     * Max-health the blade lends its wielder while it is held — a keyed {@link Attribute#MAX_HEALTH}
+     * modifier that doubles a vanilla 20 to two full heart-rows, then drops away the instant the blade is
+     * sheathed. It is the spec'd mechanic itself, not a duplicate of any balance dial, so a held modifier is
+     * its correct home (unlike attack speed, whose one dial is {@code EgoModels.MIMICRY.spd}). The modifier
+     * is keyed and remove-before-add, cleared on release, on death, on join, and on plugin disable, so no
+     * wielder is ever left carrying a heart-row the blade no longer lends.
+     */
+    private static final double HOLD_MAX_HEALTH_BONUS = 20.0;
 
     // ---- tuning: the show ----------------------------------------------------------
     //
@@ -289,11 +309,18 @@ public final class MimicryWeapon implements Weapon {
     private static final double SHOCKWAVE_RADIUS_MAX = 24.0;
     private static final int IMPACT_SWEEPS = 6;
 
-    /** An M1 arc, and the heavier one that ends the three-beat chain. */
+    /** An M1 arc, and the heavier one that ends the four-beat chain. */
     private static final int M1_POINTS = 18;
     private static final int M1_POINTS_HEAVY = 26;
     private static final int M1_REVEAL = 3;
     private static final int M1_FADE = 3;
+
+    /**
+     * PLACEHOLDER (feel, not balance): the forward step the finisher beat throws the wielder into its cut.
+     * A velocity nudge only — vanilla collision keeps it wall-safe. Tune with the rest of the numbers next
+     * wave.
+     */
+    private static final double FINISHER_LUNGE = 0.55;
 
     /** The chain forgets itself after this long, and the next swing starts from the first beat again. */
     private static final long COMBO_RESET_MS = 1_200L;
@@ -321,11 +348,14 @@ public final class MimicryWeapon implements Weapon {
     /** Wielder -> epoch ms of their last drink, for the throttle. */
     private final Map<UUID, Long> lastDrinkAt = new HashMap<>();
 
-    /** Wielder -> where they are in the three-beat M1 chain. Cosmetic only. */
+    /** Wielder -> where they are in the four-beat M1 chain. Cosmetic only. */
     private final Map<UUID, Combo> combos = new HashMap<>();
 
     /** Wielders currently inside their own ability damage — the fence against re-entrant hooks. */
     private final Set<UUID> striking = new HashSet<>();
+
+    /** Wielders currently carrying the held max-health modifier, so plugin-disable can strip every one. */
+    private final Set<UUID> holders = new HashSet<>();
 
     /** When {@link #prune} last swept. */
     private long lastPruneMs = 0L;
@@ -333,6 +363,7 @@ public final class MimicryWeapon implements Weapon {
     public MimicryWeapon(Reliquary plugin) {
         this.plugin = plugin;
         this.key = new NamespacedKey(plugin, "mimicry");
+        this.holdHealthKey = new NamespacedKey(plugin, "mimicry_hold_health");
     }
 
     @Override
@@ -540,10 +571,15 @@ public final class MimicryWeapon implements Weapon {
     }
 
     /**
-     * The M1 chain: a real slash on every swing, three beats that alternate their roll and then land a
-     * heavier overhead — a small rhyme with the downswing the reservoir eventually buys. This is animation
-     * only. The vanilla swing under it is untouched and is what deals the damage; adding a blow here would
-     * double-hit and is not what "m1 animations" asks for.
+     * The M1 chain: a real slash on every swing, a bespoke four-beat combo carrying the weight of the Red
+     * Mist. Two wide crescent sweeps rolled opposite ways, a rising uppercut, then a heavy fleshy finisher
+     * that drops the blade overhead, bursts blood and a watching eye, and steps the wielder into it — a
+     * small rhyme with the downswing the reservoir eventually buys. Modelled on Gebura's heavy red
+     * crescents rather than Lævateinn's lighter language.
+     *
+     * <p>This is animation only. The vanilla swing under it is untouched and is what deals the damage;
+     * adding a blow here would double-hit and is not what "m1 animations" asks for. The finisher's forward
+     * step is a velocity nudge, never a teleport, so vanilla collision keeps it wall-safe for free.
      */
     @Override
     public void onSwing(Player player) {
@@ -557,7 +593,7 @@ public final class MimicryWeapon implements Weapon {
         }
         c.lastMs = now;
         int beat = c.beat;
-        c.beat = (c.beat + 1) % 3;
+        c.beat = (c.beat + 1) % 4;
 
         m1Fx(player, beat);
     }
@@ -758,7 +794,7 @@ public final class MimicryWeapon implements Weapon {
         }
     }
 
-    /** The blow a foe that was not faltering takes: devastating, bought with three minutes of silence. */
+    /** The blow a foe that was not faltering takes: devastating, bought with 45 seconds of silence. */
     private void strike(Player attacker, LivingEntity victim) {
         UUID aid = attacker.getUniqueId();
         strikeFx(attacker, victim);
@@ -852,7 +888,11 @@ public final class MimicryWeapon implements Weapon {
      */
     @Override
     public boolean onTick(Player player, long tick) {
-        if (!matches(player.getInventory().getItemInMainHand())) return false;
+        if (!matches(player.getInventory().getItemInMainHand())) {
+            releaseHold(player);                          // sheathed — hand back the lent heart-row at once
+            return false;
+        }
+        applyHold(player);                               // held — lend the second heart-row (idempotent)
 
         long now = System.currentTimeMillis();
         if (now - lastPruneMs >= PRUNE_PERIOD_MS) prune(now);
@@ -865,10 +905,42 @@ public final class MimicryWeapon implements Weapon {
                 ? EgoHud.cooldown("Onrush", readyAt - now, RUST)     // whole seconds, never milliseconds
                 : EgoHud.ready("Onrush", BONE);
 
-        Component label = plain("Nothing There  " + (long) Math.round(amount))
+        Component label = plain("Hello.  " + (long) Math.round(amount))
                 .append(plain("  ")).append(onrush);
         player.sendActionBar(EgoHud.gauge(RUST, amount / RESERVOIR_FULL, label));
         return true;
+    }
+
+    // ---- the held heart-row ------------------------------------------------------------
+
+    /**
+     * Lend the wielder the second heart-row while the blade is held. Idempotent and remove-before-add, so
+     * calling it every tick can neither stack the bonus nor leave a foreign copy of it behind; it also
+     * re-heals the modifier if something else stripped it out from under a live holder.
+     */
+    private void applyHold(Player player) {
+        holders.add(player.getUniqueId());
+        AttributeInstance inst = player.getAttribute(Attribute.MAX_HEALTH);
+        if (inst == null) return;
+        for (AttributeModifier m : inst.getModifiers()) {
+            if (holdHealthKey.equals(m.getKey())) return;    // already lent — nothing to do
+        }
+        inst.addModifier(new AttributeModifier(
+                holdHealthKey, HOLD_MAX_HEALTH_BONUS, AttributeModifier.Operation.ADD_NUMBER));
+    }
+
+    /** Take the lent heart-row back and clamp the wielder down into the smaller frame it leaves. */
+    private void releaseHold(Player player) {
+        holders.remove(player.getUniqueId());
+        AttributeInstance inst = player.getAttribute(Attribute.MAX_HEALTH);
+        if (inst == null) return;
+        boolean removed = false;
+        for (AttributeModifier m : new java.util.ArrayList<>(inst.getModifiers())) {
+            if (holdHealthKey.equals(m.getKey())) { inst.removeModifier(m); removed = true; }
+        }
+        if (removed && player.getHealth() > inst.getValue()) {
+            player.setHealth(Math.max(0.0, inst.getValue()));    // don't leave health hanging above the new max
+        }
     }
 
     // ---- lifecycle ---------------------------------------------------------------------
@@ -882,6 +954,13 @@ public final class MimicryWeapon implements Weapon {
     @Override
     public void onPlayerDeath(PlayerDeathEvent event) {
         clearMarksOn(event.getEntity().getUniqueId());
+        releaseHold(event.getEntity());                  // don't carry the lent heart-row through respawn
+    }
+
+    /** Defensive on login: shed any held heart-row saved on a player by an unclean shutdown. */
+    @Override
+    public void onJoin(Player player) {
+        releaseHold(player);
     }
 
     /** Drop every wielder's mark on this now-dead foe. */
@@ -902,12 +981,22 @@ public final class MimicryWeapon implements Weapon {
         marks.remove(id);
         lastDrinkAt.remove(id);
         combos.remove(id);
+        holders.remove(id);   // the lent heart-row is saved on the departing body; onJoin sheds it on return
         prune(System.currentTimeMillis());
     }
 
-    /** Nothing of Mimicry's is out in the world — only its bookkeeping, which goes here. */
+    /**
+     * Nothing of Mimicry's is out in the world — only its bookkeeping. But the held heart-row is a live
+     * modifier on every current holder, so return it to each before the plugin lets go: no one is left at
+     * two heart-rows the moment Mimicry stops running.
+     */
     @Override
     public void onDisable() {
+        for (UUID id : new java.util.ArrayList<>(holders)) {
+            Player p = plugin.getServer().getPlayer(id);
+            if (p != null) releaseHold(p);
+        }
+        holders.clear();
         reservoirs.clear();
         marks.clear();
         onrushReadyAt.clear();
@@ -1032,39 +1121,77 @@ public final class MimicryWeapon implements Weapon {
         Location pivot = player.getLocation().add(0, 1.1, 0);
         Vector dir = eye.getDirection().normalize();
 
-        boolean heavy = beat == 2;
+        Vector right = dir.clone().crossProduct(new Vector(0, 1, 0));
+        if (right.lengthSquared() < 1.0e-6) right = new Vector(1, 0, 0);
+        right.normalize();
+        Vector up = right.clone().crossProduct(dir).normalize();
 
-        if (heavy) {
-            // Overhead: the plane of the cut is vertical, straight down through the facing.
-            Vector fwd = dir.clone().setY(0);
-            if (fwd.lengthSquared() < 1.0e-6) fwd = new Vector(0, 0, 1);
-            fwd.normalize();
-            arc(world, pivot, new Vector(0, 1, 0), fwd,
-                    2.9, Math.toRadians(175), Math.toRadians(50), false,
-                    2.2f, M1_POINTS_HEAVY, M1_REVEAL + 1, M1_FADE, true);
-
-            world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_STRONG, 1.0f, 0.75f);
-            world.playSound(eye, Sound.ITEM_TRIDENT_RIPTIDE_3, 0.6f, 1.1f);
-            world.playSound(eye, Sound.BLOCK_ANVIL_LAND, 0.22f, 1.7f);
-            world.spawnParticle(Particle.DUST_COLOR_TRANSITION, eye.clone().add(dir.clone().multiply(1.6)),
-                    8, 0.3, 0.3, 0.3, 0.0, new Particle.DustTransition(BONE_C, BLOOD_C, 1.6f));
-        } else {
-            // A swoop rolled around the facing, alternating side to side so the chain reads as a rhythm.
-            Vector right = dir.clone().crossProduct(new Vector(0, 1, 0));
-            if (right.lengthSquared() < 1.0e-6) right = new Vector(1, 0, 0);
-            right.normalize();
-            Vector up = right.clone().crossProduct(dir).normalize();
-
-            double roll = (beat == 0 ? 0.7 : -0.7) + rng.nextDouble(-0.18, 0.18);
-            Vector v = up.clone().multiply(Math.cos(roll)).add(right.clone().multiply(Math.sin(roll)));
-
-            arc(world, pivot, dir.clone(), v, 2.3 + rng.nextDouble() * 0.35,
-                    Math.toRadians(165), rng.nextDouble(-0.2, 0.2), beat == 1,
-                    1.9f, M1_POINTS, M1_REVEAL, M1_FADE, true);
-
-            world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.85f, 1.25f + rng.nextFloat() * 0.3f);
-            world.playSound(eye, Sound.ITEM_TRIDENT_RETURN, 0.4f, 1.6f + rng.nextFloat() * 0.25f);
+        switch (beat) {
+            case 0, 1 -> {
+                // Two heavy crescent sweeps rolled opposite ways — the wide, deliberate Gebura arc, thicker
+                // and slower-reading than Arayashiki's, so the chain opens with weight rather than speed.
+                double roll = (beat == 0 ? 0.85 : -0.85) + rng.nextDouble(-0.15, 0.15);
+                Vector v = up.clone().multiply(Math.cos(roll)).add(right.clone().multiply(Math.sin(roll)));
+                arc(world, pivot, dir.clone(), v, 2.7 + rng.nextDouble() * 0.4,
+                        Math.toRadians(185), rng.nextDouble(-0.2, 0.2), beat == 1,
+                        2.1f, M1_POINTS, M1_REVEAL, M1_FADE, true);
+                world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.9f, 1.05f + rng.nextFloat() * 0.2f);
+                world.playSound(eye, Sound.ITEM_TRIDENT_RIPTIDE_1, 0.5f, 0.8f + rng.nextFloat() * 0.2f);
+            }
+            case 2 -> {
+                // A rising uppercut crescent — the blade dragged up through the foe before the overhead fall.
+                arc(world, pivot, dir.clone(), up.clone(), 2.6 + rng.nextDouble() * 0.3,
+                        Math.toRadians(170), Math.toRadians(-35), true,
+                        2.1f, M1_POINTS, M1_REVEAL, M1_FADE, true);
+                world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.9f, 0.85f);
+                world.playSound(eye, Sound.ITEM_TRIDENT_RETURN, 0.45f, 1.2f);
+            }
+            default -> m1Finisher(player, world, eye, pivot, dir);
         }
+    }
+
+    /**
+     * The fourth beat: a heavy overhead crescent brought straight down, a fleshy burst thrown out where the
+     * edge lands, and a short forward step into the blow. The weight lives in a slower reveal, not in more
+     * particles, so it stays within the same perf budget as the lighter beats.
+     */
+    private void m1Finisher(Player player, World world, Location eye, Location pivot, Vector dir) {
+        Vector fwd = dir.clone().setY(0);
+        if (fwd.lengthSquared() < 1.0e-6) fwd = new Vector(0, 0, 1);
+        fwd.normalize();
+
+        arc(world, pivot, new Vector(0, 1, 0), fwd,
+                3.2, Math.toRadians(195), Math.toRadians(55), false,
+                2.6f, M1_POINTS_HEAVY, M1_REVEAL + 2, M1_FADE + 1, true);
+
+        world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_STRONG, 1.0f, 0.65f);
+        world.playSound(eye, Sound.ITEM_TRIDENT_RIPTIDE_3, 0.7f, 0.9f);
+        world.playSound(eye, Sound.ENTITY_HOGLIN_ATTACK, 0.4f, 0.6f);
+        world.playSound(eye, Sound.BLOCK_ANVIL_LAND, 0.22f, 1.6f);
+
+        // The fleshy signature: blood, bone fangs, and a watching eye, out ahead where the edge comes down.
+        fleshyBurst(world, eye.clone().add(dir.clone().multiply(2.0)), 1.0f);
+
+        // Step into the swing — a velocity nudge, wall-safe by vanilla collision, never a teleport.
+        Vector step = fwd.clone().multiply(FINISHER_LUNGE).setY(0.16);
+        player.setVelocity(player.getVelocity().add(step));
+    }
+
+    /**
+     * The ALEPH accent shared by Mimicry's heaviest moments: a spray of blood, a scatter of bone-white
+     * fangs, and a single watching green eye bleeding to red as it fades. A fixed budget scaled by
+     * {@code scale}, so even the largest cast cannot let it run away with the frame.
+     */
+    private void fleshyBurst(World world, Location at, float scale) {
+        int blood = Math.max(6, Math.round(14 * scale));
+        world.spawnParticle(Particle.DUST, at, blood, 0.35, 0.4, 0.35, 0.0,
+                new Particle.DustOptions(BLOOD_C, 1.4f), true);
+        world.spawnParticle(Particle.DUST, at, 6, 0.4, 0.3, 0.4, 0.0,
+                new Particle.DustOptions(BONE_C, 1.1f), true);              // bone fangs
+        world.spawnParticle(Particle.DUST, at, 1, 0.05, 0.1, 0.05, 0.0,
+                new Particle.DustOptions(EYE_C, 1.7f), true);              // the iris
+        world.spawnParticle(Particle.DUST_COLOR_TRANSITION, at, 3, 0.18, 0.2, 0.18, 0.0,
+                new Particle.DustTransition(EYE_C, BLOOD_C, 1.2f), true);   // the eye, weeping shut
     }
 
     /**
@@ -1132,6 +1259,7 @@ public final class MimicryWeapon implements Weapon {
         world.spawnParticle(Particle.EXPLOSION, chest, 1, 0, 0, 0, 0, (Object) null, true);
         world.spawnParticle(Particle.SWEEP_ATTACK, chest, IMPACT_SWEEPS, 1.0, 0.5, 1.0, 0.0, (Object) null, true);
         world.spawnParticle(Particle.FLASH, chest, 1, 0, 0, 0, 0, BLOOD_C, true);  // FLASH takes a Color here
+        fleshyBurst(world, chest, 1.0f + bigness * 1.5f);   // blood, fangs, and a watching eye at the landing
 
         // The shockwave. Fixed point count, so its cost never tracks the size of the cut.
         double ring = Math.min(radius, SHOCKWAVE_RADIUS_MAX);
@@ -1238,6 +1366,8 @@ public final class MimicryWeapon implements Weapon {
         world.spawnParticle(Particle.CRIT, neck, 12, 0.2, 0.2, 0.2, 0.3);
         world.spawnParticle(Particle.DUST_COLOR_TRANSITION, neck, 24, 0.25, 0.2, 0.25, 0.0,
                 new Particle.DustTransition(BONE_C, BLOOD_C, 1.4f));
+        world.spawnParticle(Particle.DUST, neck, 1, 0.05, 0.1, 0.05, 0.0,
+                new Particle.DustOptions(EYE_C, 1.6f), true);   // one last eye, watching from the nape
     }
 
     // ---- lore --------------------------------------------------------------------------
@@ -1249,6 +1379,8 @@ public final class MimicryWeapon implements Weapon {
 
     private static final Color BONE_C  = Color.fromRGB(0xD6, 0xD2, 0xC8);
     private static final Color BLOOD_C = Color.fromRGB(0x8E, 0x2B, 0x27);
+    /** The green iris of the eyes set into the blade — the thing that watches from the flesh. */
+    private static final Color EYE_C   = Color.fromRGB(0x4F, 0xC8, 0x5C);
 
     /** A small non-italic action-bar fragment in the blade's bone tone. */
     private static Component plain(String text) {
@@ -1278,13 +1410,17 @@ public final class MimicryWeapon implements Weapon {
                     new EgoLore.Ability("[Passive] Is That the Red Mist?!?",
                             "Heal 25% of the damage you deal,",
                             "at most once every 5 seconds."),
-                    new EgoLore.Ability("[Passive] The reservoir",
+                    new EgoLore.Ability("[Passive] Hello.",
                             "Damage dealt TO you pools in the",
                             "blade, and the pool itself has no",
                             "ceiling. The gauge reads full at",
                             "120 — the point past which it can",
                             "buy no more. The pool empties",
                             "after 5 minutes without a wound."),
+                    new EgoLore.Ability("[Passive] Two heart-rows",
+                            "While Mimicry is held your max",
+                            "health doubles to 40. It drops the",
+                            "instant the blade is sheathed."),
                     new EgoLore.Ability("[Shift + Right-click] Nothing There",
                             "Bring the blade down. Everything",
                             "nearby takes half the pooled total,",
@@ -1300,6 +1436,6 @@ public final class MimicryWeapon implements Weapon {
                             "finish it: player <25%, mob <50%,",
                             "boss <10% HP. Free if it lands.",
                             "Otherwise rush to its face and",
-                            "strike hard — 3 minute cooldown.")
+                            "strike hard — 45 second cooldown.")
             ));
 }
