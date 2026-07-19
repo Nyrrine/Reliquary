@@ -46,8 +46,8 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <ul>
  *   <li><b>Right-click</b> — loose a fast homing comet led by a shulker bullet, curving toward the nearest
- *       living body ahead of it. On contact (or a wall, or when its light guts out) it bursts for
- *       {@value #BOLT_DAMAGE} damage in a small starburst. Three charges, shown as
+ *       living body ahead of it. On contact it bursts for {@value #BOLT_DAMAGE} damage in a small starburst;
+ *       a wall or a guttered-out light ends it in the same starburst but deals nothing. Three charges, shown as
  *       {@link EgoHud#pips pips}; when all three are spent the rod recharges.</li>
  *   <li><b>Sneak + right-click</b> — <b>blink</b> a short step in the look direction to zone or reposition.
  *       It cannot pass through walls (it raytraces and lands just short of the first solid block).
