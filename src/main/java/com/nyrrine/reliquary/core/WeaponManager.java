@@ -2,11 +2,14 @@ package com.nyrrine.reliquary.core;
 
 import com.nyrrine.reliquary.Reliquary;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Mob;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -21,8 +24,11 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerResourcePackStatusEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
+import org.bukkit.event.world.EntitiesLoadEvent;
+import org.bukkit.event.world.EntitiesUnloadEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -89,6 +95,16 @@ public final class WeaponManager implements Listener {
      * back to it.
      */
     private final Map<UUID, Integer> dealingDepth = new HashMap<>();
+
+    /**
+     * Marks a mob whose AI a relic has temporarily suspended, storing whether it had AI before (so a mob
+     * spawned mindless is never woken). It lives on the mob's persistent data, not in a map, so it survives
+     * a chunk unload/reload and even a crash: {@link #onEntitiesUnload} restores AI before the mob is written
+     * to disk, {@link #onEntitiesLoad} catches any that slipped through, and the relic clears it when its own
+     * hold ends. Without this, an {@code isValid()}-guarded restore silently skips a chunk-unloaded mob and
+     * leaves it saved with {@code NoAI:1} — frozen for good.
+     */
+    private static final NamespacedKey AI_SUSPENDED_KEY = new NamespacedKey("reliquary", "ai_suspended");
 
     public WeaponManager(Reliquary plugin) {
         this.plugin = plugin;
@@ -301,6 +317,61 @@ public final class WeaponManager implements Listener {
             damage.run();
         } finally {
             dealingDepth.computeIfPresent(wielder, (id, depth) -> depth <= 1 ? null : depth - 1);
+        }
+    }
+
+    /**
+     * Suspend {@code mob}'s AI on a relic's behalf and mark it so the suspension can always be undone — on
+     * the relic's own timer, on chunk unload, on reload, or on plugin disable. Idempotent: re-suspending an
+     * already-marked mob just re-asserts {@code setAI(false)} without overwriting the remembered state, so a
+     * relic that extends a hold never forgets the mob had AI to begin with.
+     */
+    public void suspendAi(Mob mob) {
+        var pdc = mob.getPersistentDataContainer();
+        if (!pdc.has(AI_SUSPENDED_KEY, PersistentDataType.BYTE)) {
+            pdc.set(AI_SUSPENDED_KEY, PersistentDataType.BYTE, (byte) (mob.hasAI() ? 1 : 0));
+        }
+        mob.setAI(false);
+    }
+
+    /**
+     * Undo a {@link #suspendAi}: restore the mob's AI to what it had before and clear the mark. A no-op on a
+     * mob this manager never suspended, so a relic may call it unconditionally. Guarded on {@code isDead()}
+     * only — never {@code isValid()}, which is also false for the chunk-unloaded mob this whole mechanism
+     * exists to save. A dead mob is gone and never written, so it is the only case to skip.
+     */
+    public void restoreAi(Mob mob) {
+        var pdc = mob.getPersistentDataContainer();
+        Byte had = pdc.get(AI_SUSPENDED_KEY, PersistentDataType.BYTE);
+        if (had == null) return;
+        pdc.remove(AI_SUSPENDED_KEY);
+        if (!mob.isDead()) mob.setAI(had != 0);
+    }
+
+    /**
+     * Restore AI for every suspended mob in a chunk about to unload, before it is serialised — the fix for
+     * the freeze-forever bug. A relic's own restore timer self-cancels the instant its target stops being
+     * valid (which a chunk unload triggers), so without this the mob is written to disk still mindless.
+     */
+    @EventHandler
+    public void onEntitiesUnload(EntitiesUnloadEvent event) {
+        for (Entity e : event.getEntities()) {
+            if (e instanceof Mob mob && mob.getPersistentDataContainer().has(AI_SUSPENDED_KEY, PersistentDataType.BYTE)) {
+                restoreAi(mob);
+            }
+        }
+    }
+
+    /**
+     * Belt-and-braces for a mob that still slipped through — one saved mindless by an older build or a crash
+     * mid-hold. When its chunk loads again, wake it and clear the mark.
+     */
+    @EventHandler
+    public void onEntitiesLoad(EntitiesLoadEvent event) {
+        for (Entity e : event.getEntities()) {
+            if (e instanceof Mob mob && mob.getPersistentDataContainer().has(AI_SUSPENDED_KEY, PersistentDataType.BYTE)) {
+                restoreAi(mob);
+            }
         }
     }
 
