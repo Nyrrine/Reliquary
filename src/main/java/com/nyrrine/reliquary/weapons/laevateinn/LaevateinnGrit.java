@@ -1,8 +1,10 @@
 package com.nyrrine.reliquary.weapons.laevateinn;
 
 import com.nyrrine.reliquary.Reliquary;
+import org.bukkit.Location;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
+import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Player;
@@ -27,7 +29,8 @@ import java.util.UUID;
  *
  * <p>When a blow would drop the wielder to nothing and the blade is in their hand, the blow is eaten:
  * they're left on a sliver of health with the totem's own kit (Regeneration II, Fire Resistance,
- * Absorption II) and the totem's own light and sound. Then it sleeps for an hour, per player — spend
+ * Absorption II) under a custom awakening — a big purple-and-white burst, its own sound, not the
+ * vanilla totem pop. Then it sleeps for an hour, per player — spend
  * the save and the next lethal hit lands for real until the clock comes back around. Nothing is
  * persisted: a restart is a fresh hour, same as every other bit of this blade's state.
  */
@@ -87,12 +90,36 @@ final class LaevateinnGrit implements Listener {
         player.addPotionEffect(REGEN);
         player.addPotionEffect(FIRE_RES);
         player.addPotionEffect(ABSORPTION);
-        // The totem's own light and sound — a burst of its particles up the body, and the horn.
-        player.getWorld().spawnParticle(Particle.TOTEM_OF_UNDYING,
-                player.getLocation().add(0, 1, 0), 80, 0.4, 0.7, 0.4, 0.35);
-        player.getWorld().playSound(player.getLocation(), Sound.ITEM_TOTEM_USE, 1.0f, 1.0f);
+        awakeningBurst(player);
 
         readyAt.put(id, now + COOLDOWN_MS);
+    }
+
+    /**
+     * The revive's show — a custom awakening in place of the vanilla totem pop (§2.1). Layered,
+     * resonant sound for the wake; a big purple-and-white explosion for the burst, bigger than a
+     * totem's own. Cosmetic only — the save above is what actually happens.
+     */
+    private static void awakeningBurst(Player player) {
+        World world = player.getWorld();
+        Location at = player.getLocation();
+        Location core = at.clone().add(0, 1.0, 0);
+
+        // The awakening: a deep beacon swell for the wake, a conduit shimmer riding over it, and a low
+        // explosion to land the blast. Layered on purpose — no single vanilla sound reads as "awakening".
+        world.playSound(at, Sound.BLOCK_BEACON_ACTIVATE, 1.4f, 0.7f);
+        world.playSound(at, Sound.BLOCK_CONDUIT_ACTIVATE, 1.0f, 1.1f);
+        world.playSound(at, Sound.ENTITY_GENERIC_EXPLODE, 1.0f, 0.8f);
+
+        // The burst: explosion cores for the blast shape and a flash for the light, then a wide sphere
+        // of dust in the relic's own purple and white — denser and broader than a totem's swirl.
+        world.spawnParticle(Particle.EXPLOSION_EMITTER, core, 1);
+        world.spawnParticle(Particle.EXPLOSION, core, 8, 0.7, 0.6, 0.7, 0.0);
+        world.spawnParticle(Particle.FLASH, core, 2);
+        Particle.DustOptions purple = new Particle.DustOptions(LaevateinnVfx.PURPLE, 1.5f);
+        Particle.DustOptions white = new Particle.DustOptions(LaevateinnVfx.WHITE, 1.4f);
+        world.spawnParticle(Particle.DUST, core, 150, 1.2, 1.3, 1.2, 0.0, purple);
+        world.spawnParticle(Particle.DUST, core, 110, 1.2, 1.3, 1.2, 0.0, white);
     }
 
     private static double maxHealth(Player player) {
