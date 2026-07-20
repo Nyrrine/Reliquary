@@ -58,6 +58,11 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li><b>[Right Click] Fixed Stare</b> — for {@link #FIXED_STARE_MS} the watcher refuses to look away:
  *       Delight cannot decay and builds at {@link #STARE_STACK_MULT}x. {@link #FIXED_STARE_COOLDOWN_MS}
  *       cooldown, read on the action bar in whole seconds.</li>
+ *   <li><b>[Shift + Right Click] Lingering Gaze</b> — marks the enemy in the crosshair; for
+ *       {@link #LINGER_TICKS}s it takes {@link #LINGER_DAMAGE} a second and feeds the wielder
+ *       {@link #LINGER_DELIGHT_PER_TICK} Delight a tick. The tick damage is fenced through the framework's
+ *       {@code dealing()}, so it neither scripts a hit two nor feeds a second stack. {@link
+ *       #LINGER_COOLDOWN_MS} cooldown.</li>
  * </ul>
  *
  * <p><b>Two mechanics carry this whole weapon and both are easy to get silently wrong:</b>
@@ -145,6 +150,21 @@ public final class GazeWeapon implements Weapon {
     /** Stack rate multiplier inside the Fixed Stare window — "builds twice as fast". */
     private static final int STARE_STACK_MULT = 2;
 
+    // ---- Lingering Gaze tuning (PLACEHOLDERS — flagged for Nyrrine's balance wave) --
+
+    /** PLACEHOLDER: damage each one-second tick of the mark deals to the watched enemy. */
+    private static final double LINGER_DAMAGE = 1.0;
+    /** PLACEHOLDER: Delight the wielder gains per tick of the mark. */
+    private static final int LINGER_DELIGHT_PER_TICK = 1;
+    /** PLACEHOLDER: how many one-second ticks the mark lingers (5s). */
+    private static final int LINGER_TICKS = 5;
+    /** One second between ticks. */
+    private static final long LINGER_INTERVAL_TICKS = 20L;
+    /** PLACEHOLDER: cooldown between casts of Lingering Gaze. */
+    private static final long LINGER_COOLDOWN_MS = 10_000L;
+    /** PLACEHOLDER: how far the crosshair reaches to catch a target, in blocks. */
+    private static final int LINGER_RANGE = 20;
+
     // ---- state (O(wielders); no victim-keyed maps to leak) ------------------------
 
     /** Wielder -> their watcher's state. Players only, so quit/disable prune it completely. */
@@ -177,6 +197,8 @@ public final class GazeWeapon implements Weapon {
         private long stareUntil;
         /** Epoch-ms Fixed Stare may be cast again. */
         private long cooldownReadyAt;
+        /** Epoch-ms Lingering Gaze may be cast again. */
+        private long lingerReadyAt;
     }
 
     public GazeWeapon(Reliquary plugin) {
@@ -372,6 +394,11 @@ public final class GazeWeapon implements Weapon {
     public void onInteract(Player player, boolean sneaking) {
         if (!matches(player.getInventory().getItemInMainHand())) return;
 
+        if (sneaking) {
+            lingeringGaze(player);
+            return;
+        }
+
         long now = System.currentTimeMillis();
         Delight d = state(player.getUniqueId());
 
@@ -391,6 +418,102 @@ public final class GazeWeapon implements Weapon {
         sendDelightBar(player, now);
     }
 
+    // ---- [Shift + Right Click] Lingering Gaze ---------------------------------------
+
+    /**
+     * Shift-right-click marks the enemy in the wielder's crosshair. For {@link #LINGER_TICKS} seconds the
+     * mark deals {@link #LINGER_DAMAGE} a second and feeds the wielder {@link #LINGER_DELIGHT_PER_TICK}
+     * Delight a tick, on its own {@link #LINGER_COOLDOWN_MS} cooldown. A quiet no-op with nothing in sight or
+     * on cooldown.
+     *
+     * <p>The tick damage is routed through the framework's {@code dealing()} fence, so it never re-enters
+     * {@link #onHit} as a swing — no scripted hit two, and no second Delight stack from the passive. The
+     * tick's own +1 is the only Delight it grants.
+     */
+    private void lingeringGaze(Player player) {
+        UUID id = player.getUniqueId();
+        long now = System.currentTimeMillis();
+        Delight d = state(id);
+
+        if (now < d.lingerReadyAt) {
+            player.sendActionBar(EgoHud.cooldown("Lingering Gaze", d.lingerReadyAt - now, FAINT_HUD));
+            player.playSound(player.getLocation(), Sound.BLOCK_WOODEN_TRAPDOOR_CLOSE, 0.35f, 0.6f);
+            return;
+        }
+
+        LivingEntity target = crosshairTarget(player);
+        if (target == null) {
+            player.sendActionBar(EgoHud.status("Lingering Gaze: no one in sight", FAINT_HUD));
+            player.playSound(player.getLocation(), Sound.BLOCK_WOODEN_TRAPDOOR_CLOSE, 0.35f, 0.6f);
+            return;
+        }
+
+        d.lingerReadyAt = now + LINGER_COOLDOWN_MS;
+        EgoDurability.wearMainHand(player); // an ability use — vanilla swings wear on their own
+        markFx(player, target);
+        startLinger(player, target);
+    }
+
+    /** The living thing in the wielder's crosshair within {@link #LINGER_RANGE}, line-of-sight aware, else null. */
+    private LivingEntity crosshairTarget(Player player) {
+        if (player.getTargetEntity(LINGER_RANGE) instanceof LivingEntity le
+                && !le.equals(player) && !le.isDead() && le.isValid()) {
+            return le;
+        }
+        return null;
+    }
+
+    /**
+     * Run the mark: one tick a second for {@link #LINGER_TICKS} seconds. Each tick deals fenced damage and
+     * grants a stack; it ends early if the target dies or leaves the world, or the wielder logs off. Holds
+     * only the two entities for its short life, and the scheduler cancels it on plugin disable.
+     */
+    private void startLinger(Player player, LivingEntity target) {
+        UUID id = player.getUniqueId();
+        new BukkitRunnable() {
+            int done = 0;
+
+            @Override
+            public void run() {
+                if (done >= LINGER_TICKS || !player.isOnline() || target.isDead() || !target.isValid()) {
+                    cancel();
+                    return;
+                }
+                done++;
+
+                // Fenced: onHit does not see this, so it neither scripts a hit two nor feeds a second stack.
+                plugin.weapons().dealing(id, () -> target.damage(LINGER_DAMAGE, player));
+
+                long now = System.currentTimeMillis();
+                Delight d = state(id);
+                delight(d, now);                                              // settle pending drain first
+                d.stacks = Math.min(MAX_DELIGHT, d.stacks + LINGER_DELIGHT_PER_TICK);
+                d.decayAnchor = now;                                          // the mark is landing — keep fed
+                lingerTickFx(target);
+            }
+        }.runTaskTimer(plugin, LINGER_INTERVAL_TICKS, LINGER_INTERVAL_TICKS);
+    }
+
+    /** The watcher fixing on a fresh mark: an enderman's stare and a grey iris blooming over the target. */
+    private void markFx(Player player, LivingEntity target) {
+        World world = target.getWorld();
+        Location eyes = target.getLocation().add(0, target.getHeight() * 0.9, 0);
+        world.playSound(eyes, Sound.ENTITY_ENDERMAN_STARE, 0.7f, 0.9f);
+        world.playSound(player.getLocation(), Sound.BLOCK_WOODEN_TRAPDOOR_OPEN, 0.4f, 0.7f);
+        world.spawnParticle(Particle.DUST_COLOR_TRANSITION, eyes, 12, 0.25, 0.3, 0.25, 0.0,
+                new Particle.DustTransition(IRIS_GREY, KEYHOLE_DARK, 1.3f));
+    }
+
+    /** A quiet tick of the lingering mark: a wet grey glint and a wisp of the keyhole's shadow. */
+    private void lingerTickFx(LivingEntity target) {
+        World world = target.getWorld();
+        Location body = target.getLocation().add(0, target.getHeight() * 0.7, 0);
+        world.spawnParticle(Particle.DUST, body, 5, 0.24, 0.3, 0.24, 0.0,
+                new Particle.DustOptions(IRIS_GREY, 1.0f));
+        world.spawnParticle(Particle.SMOKE, body, 2, 0.15, 0.2, 0.15, 0.0);
+        world.playSound(body, Sound.ENTITY_ENDERMAN_STARE, 0.3f, 1.2f);
+    }
+
     // ---- action bar -----------------------------------------------------------------
 
     /**
@@ -405,7 +528,8 @@ public final class GazeWeapon implements Weapon {
 
         if (!matches(player.getInventory().getItemInMainHand())) {
             Delight d = states.get(id);
-            if (d != null && delight(d, now) <= 0 && now >= d.stareUntil && now >= d.cooldownReadyAt) {
+            if (d != null && delight(d, now) <= 0 && now >= d.stareUntil
+                    && now >= d.cooldownReadyAt && now >= d.lingerReadyAt) {
                 states.remove(id); // fully idle — don't hold a record for a sheathed sword
             }
             return false;
@@ -566,6 +690,11 @@ public final class GazeWeapon implements Weapon {
                     new EgoLore.Ability("[Right Click] Fixed Stare",
                             "For 5 seconds, your Delight cannot",
                             "decay and builds twice as fast.",
-                            "15 second cooldown.")
+                            "15 second cooldown."),
+                    new EgoLore.Ability("[Shift + Right Click] Lingering Gaze",
+                            "Mark the enemy in your crosshair.",
+                            "For 5s it takes 1 damage a second,",
+                            "and each tick gives you 1 Delight.",
+                            "10 second cooldown.")
             ));
 }
