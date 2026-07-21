@@ -114,7 +114,8 @@ public final class RedEyesWeapon implements Weapon {
     private static final double LEAP_UP            = 0.95;     // the upward heave of the jump
     private static final double SLAM_RADIUS        = 4.5;      // AoE reach on landing
     private static final int    SLAM_MAX_TARGETS   = 10;       // cap the AoE scan for TPS
-    private static final double SLAM_DAMAGE        = 3.0;      // small AoE damage (fenced against re-entry)
+    private static final double SLAM_DAMAGE        = 9.0;      // AoE damage (fenced against re-entry; i-frames cleared so it lands)
+    private static final int    SLAM_STRENGTH_TICKS = 60;      // 3s of Strength I on a landed slam — sets up the follow-up melee
 
     public RedEyesWeapon(Reliquary plugin) {
         this.plugin = plugin;
@@ -371,12 +372,18 @@ public final class RedEyesWeapon implements Weapon {
                 if (hit >= SLAM_MAX_TARGETS) break;
                 if (e == player || !(e instanceof LivingEntity other)) continue;
                 stun(other);
+                // Clear i-frames first: the slam often lands inside the 10-tick window of the swing that
+                // preceded the leap, where an equal-or-smaller follow-up is refused whole. Cleared, the
+                // slam always lands. Knockback stays vanilla (not routed through the pierce helper).
+                other.setNoDamageTicks(0);
                 other.damage(SLAM_DAMAGE, player); // fenced: onHit ignores this
                 hit++;
             }
         } finally {
             inAoe = false;
         }
+        // A landed slam feeds the follow-up: a short Strength I so the melee after it actually threatens.
+        player.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, SLAM_STRENGTH_TICKS, 0, false, true, true));
     }
 
     /** A double red web-ring plus a dome of eye motes at the slam's centre. */
@@ -490,7 +497,8 @@ public final class RedEyesWeapon implements Weapon {
                             "Needs Penitence in the off-hand. Leap,",
                             "then slam on landing: up to 10 targets",
                             "within 4.5 blocks are rooted and take",
-                            "3 damage. Your fall damage is waived.",
+                            "9 damage, and you gain brief Strength.",
+                            "Your fall damage is waived.",
                             "3 minute cooldown.")
             ));
 }

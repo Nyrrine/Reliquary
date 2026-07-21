@@ -66,7 +66,7 @@ public final class WristCutterWeapon implements Weapon {
     private static final double BLEED_TICK_DAMAGE = 1.0;  // one drained stack = half a heart
     private static final long   BLEED_PERIOD_TICKS = 20;  // drain one stack per second
     private static final int    STACKS_PER_HIT = 1;       // each landed cut deepens the wound by one stack
-    private static final int    MAX_STACKS = 6;           // cap: <=6.0 accumulated, bled out over <=6s
+    private static final int    MAX_STACKS = 8;           // cap: <=8.0 accumulated, bled out over <=8s (true bleed — ignores plate)
 
     public WristCutterWeapon(Reliquary plugin) {
         this.plugin = plugin;
@@ -171,9 +171,11 @@ public final class WristCutterWeapon implements Weapon {
             ticking.add(vid); // fence: victim.damage below re-enters onHit; don't let it add a stack
             try {
                 if (attacker != null && !attacker.equals(victim)) {
-                    victim.damage(BLEED_TICK_DAMAGE, attacker);
+                    // Armor-piercing true bleed: the wound ignores plate. The helper clears i-frames and
+                    // neutralises knockback, matching this DoT's zero-shove intent.
+                    plugin.weapons().pierceDamage(victim, BLEED_TICK_DAMAGE, 1.0, attacker);
                 } else {
-                    victim.damage(BLEED_TICK_DAMAGE);
+                    victim.damage(BLEED_TICK_DAMAGE); // attacker offline: no pierce helper without a player
                 }
             } finally {
                 ticking.remove(vid);
@@ -258,12 +260,13 @@ public final class WristCutterWeapon implements Weapon {
             List.of(
                     new EgoLore.Ability("[Passive] Bleed Drain",
                             "Bleed stacks drain one per second,",
-                            "each dealing half a heart. The drain",
+                            "each dealing half a heart of true",
+                            "damage that ignores armor. The drain",
                             "starts from the first stack and never",
                             "knocks the foe back."),
                     new EgoLore.Ability("[Left Click] Bleeding Cut",
                             "Each landed hit deepens the wound by",
-                            "one bleed stack, up to 6. Sword damage",
+                            "one bleed stack, up to 8. Sword damage",
                             "is unchanged.")
             ));
 }

@@ -20,6 +20,8 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
 import java.util.List;
@@ -32,9 +34,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * Penitence — "One Sin and Hundreds of Good Deeds". A Lobotomy Corp E.G.O weapon shaped as a
  * cross-headed mace, materialized from a hollow-skulled archetype and reshaped by the observer.
  *
- * <p>By design it is <b>useless as a weapon</b>: its outgoing damage is hard-capped to a tiny value in
- * {@link #onHit}, so even a mace fall-slam does no more than graze. It is not carried to kill but to
- * atone — every landed blow can return a little of the penitent's own body and comfort:
+ * <p>It is a <b>penitent's weapon, not a killer's</b>: its outgoing damage is hard-capped in
+ * {@link #onHit} so an ordinary blow only ever grazes. The one exception is a committed mace fall-slam,
+ * which lands the cap and bites through half the target's armour — the atonement made forceful. Beyond
+ * the blow, every landed strike can still return a little of the penitent's own body and comfort:
  *
  * <ul>
  *   <li><b>Saturation grace</b> — a flat 10% chance per hit to restore a little food + saturation.</li>
@@ -53,8 +56,17 @@ public final class PenitenceWeapon implements Weapon {
     /** PDC key marking an ItemStack as Penitence. */
     private final NamespacedKey key;
 
-    /** Hard ceiling on outgoing damage — Penitence cannot be used as a mace; a blow only ever grazes. */
-    private static final double MACE_DAMAGE_CAP = 2.0;
+    /** Hard ceiling on outgoing damage — an ordinary blow only ever grazes for this much. */
+    private static final double MACE_DAMAGE_CAP = 6.0;
+
+    /** A committed mace fall-slam ignores this fraction of the target's armour (the atonement made forceful). */
+    private static final double FALL_SLAM_ARMOR_PIERCE = 0.50;
+
+    /** How far the wielder must be falling for a hit to count as a fall-slam rather than a plain swing. */
+    private static final float  FALL_SLAM_MIN_FALL = 1.5f;
+
+    /** Weakness I on the struck foe when a mend procs — pressure without lifting the damage cap. 2s. */
+    private static final int    MEND_WEAKNESS_TICKS = 40;
 
     /** How much health a mending proc restores — one heart. Clamped to max, never overheals. */
     private static final double HEAL_PER_HIT = 2.0;
@@ -111,9 +123,16 @@ public final class PenitenceWeapon implements Weapon {
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
-        // Penitence cannot be wielded as a mace — hard-cap the outgoing damage so even a full
-        // fall-slam only grazes. It is carried to atone, not to kill.
-        event.setDamage(Math.min(event.getDamage(), MACE_DAMAGE_CAP));
+        // An ordinary swing only ever grazes — cap it. The exception is a committed mace fall-slam: it
+        // still lands only the cap, but half the target's armour is ignored, so the slam is worth throwing
+        // without turning Penitence into a mace. The slam is routed through the framework's pierce helper
+        // (i-frames cleared, fenced, zero-knockback), and its vanilla blow is cancelled so the two don't stack.
+        if (attacker.getFallDistance() > FALL_SLAM_MIN_FALL) {
+            event.setCancelled(true);
+            plugin.weapons().pierceDamage(victim, MACE_DAMAGE_CAP, FALL_SLAM_ARMOR_PIERCE, attacker);
+        } else {
+            event.setDamage(Math.min(event.getDamage(), MACE_DAMAGE_CAP));
+        }
 
         // TODO(flavor): "Special: against any wielder of 'Paradise Lost', deals 50000% more damage."
         // Deliberately NOT implemented. When a Paradise Lost weapon/wielder exists, detect the victim
@@ -135,6 +154,9 @@ public final class PenitenceWeapon implements Weapon {
         double chance = healChance.getOrDefault(id, HEAL_CHANCE_BASE);
         if (ThreadLocalRandom.current().nextDouble() < chance) {
             healChance.put(id, HEAL_CHANCE_BASE); // proc — reset the ramp
+            // A mend-proc presses the struck foe: a short Weakness, so the grace has a little bite without
+            // the damage cap ever rising.
+            victim.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, MEND_WEAKNESS_TICKS, 0, false, true, true));
             if (mend(attacker)) {
                 tollBell(attacker);
                 traceCross(attacker, victim);
@@ -236,8 +258,9 @@ public final class PenitenceWeapon implements Weapon {
             ),
             List.of(
                     new EgoLore.Ability("[Left Click] Damage Cap",
-                            "Attacks deal at most 2 damage. Even",
-                            "a mace fall-slam only grazes."),
+                            "Attacks deal at most 6 damage. A",
+                            "committed mace fall-slam bites through",
+                            "half the target's armor."),
                     new EgoLore.Ability("[Passive] Saturation Grace",
                             "Each hit has a 10% chance to restore",
                             "a little food and saturation."),
@@ -245,6 +268,7 @@ public final class PenitenceWeapon implements Weapon {
                             "Each hit has a chance to mend one",
                             "heart, never overhealing. Starts at",
                             "5% and climbs 5% per hit until it",
-                            "procs, then resets to 5%.")
+                            "procs, then resets to 5%. A proc also",
+                            "briefly weakens the struck foe.")
             ));
 }

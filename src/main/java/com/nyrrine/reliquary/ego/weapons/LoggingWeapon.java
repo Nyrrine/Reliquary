@@ -276,9 +276,11 @@ public final class LoggingWeapon implements Weapon {
             if (wielder != null) ticking.add(wielderId); // fence: this damage re-enters onHit
             try {
                 if (wielder != null && !wielder.equals(victim)) {
-                    victim.damage(BLEED_DAMAGE, wielder);
+                    // Internal bleeding shouldn't be plated — true damage via the pierce helper (full armour
+                    // bypass), which also clears i-frames and neutralises knockback for this DoT.
+                    plugin.weapons().pierceDamage(victim, BLEED_DAMAGE, 1.0, wielder);
                 } else {
-                    victim.damage(BLEED_DAMAGE);
+                    victim.damage(BLEED_DAMAGE); // wielder offline: no pierce helper without a player
                 }
             } finally {
                 if (wielder != null) ticking.remove(wielderId);
@@ -429,8 +431,8 @@ public final class LoggingWeapon implements Weapon {
                             "At a full charge, tear the heart from",
                             "the last foe you hit — within 8 blocks",
                             "and struck in the last 9 seconds. A",
-                            "heavy burst, a short bleed, and 9s of",
-                            "Slowness II and Weakness. Spends the",
-                            "charge.")
+                            "heavy burst, a short bleed of true",
+                            "damage, and 9s of Slowness II and",
+                            "Weakness. Spends the charge.")
             ));
 }

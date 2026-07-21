@@ -132,6 +132,8 @@ public final class HornetWeapon implements Weapon {
     private static final int    BUCKSHOT_PELLETS       = 6;     // pellets per blast
     private static final double BUCKSHOT_PELLET_DAMAGE = 1.8;   // per pellet — 10.8 total point-blank
     private static final double SHOTGUN_RANGE          = 12.0;  // close-quarters reach
+    private static final double POINT_BLANK_RANGE      = 4.0;   // within this, the packed blast bites through plate
+    private static final double BUCKSHOT_ARMOR_PIERCE  = 0.30;  // ~30% of armour ignored at point-blank
     private static final double SHOTGUN_RAY_SIZE       = 0.5;   // entity ray fatness
     private static final double SHOTGUN_CONE           = 0.13;  // spread scatter on each pellet
     private static final long   SHOTGUN_COOLDOWN_MS    = 3000L; // 3s between shots
@@ -496,10 +498,16 @@ public final class HornetWeapon implements Weapon {
             // ten ticks — so without this the first pellet stamped hurt-immunity and the other five were
             // swallowed whole. A full point-blank blast landed 1.8 instead of 10.8, which read in play as
             // "buckshot does half a heart". The pellets aren't weak; they were never arriving.
+            double hitDist = eye.toVector().distance(entHit.getHitPosition());
             le.setNoDamageTicks(0);
             shooting.add(le.getUniqueId());
             try {
-                le.damage(BUCKSHOT_PELLET_DAMAGE, player);   // routed so other plugins can cancel
+                if (hitDist <= POINT_BLANK_RANGE) {
+                    // Point-blank: the packed shot punches through plate. Partial armour-pierce via the helper.
+                    plugin.weapons().pierceDamage(le, BUCKSHOT_PELLET_DAMAGE, BUCKSHOT_ARMOR_PIERCE, player);
+                } else {
+                    le.damage(BUCKSHOT_PELLET_DAMAGE, player);   // routed so other plugins can cancel
+                }
             } finally {
                 shooting.remove(le.getUniqueId());
             }
@@ -860,8 +868,9 @@ public final class HornetWeapon implements Weapon {
                     new EgoLore.Ability("[Left-Click] Hornet [Rifle]",
                             "One spore round. 1s between shots."),
                     new EgoLore.Ability("[Left-Click] Hornet [Shotgun]",
-                            "A buckshot cone; each pellet",
-                            "pierces 3 bodies. 3s between shots.")
+                            "A buckshot cone; each pellet pierces 3",
+                            "bodies, and point-blank bites through",
+                            "armor. 3s between shots.")
             ));
 
     // ---- lifecycle -----------------------------------------------------------------------

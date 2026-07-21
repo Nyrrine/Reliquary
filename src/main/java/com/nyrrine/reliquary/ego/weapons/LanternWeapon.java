@@ -45,10 +45,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * while the Lantern is drawn; see it for the two blows that don't count.
  *
  * <p><b>[Left Click] I Shall Nibble Thee!</b> Ordinary slow strikes ride the vanilla swing untouched, but
- * every {@value #NIBBLE_EVERY}th landed strike is a real bite: the teeth close, and the wielder is healed
- * for the <i>full</i> damage that strike dealt ({@code event.getFinalDamage()} — what the victim actually
- * takes after their armour, so a well-armoured foe feeds the lantern less). The strike counter rides the
- * action bar as pips so the wielder can see the bite coming.
+ * every {@value #NIBBLE_EVERY}th landed strike is a real bite: the teeth close, a {@value #NIBBLE_BITE_DAMAGE}
+ * true-damage bite that ignores armour lands on top of the swing, and the wielder is healed for both — the
+ * swing's post-armour figure ({@code event.getFinalDamage()}) plus the full bite, so even a plated foe now
+ * feeds the lantern. The strike counter rides the action bar as pips so the wielder can see the bite coming.
  *
  * <p><b>On the fallback item.</b> The Lantern was a MACE and is now a NETHERITE_HOE — a haft with a head,
  * which is the right silhouette for a lantern on a pole and, more to the point, one of the few vanilla
@@ -83,6 +83,9 @@ public final class LanternWeapon implements Weapon {
 
     /** I Shall Nibble Thee!: every Nth landed strike is the bite that heals. */
     private static final int NIBBLE_EVERY = 5;
+
+    /** The bite itself: true damage bypassing armour, so plate doesn't starve the devour. */
+    private static final double NIBBLE_BITE_DAMAGE = 4.0;
 
     /** Ambient lure glow cadence, in onTick dispatches (onTick fires every 2 server ticks -> ~1s). */
     private static final int LURE_PERIOD = 10;
@@ -144,14 +147,14 @@ public final class LanternWeapon implements Weapon {
     // ---- [Left Click] I Shall Nibble Thee! ---------------------------------------------
 
     /**
-     * A landed strike, and the teeth that ride it. Every {@value #NIBBLE_EVERY}th one bites, and the
-     * wielder is healed for the full damage that strike deals — read via {@code getFinalDamage()}, so the
-     * figure is what the victim actually takes once their armour has had its say, and a well-armoured foe
-     * feeds the lantern less.
+     * A landed strike, and the teeth that ride it. Every {@value #NIBBLE_EVERY}th one bites: a
+     * {@value #NIBBLE_BITE_DAMAGE} true-damage bite that ignores armour lands on top of the vanilla swing,
+     * and the wielder is healed for both — the swing's post-armour figure (via {@code getFinalDamage()})
+     * plus the full bite — so even a well-armoured foe now feeds the lantern.
      *
-     * <p>Nothing here re-deals damage ({@code victim.damage()} is never called, only the attacker is
-     * healed), so this hook cannot re-enter itself and needs no re-entrancy fence. Wear is left to the
-     * vanilla swing that carried the hit — the bite is not a separate use.
+     * <p>The bite is dealt through the framework's pierce helper, which fences the blow (the re-entering
+     * dispatch is recognised as ours and never handed back), so this hook cannot bite its own bite. Wear is
+     * left to the vanilla swing that carried the hit — the bite is not a separate use.
      *
      * <p>This used to open by clamping a MACE fall-slam out of the blow. The Lantern is no longer a mace
      * (see {@link EgoModels#LANTERN}), so there is no slam bonus to neutralise and the clamp is gone with
@@ -168,8 +171,10 @@ public final class LanternWeapon implements Weapon {
         }
         nibbleTally.put(id, 0); // the teeth have closed — start counting toward the next bite
 
-        // What the victim actually takes, post-clamp and post-armour, is what the lantern gets to swallow.
-        double dealt = event.getFinalDamage();
+        // The teeth close: a true-damage bite that ignores plate, landed on top of the vanilla swing so the
+        // devour bites netherite. The lantern swallows both — the swing (post-armour) and the full bite.
+        plugin.weapons().pierceDamage(victim, NIBBLE_BITE_DAMAGE, 1.0, attacker);
+        double dealt = event.getFinalDamage() + NIBBLE_BITE_DAMAGE;
         biteFx(attacker, victim);
         if (dealt > 0 && heal(attacker, dealt)) cue(attacker, "Lantern — nibbled");
     }
@@ -401,8 +406,9 @@ public final class LanternWeapon implements Weapon {
             "damage after three seconds."),
         new EgoLore.Ability("[Left Click] I Shall Nibble Thee!",
             "Slow strikes. Every 5th strike bites",
-            "deep and heals you for the full",
-            "damage that strike dealt.")
+            "deep for 4 true damage through armor,",
+            "and heals you for the swing plus the",
+            "bite.")
     );
 
     private static final EgoLore.Tooltip TOOLTIP =

@@ -218,7 +218,7 @@ public final class BeakWeapon implements Weapon {
             if (entHit == null || !(entHit.getHitEntity() instanceof LivingEntity le)) break;
 
             Location hitLoc = entHit.getHitPosition().toLocation(world);
-            damageNoKnockback(le, player);
+            damageNoKnockback(le, player, piercing > 0);
             impactFx(world, hitLoc);
             hitIds.add(le.getUniqueId());
             if (firstHit == null) firstHit = hitLoc;
@@ -233,8 +233,18 @@ public final class BeakWeapon implements Weapon {
         drawTracer(world, muzzle, end);
     }
 
-    /** Deal the peck with zero knockback — capture the victim's velocity, damage, then restore it. */
-    private void damageNoKnockback(LivingEntity victim, Player source) {
+    /**
+     * Deal the peck with zero knockback — capture the victim's velocity, damage, then restore it. With the
+     * Piercing enchant the toothed pellet also punches through plate: the blow is routed through the
+     * framework's pierce helper for a full armour bypass (which clears i-frames and neutralises knockback on
+     * its own), so a plated target no longer eats the whole peck.
+     */
+    private void damageNoKnockback(LivingEntity victim, Player source, boolean pierceArmor) {
+        if (pierceArmor) {
+            plugin.weapons().pierceDamage(victim, DAMAGE, 1.0, source);
+            peckSound(victim);
+            return;
+        }
         Vector velocity = victim.getVelocity();
         // The bird pecks faster than vanilla lets a body be hurt. A body may only take damage once every
         // ten ticks, and a Multishot burst puts three pecks two ticks apart into whatever is in front of
@@ -395,7 +405,7 @@ public final class BeakWeapon implements Weapon {
                     new EgoLore.Ability("[Passive] Piercing Through-Shot",
                             "With Piercing, each pellet punches",
                             "through the first target and into one",
-                            "more per level.")
+                            "more per level, and bites through armor.")
             ));
 
     // ---- lifecycle -----------------------------------------------------------------
