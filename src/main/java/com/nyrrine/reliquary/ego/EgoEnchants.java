@@ -10,6 +10,7 @@ import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -41,9 +42,9 @@ public final class EgoEnchants {
         return lvl == null ? 0 : lvl;
     }
 
-    /** Every ego-enchant on {@code item} as {@code id -> level} (never null). */
+    /** Every ego-enchant on {@code item} as {@code id -> level} (never null). Ordered for a stable tooltip. */
     public static Map<String, Integer> all(ItemStack item) {
-        Map<String, Integer> out = new HashMap<>();
+        Map<String, Integer> out = new LinkedHashMap<>();
         if (item == null || !item.hasItemMeta()) return out;
         PersistentDataContainer sub = item.getItemMeta().getPersistentDataContainer()
                 .get(EGO_ENCHANTS, PersistentDataType.TAG_CONTAINER);

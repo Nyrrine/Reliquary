@@ -144,6 +144,8 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         weapons.register(flowerWedge);
 
         weapons.start();
+        getServer().getPluginManager().registerEvents(
+                new com.nyrrine.reliquary.ego.EgoEnchantListener(weapons), this); // vanilla enchants at an anvil read beneath the ego
         getServer().getPluginManager().registerEvents(new LaevateinnDoubleJump(this, laevateinn), this);
         getServer().getPluginManager().registerEvents(new LaevateinnMelee(laevateinn), this);
         getServer().getPluginManager().registerEvents(new FlowerBuryingWedgeReckoning(flowerWedge), this);
@@ -371,6 +373,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         EgoEnchants.set(meta, id, level);
         item.setItemMeta(meta);
         EgoEnchants.reapplyLore(egoWeapon, item);
+        player.getInventory().setItemInMainHand(item); // write the mutated item back so the change persists + refreshes
 
         Component verb = level == 0
                 ? Component.text("Removed ").color(NamedTextColor.GRAY)
@@ -418,6 +421,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         for (EgoEnchant e : customs) EgoEnchants.set(meta, e.id(), e.maxLevel());
         item.setItemMeta(meta);
         EgoEnchants.reapplyLore(egoWeapon, item);
+        player.getInventory().setItemInMainHand(item); // write the mutated item back so it persists + refreshes
 
         player.sendMessage(Component.text("Maxed ").color(NamedTextColor.GRAY)
                 .append(Component.text(vanilla + " vanilla + " + customs.size() + " custom")
