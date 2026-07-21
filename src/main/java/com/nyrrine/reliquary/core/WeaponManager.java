@@ -457,15 +457,26 @@ public final class WeaponManager implements Listener {
      * velocity is restored to match the roster's zero-knockback follow-up idiom.
      */
     public void pierceDamage(LivingEntity victim, double amount, double ignoreFraction, Player attacker) {
-        double f = Math.max(0.0, Math.min(1.0, ignoreFraction));
-        double reduction = armorReduction(victim, amount);
-        double input = amount * ((1.0 - f) + f / Math.max(1.0e-3, 1.0 - reduction));
+        double input = pierceInput(victim, amount, ignoreFraction);
         Vector before = victim.getVelocity();
         dealing(attacker.getUniqueId(), () -> {
             victim.setNoDamageTicks(0);
             victim.damage(input, attacker);
         });
         victim.setVelocity(before);
+    }
+
+    /**
+     * The armour-pierce scaling of {@link #pierceDamage} as a raw damage value to hand to
+     * {@code event.setDamage(...)} instead of re-dealing — so a relic can make its OWN vanilla swing ignore
+     * {@code ignoreFraction} of the target's armour while KEEPING the swing's knockback, sweep, on-hit enchant
+     * procs and durability. Use this on a primary swing's damage event; use {@link #pierceDamage} for a
+     * scheduled follow-up blow that has no event of its own.
+     */
+    public double pierceInput(LivingEntity victim, double amount, double ignoreFraction) {
+        double f = Math.max(0.0, Math.min(1.0, ignoreFraction));
+        double reduction = armorReduction(victim, amount);
+        return amount * ((1.0 - f) + f / Math.max(1.0e-3, 1.0 - reduction));
     }
 
     /** The vanilla armour + toughness reduction fraction (0..1) a blow of {@code damage} suffers on {@code victim}. */
