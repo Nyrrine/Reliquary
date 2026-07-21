@@ -161,12 +161,13 @@ public final class MimicryWeapon implements Weapon {
     // ---- tuning: the passive drink -------------------------------------------------
 
     /**
-     * PLACEHOLDER (balance wave): how much harder the regular M1 slices (beats 1-3) hit. A multiplier on the
-     * vanilla swing in {@link #onHit}, so enchants/crits still scale (never a flat set — not the Regret bug).
-     * The finisher beat is left at its base number by design (its payoff is the deeper drink, lunge, reach).
-     * Exact value is in Nyrrine's balance doc.
+     * PLACEHOLDER (balance wave): how much harder the regular M1 slices (beats 1-3) hit, and the heavier
+     * multiplier the finisher earns so it stays the biggest cut of the chain (Nyrrine §7: bump the finisher
+     * too). Both are multipliers on the vanilla swing in {@link #onHit}, so enchants and crits still scale
+     * (never a flat set — not the Regret bug). Exact values are in Nyrrine's balance doc.
      */
     private static final double M1_REGULAR_DAMAGE_MULT = 1.35;
+    private static final double M1_FINISHER_DAMAGE_MULT = 1.65;
 
     /** Fraction of a landed blow's damage the weapon drinks back into its wielder. */
     private static final double LIFESTEAL_FRACTION = 0.25;
@@ -521,12 +522,12 @@ public final class MimicryWeapon implements Weapon {
 
         long now = System.currentTimeMillis();
 
-        // Which M1 beat this swing is: the finisher was primed on its draw. The regular slices (beats 1-3)
-        // hit harder — a multiplier, so enchants still scale — while the finisher's blow keeps its base
-        // number, its payoff being the deeper drink, the lunge and the reach rather than a bigger cut.
+        // Which M1 beat this swing is: the finisher was primed on its draw. Every landed slice hits harder
+        // through a multiplier (so enchants and crits still scale), and the finisher hits the hardest of all
+        // — it stays the biggest cut of the chain on top of its deeper drink, lunge and reach.
         Combo combo = combos.get(aid);
         boolean finisher = combo != null && combo.finisherPrimed;
-        if (!finisher) event.setDamage(event.getDamage() * M1_REGULAR_DAMAGE_MULT);
+        event.setDamage(event.getDamage() * (finisher ? M1_FINISHER_DAMAGE_MULT : M1_REGULAR_DAMAGE_MULT));
 
         // The damage the blow actually lands, after armour and resistances — what the weapon really took.
         double dealt = event.getFinalDamage();

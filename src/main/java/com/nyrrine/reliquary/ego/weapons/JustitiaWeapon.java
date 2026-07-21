@@ -78,12 +78,12 @@ import java.util.concurrent.ThreadLocalRandom;
  * that is exactly 20% / 40% / 40%. Jurisdiction's ramp is clamped at {@link #MAX_BONUS_STACKS} swings
  * precisely so {@code p10 + p5} can never cross 1.0 and silently eat the miss band.
  *
- * <h2>The two fences that keep it honest</h2>
- * A combo re-deals damage through {@code victim.damage(..., attacker)}, which re-enters
- * {@link #onHit} — so every sub-hit runs inside the {@link #comboing} fence, or a five-hit proc would
- * roll Judgement five more times and recursively proc itself into oblivion. Conversely the opening
- * swing stamps hurt-immunity on the victim, which would swallow every follow-up cut, so each sub-hit
- * clears {@code setNoDamageTicks(0)} first — without it a "ten-hit combo" lands exactly once.
+ * <h2>How a verdict's cuts stay honest</h2>
+ * A combo deals each of its cuts through the framework's {@code pierceDamage} (which also gives them their
+ * armour-ignoring bite). That one call carries everything the combo used to fence by hand: it runs inside
+ * the framework's {@code dealing()} fence, so a cut never re-enters {@link #onHit} to roll Judgement on
+ * itself and recurse away; and it clears the victim's hurt-immunity first, or the opening swing's i-frames
+ * would swallow every follow-up and a "ten-hit combo" would land exactly once.
  *
  * <h2>How the counter hears the blow, and why immunity zeroes rather than cancels</h2>
  * Persecution answers from {@link #onDamaged}, which hands it the strike itself — so the defendant is
@@ -115,13 +115,6 @@ public final class JustitiaWeapon implements Weapon {
 
     /** Wielder UUID -> their balance: proc ramp, cooldowns, hit counter, live stance. Pruned on quit. */
     private final Map<UUID, Wielder> wielders = new HashMap<>();
-
-    /**
-     * Wielders currently dealing a Judgement combo's sub-hit — the re-entrancy fence for {@link #onHit}.
-     * The sub-hit's {@code victim.damage(..., attacker)} re-enters the manager's melee dispatch; without
-     * this, a proc would roll Judgement again on its own cuts and recurse away.
-     */
-    private final Set<UUID> comboing = new HashSet<>();
 
     /** Live combos, so {@link #onDisable} can cancel a verdict caught mid-swing. Self-pruning. */
     private final Set<JudgementCombo> activeCombos = new HashSet<>();
@@ -197,6 +190,9 @@ public final class JustitiaWeapon implements Weapon {
     /** How long Darkness clings — 5 seconds. */
     private static final int INDIFFERENCE_TICKS = 100;
 
+    /** Fraction of a struck body's armour a verdict cut ignores — the greatsword is a sentence, not a poke. */
+    private static final double JUDGEMENT_ARMOR_IGNORE = 0.33;
+
     // ---- Persecution: the counter-stance --------------------------------------------
 
     /**
@@ -208,6 +204,13 @@ public final class JustitiaWeapon implements Weapon {
 
     /** Persecution rests this long once the stance closes — by counter or by lapse. */
     private static final long PERSECUTION_COOLDOWN_MS = 15_000L;
+
+    /**
+     * PLACEHOLDER (balance wave): the retribution the counter deals the striker as the verdict lands. It
+     * ignores the same {@link #JUDGEMENT_ARMOR_IGNORE} armour fraction a verdict cut does — the counter used
+     * to be pure control (0 damage); now it bites.
+     */
+    private static final double PERSECUTION_RETRIBUTION_DAMAGE = 9.0;
 
     /** How long a countered striker is rooted — ~2s. Best-effort against players; see {@link RootTask}. */
     private static final int ROOT_TICKS = 40;
@@ -325,7 +328,8 @@ public final class JustitiaWeapon implements Weapon {
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
         UUID id = attacker.getUniqueId();
-        if (comboing.contains(id)) return; // our own verdict's cut — a proc must never proc itself
+        // Our own verdict cut never reaches here: it is dealt through the framework's pierceDamage, whose
+        // dealing() fence makes the manager skip this dispatch. So a proc can never proc itself.
 
         Wielder w = wielder(id);
         if (w.swingStacks < MAX_BONUS_STACKS) w.swingStacks++; // Jurisdiction: only a landed blow tips it
@@ -402,11 +406,11 @@ public final class JustitiaWeapon implements Weapon {
     }
 
     /**
-     * A passed verdict, cut by cut. Each step clears the victim's hurt-immunity before striking — vanilla
-     * stamped i-frames on the opening swing and every follow-up would otherwise be swallowed, turning the
-     * combo into a single hit — and runs the damage inside the {@link #comboing} fence so it cannot roll
-     * Judgement on itself. Velocity is captured and restored around each cut so the flurry stays a
-     * flurry rather than punting the quarry across the field, exactly as the bleed weapons do.
+     * A passed verdict, cut by cut. Each step is dealt through {@code pierceDamage}, which clears the
+     * victim's hurt-immunity before striking (vanilla stamped i-frames on the opening swing and every
+     * follow-up would otherwise be swallowed, turning the combo into a single hit), fences the cut so it
+     * cannot roll Judgement on itself, restores the pre-hit velocity so the flurry stays a flurry rather
+     * than punting the quarry across the field, and gives each cut its armour-ignoring bite.
      */
     private final class JudgementCombo extends BukkitRunnable {
         private final UUID attackerId;
@@ -436,17 +440,11 @@ public final class JustitiaWeapon implements Weapon {
 
             int index = step++;          // which stroke of the sentence this is — the cut's VFX wants it
             double dmg = steps[index];
-            Vector preVel = victim.getVelocity();
-            UUID aid = attacker.getUniqueId();
 
-            comboing.add(aid); // fence: the damage below re-enters onHit — don't let the proc proc itself
-            try {
-                victim.setNoDamageTicks(0); // strip the i-frames, or this cut simply never lands
-                victim.damage(dmg, attacker);
-            } finally {
-                comboing.remove(aid);
-                victim.setVelocity(preVel); // undo this cut's knockback impulse
-            }
+            // The verdict cut ignores a third of the target's armour, dealt through the framework's pierce:
+            // fenced (so it never re-rolls Judgement on its own cut), i-frames cleared so each stroke lands,
+            // knockback undone — everything the old private comboing fence did, now the framework's job.
+            plugin.weapons().pierceDamage(victim, dmg, JUDGEMENT_ARMOR_IGNORE, attacker);
 
             registerHit(victim, wielder); // each cut of the verdict counts toward Indifference
             cutFx(attacker, victim, dmg, index);
@@ -561,6 +559,10 @@ public final class JustitiaWeapon implements Weapon {
         Location behind = Blink.behind(striker.getLocation(), COUNTER_BEHIND_DISTANCE);
         if (behind != null) player.teleport(behind);
         applyIndifference(striker); // "This counter move triggers Indifference"
+
+        // The verdict is not just control any more — it bites, ignoring the same armour fraction a cut does.
+        // Fenced through pierceDamage, so it neither re-rolls Judgement nor punts the rooted striker away.
+        plugin.weapons().pierceDamage(striker, PERSECUTION_RETRIBUTION_DAMAGE, JUDGEMENT_ARMOR_IGNORE, player);
 
         counterFx(from, player, striker);
     }
@@ -704,7 +706,6 @@ public final class JustitiaWeapon implements Weapon {
     public void onQuit(UUID id) {
         Wielder w = wielders.remove(id);
         if (w != null && w.scales != null) w.scales.dispose();
-        comboing.remove(id);
         rooted.remove(id); // the quitter may have been a rooted striker rather than a wielder
     }
 
@@ -722,7 +723,6 @@ public final class JustitiaWeapon implements Weapon {
             if (w.scales != null) w.scales.dispose();
         }
         wielders.clear();
-        comboing.clear();
 
         sweepOrphans(); // belt-and-braces: reap any stray scale piece anywhere in the world
     }

@@ -46,8 +46,9 @@ import java.util.UUID;
  * vanilla connect is swallowed (so its lone blow and its knockback never land) and in its place the motor
  * drives {@link #STRIKES} small grinding bites into the same body, a few ticks apart, over a short window
  * ({@link #STRIKE_PERIOD_TICKS}-spaced) — a slower cadence than a sword. The whole burst tops out at
- * {@code STRIKES * STRIKE_DAMAGE} (~6.6) — a measured burst rather than a big single blow — and armour
- * reduces it normally (the grind does not shred plate). A low, sawing grindstone note rides every left-click.
+ * {@code STRIKES * STRIKE_DAMAGE} (~6.6) — a measured burst rather than a big single blow — and each bite
+ * ignores {@link #GRIND_ARMOR_IGNORE} of the body's armour: a grinder's teeth shred plate where a sword
+ * glances off it. A low, sawing grindstone note rides every left-click.
  *
  * <p><b>Shift-right-click — the sustained grind (a TOGGLE).</b> True right-mouse-hold isn't detectable in
  * Bukkit, so the sustained grind is a toggle: shift-right-click spins it up, shift-right-click again — or
@@ -98,8 +99,11 @@ public final class GrinderMk4Weapon implements Weapon {
     private static final double GRIND_RANGE   = 3.5;
     /** Cone tightness — dot(look, toTarget) must clear this (~0.6 ≈ a 53° half-cone). */
     private static final double GRIND_DOT     = 0.60;
-    /** Per-application grind damage. Applied every {@link #GRIND_INTERVAL} ticks → ~4 DPS, no shred. */
+    /** Per-application grind damage. Applied every {@link #GRIND_INTERVAL} ticks → ~4 DPS. */
     private static final double GRIND_DAMAGE  = 2.0;
+
+    /** Fraction of a body's armour every grinding bite ignores — a grinder's teeth shred plate (balance wave). */
+    private static final double GRIND_ARMOR_IGNORE = 0.50;
     /** onTick runs every 2 game ticks and {@code tick} counts those runs; grind entities every 5th
      *  run = every ~10 game ticks (0.5s). Aligns with vanilla i-frames so every bite lands full. */
     private static final long   GRIND_INTERVAL = 5L;
@@ -402,27 +406,29 @@ public final class GrinderMk4Weapon implements Weapon {
     // ---- the shared no-knockback grinding bite ------------------------------------
 
     /**
-     * Deal one grinding bite. The {@link #ticking} fence wraps the {@code victim.damage} call (so the
-     * re-entering {@link #onHit} leaves it alone), i-frames are cleared so rapid bites all land full, and
-     * the victim's velocity is captured and restored around the hit — the grind never knocks anything back.
+     * Deal one grinding bite. A grinder shreds: each bite ignores {@link #GRIND_ARMOR_IGNORE} of the body's
+     * armour, dealt through the framework's {@code pierceDamage} — which fences the blow (so the re-entering
+     * {@link #onHit} leaves it alone), clears i-frames so rapid bites all land full, and captures/restores
+     * the victim's velocity so the grind never knocks anything back. The self-grind corner (a reflected
+     * bite onto the wielder) keeps the plain fenced form: piercing your own armour is meaningless.
      */
     private void grindDamage(Player attacker, LivingEntity victim, double dmg) {
-        UUID vid = victim.getUniqueId();
-        Vector before = victim.getVelocity();
-        ticking.add(vid);
-        try {
-            victim.setNoDamageTicks(0);
-            if (!attacker.equals(victim)) {
-                victim.damage(dmg, attacker);
-            } else {
+        if (attacker.equals(victim)) {
+            UUID vid = victim.getUniqueId();
+            Vector before = victim.getVelocity();
+            ticking.add(vid);
+            try {
+                victim.setNoDamageTicks(0);
                 victim.damage(dmg);
+            } catch (Throwable ignored) {
+                // A bite on a vanishing body shouldn't propagate — swallow and move on.
+            } finally {
+                ticking.remove(vid);
             }
-        } catch (Throwable ignored) {
-            // A bite on a vanishing body shouldn't propagate — swallow and move on.
-        } finally {
-            ticking.remove(vid);
+            victim.setVelocity(before);
+            return;
         }
-        victim.setVelocity(before); // restore pre-hit motion → zero knockback from the bite
+        plugin.weapons().pierceDamage(victim, dmg, GRIND_ARMOR_IGNORE, attacker);
     }
 
     // ---- SFX / VFX -----------------------------------------------------------------

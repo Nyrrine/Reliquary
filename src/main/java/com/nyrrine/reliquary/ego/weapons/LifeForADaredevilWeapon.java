@@ -117,6 +117,12 @@ public final class LifeForADaredevilWeapon implements Weapon {
     private static final double EXECUTE_RANGE = 9.0;
     private static final double EXECUTE_RANGE_SQ = EXECUTE_RANGE * EXECUTE_RANGE;
 
+    /**
+     * Fraction of a struck body's armour the base swing ignores (NOT full — the execute is the only
+     * armour-bypass) — the edge that pays for the wielder's two-heart burden. PLACEHOLDER for the balance wave.
+     */
+    private static final double DAREDEVIL_ARMOR_IGNORE = 0.45;
+
     /** How far past the victim's back the wielder arrives — a step, not a stride. */
     private static final double BEHIND_DISTANCE = 1.2;
 
@@ -324,10 +330,11 @@ public final class LifeForADaredevilWeapon implements Weapon {
     // ---- gimmick: a decapitation execute on a faltering foe -------------------------
 
     /**
-     * Melee hit landed. The vanilla sword damage is left intact. If the struck target is within
-     * {@link #EXECUTE_RANGE} and already below its HP threshold, the wielder blinks behind it and takes
-     * the head with an armour-bypassing finishing blow. The finishing blow re-enters this method (it fires
-     * its own damage event); the {@link #executing} fence makes that re-entrant call a no-op.
+     * Melee hit landed. The base swing is re-dealt through {@code pierceDamage} so it ignores part of the
+     * target's armour ({@link #DAREDEVIL_ARMOR_IGNORE}). If the struck target was already below its HP
+     * threshold before the swing and within {@link #EXECUTE_RANGE}, the wielder then blinks behind it and
+     * takes the head with an armour-bypassing finishing blow. Both re-enter this method (each fires its own
+     * damage event); the {@link #executing} fence and pierceDamage's own fence make those calls no-ops.
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
@@ -336,15 +343,25 @@ public final class LifeForADaredevilWeapon implements Weapon {
 
         if (victim.isDead() || !victim.isValid()) return;
         if (victim.getWorld() != attacker.getWorld()) return;
-        if (attacker.getLocation().distanceSquared(victim.getLocation()) > EXECUTE_RANGE_SQ) return;
 
-        AttributeInstance maxAttr = victim.getAttribute(Attribute.MAX_HEALTH);
-        double maxHp = maxAttr != null ? maxAttr.getValue() : 20.0;
-        if (maxHp <= 0.0) return;
-        double frac = victim.getHealth() / maxHp;
-        if (frac >= thresholdFor(victim)) return;            // not faltering enough — an ordinary sword blow
+        // Whether this blow finishes the target is read on its health BEFORE the swing lands — unchanged: the
+        // execute answers a foe already faltering, not one this swing itself brought low.
+        boolean faltering = false;
+        if (attacker.getLocation().distanceSquared(victim.getLocation()) <= EXECUTE_RANGE_SQ) {
+            AttributeInstance maxAttr = victim.getAttribute(Attribute.MAX_HEALTH);
+            double maxHp = maxAttr != null ? maxAttr.getValue() : 20.0;
+            faltering = maxHp > 0.0 && victim.getHealth() / maxHp < thresholdFor(victim);
+        }
 
-        decapitate(attacker, victim);
+        // The base swing bites through ~45% of the target's armour — the reach the wielder's own two-heart
+        // burden is paid for. pierceDamage re-deals the blow fenced (never recursing) with the armour ignored.
+        // NOTE it re-deals rather than editing the event, so the swing's vanilla knockback, sweep, on-hit
+        // enchant procs and durability wear do not carry — flagged for review.
+        double swingDmg = event.getDamage();
+        event.setCancelled(true);
+        plugin.weapons().pierceDamage(victim, swingDmg, DAREDEVIL_ARMOR_IGNORE, attacker);
+
+        if (faltering) decapitate(attacker, victim);          // already low before the swing — take the head
     }
 
     /**
