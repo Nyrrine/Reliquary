@@ -113,6 +113,9 @@ public final class EgoModels {
     // ---- ALEPH ----
     public static final Model JUSTITIA    = melee(Material.NETHERITE_SWORD, "justitia", 7.5, 1.0);
     public static final Model MIMICRY     = melee(Material.NETHERITE_SWORD, "mimicry", 6.5, 1.8);
+    // CENSORED — a grappling maw. Slow and heavy by design (its long-reaching custom strikes carry the feel,
+    // not the vanilla swing). Base atk/spd are placeholders for the balance wave.
+    public static final Model CENSORED    = melee(Material.NETHERITE_SWORD, "censored", 7.0, 0.9);
 
     // Vanilla base attributes: player attack damage = 1.0, attack speed = 4.0. An item modifier of
     // (atk - 1) / (spd - 4) makes the held weapon read exactly atk / spd.
