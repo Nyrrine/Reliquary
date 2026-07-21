@@ -28,6 +28,9 @@ public record EgoEnchant(String id, String displayName, int maxLevel, String des
     // Multishot, reinterpreted by Laetitia as a larger bolt magazine before the forced reload (+1 per level).
     public static final EgoEnchant MULTISHOT = reg("multishot", "Multishot", 3,
             "Laetitia: +1 bolt in the magazine per level before a reload.");
+    // Constellation, Our Galaxy's own reinterpretation of Multishot: +1 comet in the pool per level before recharge.
+    public static final EgoEnchant CONSTELLATION = reg("constellation", "Constellation", 2,
+            "Our Galaxy: +1 comet in the pool per level before a recharge.");
 
     /** The enchant with this id, or {@code null} if no such enchant is catalogued. */
     public static EgoEnchant get(String id) {

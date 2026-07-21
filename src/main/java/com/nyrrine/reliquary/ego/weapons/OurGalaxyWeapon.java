@@ -5,6 +5,7 @@ import com.nyrrine.reliquary.core.Blink;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -90,6 +91,7 @@ public final class OurGalaxyWeapon implements EgoWeapon {
 
     // Comet (right-click homing shot) tuning.
     private static final int    COMET_MAX_CHARGES = 3;
+    private static final int    CONSTELLATION_CAP = 2;      // Constellation adds one comet per level, up to +2 (a 5-pool)
     private static final long   COMET_RECHARGE_MS = 6_000L; // once all three are spent
     private static final double BOLT_DAMAGE       = 6.0;    // 3 hearts on contact
 
@@ -132,20 +134,32 @@ public final class OurGalaxyWeapon implements EgoWeapon {
         else fireComet(player);
     }
 
-    /** Right-click: loose a homing comet, gated by a three-charge magazine that recharges when emptied. */
+    /**
+     * The comet pool for the rod held right now: the base three plus one comet per Constellation level (capped).
+     * Constellation is reinterpreted as a bigger magazine of comets before the recharge — exactly the "+charges"
+     * fantasy from the enchant doc, correctly placed on the weapon that actually has a charge pool.
+     */
+    private int maxComets(Player player) {
+        int extra = Math.min(CONSTELLATION_CAP,
+                EgoEnchants.level(player.getInventory().getItemInMainHand(), "constellation"));
+        return COMET_MAX_CHARGES + Math.max(0, extra);
+    }
+
+    /** Right-click: loose a homing comet, gated by a charge magazine (grown by Constellation) that recharges when emptied. */
     private void fireComet(Player player) {
         UUID id = player.getUniqueId();
         long now = System.currentTimeMillis();
+        int max = maxComets(player);
 
         // Refill if the recharge has elapsed.
         Long refill = rechargeAt.get(id);
         if (refill != null && now >= refill) {
-            charges.put(id, COMET_MAX_CHARGES);
+            charges.put(id, max);
             rechargeAt.remove(id);
             refill = null;
         }
 
-        int left = charges.getOrDefault(id, COMET_MAX_CHARGES);
+        int left = charges.getOrDefault(id, max);
         if (left <= 0) {
             long remaining = refill != null ? refill - now : COMET_RECHARGE_MS;
             player.sendActionBar(EgoHud.cooldown("Comet", remaining, AZURE));
@@ -177,7 +191,7 @@ public final class OurGalaxyWeapon implements EgoWeapon {
         comet.runTaskTimer(plugin, 0L, 1L);
 
         // Show remaining charges (and, at empty, the pips read as spent — the recharge cue).
-        player.sendActionBar(EgoHud.pips("Comet", STAR, left, COMET_MAX_CHARGES));
+        player.sendActionBar(EgoHud.pips("Comet", STAR, left, max));
     }
 
     /** Sneak + right-click: a short line-of-sight blink in the look direction — never through walls. */
