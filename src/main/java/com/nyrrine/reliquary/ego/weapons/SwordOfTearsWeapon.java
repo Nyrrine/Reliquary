@@ -125,6 +125,11 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
     // same figure the roster's other big single commit lands, and it costs the whole fan to have ready.
     private static final int    RAPIER_COUNT       = 4;      // HARD CAP on the retinue — 4 displays per wielder, no more
     private static final long   BLADE_REST_MS      = 4000L;  // a blade rests this long after landing back in the fan
+
+    // Swift Return (a custom enchant — id "swift_return"): a returned blade rests less before it can be spent
+    // again. Cuts BLADE_REST_MS 12% per level, up to 36% at level 3. Cadence only — never a blade's damage.
+    private static final double SWIFT_RETURN_PER_LEVEL = 0.12;
+    private static final int    SWIFT_RETURN_CAP       = 3;
     private static final double STAB_DAMAGE        = 2.0;    // one rapier's puncture — Double Tag and duel stab alike
     private static final double IMPALE_DAMAGE      = 5.5;    // per committed blade on the Converging Impale
     private static final long   IMPALE_COOLDOWN_MS = 45000L; // the formation-wide commit gate (the old 45s, re-homed)
@@ -1002,8 +1007,17 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
             state[i] = BladeState.FAN;
             marks[i] = null;
             duelT[i] = 0;
-            restUntil[i] = System.currentTimeMillis() + BLADE_REST_MS;
+            restUntil[i] = System.currentTimeMillis() + bladeRestMs();
             if (b != null && b.isValid()) b.setTeleportDuration(3);
+        }
+
+        /** The blade-rest for the sword held right now: the base rest cut by its Swift Return bonus. */
+        private long bladeRestMs() {
+            Player owner = plugin.getServer().getPlayer(ownerId);
+            if (owner == null) return BLADE_REST_MS;
+            int lvl = Math.min(SWIFT_RETURN_CAP,
+                    EgoEnchants.level(owner.getInventory().getItemInMainHand(), "swift_return"));
+            return (long) (BLADE_REST_MS * (1.0 - SWIFT_RETURN_PER_LEVEL * lvl));
         }
 
         // ---- bookkeeping ----------------------------------------------------------
