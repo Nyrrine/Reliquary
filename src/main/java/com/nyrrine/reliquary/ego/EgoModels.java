@@ -116,6 +116,9 @@ public final class EgoModels {
     // CENSORED — a grappling maw. Slow and heavy by design (its long-reaching custom strikes carry the feel,
     // not the vanilla swing). Base atk/spd are placeholders for the balance wave.
     public static final Model CENSORED    = melee(Material.NETHERITE_SWORD, "censored", 7.0, 0.9);
+    // TWILIGHT — the Apocalypse Bird's greatsword. A SPECIAL (Cogito-unobtainable) flagship: a heavy four-hit
+    // combo blade. Base atk/spd placeholders for the balance wave; its ruin-damage passives layer on top.
+    public static final Model TWILIGHT    = melee(Material.NETHERITE_SWORD, "twilight", 8.0, 0.9);
 
     // Vanilla base attributes: player attack damage = 1.0, attack speed = 4.0. An item modifier of
     // (atk - 1) / (spd - 4) makes the held weapon read exactly atk / spd.
