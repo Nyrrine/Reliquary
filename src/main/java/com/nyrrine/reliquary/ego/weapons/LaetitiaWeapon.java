@@ -6,6 +6,7 @@ import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
@@ -43,13 +44,15 @@ import java.util.concurrent.ThreadLocalRandom;
  *       {@value #MAX_LIFETIME} ticks ends it harmlessly, in particles and sound. If the caster has a live,
  *       nearby playmate it gently homes onto
  *       them; otherwise it flies nearly straight. A raised shield facing the shot blocks it entirely.
- *       Each shot wears the toy a little (durability). Fire cooldown {@value #COOLDOWN_MS} ms.</li>
+ *       Each shot wears the toy a little (durability). Fire spends one charge from a small magazine
+ *       ({@value #MAX_CHARGES}); empty the pool and it reloads for {@value #RELOAD_MS} ms. The charge count
+ *       rides the action bar, always visible. The future Multishot enchant hooks the pool by growing it.</li>
  *   <li><b>Sneak + right-click</b> — mark a playmate: the living body under the crosshair (or the
  *       nearest one in front) becomes this caster's playmate for {@value #MARK_TTL_MS} ms. Re-marking
  *       replaces the old one.</li>
  * </ul>
  *
- * <p>State is two in-memory UUID-keyed maps (fire-cooldown + playmate marks), both cleared on quit.
+ * <p>State is two in-memory UUID-keyed maps (the charge magazine + playmate marks), both cleared on quit.
  * No world edits; each bolt is a single cheap runnable that always caps its lifetime and cancels itself
  * on end / when its caster goes offline.
  */
@@ -58,8 +61,15 @@ public final class LaetitiaWeapon implements Weapon {
     private final Reliquary plugin;
     private final NamespacedKey key;
 
-    /** Caster -> epoch-millis of their last fire. */
-    private final Map<UUID, Long> lastFire = new HashMap<>();
+    /** Caster -> their bolt magazine: charges left, the reload clock, and the last-fire gap. */
+    private final Map<UUID, Magazine> magazines = new HashMap<>();
+
+    /** A caster's charge pool. Reload is lazy: a completed reload is realised on the next {@link #magazine} read. */
+    private static final class Magazine {
+        int charges = MAX_CHARGES; // starts full
+        long reloadAt = 0L;        // > now while reloading; when it passes, the pool refills
+        long lastFireAt = 0L;      // for the small between-bolts gap
+    }
 
     /** Caster -> the playmate they've marked (target UUID + when the mark expires). */
     private final Map<UUID, Mark> playmates = new HashMap<>();
@@ -69,8 +79,12 @@ public final class LaetitiaWeapon implements Weapon {
 
     // Tuning.
     private static final double DAMAGE       = 5.0;    // 2.5 hearts — modest
-    private static final long   COOLDOWN_MS  = 1000L;  // ~1s between bolts
     private static final int    MAX_LIFETIME = 50;     // ticks before a bolt gives up
+
+    // Charge pool (PLACEHOLDERS — balance wave). A small magazine the future Multishot enchant grows.
+    private static final int    MAX_CHARGES  = 5;      // bolts before a reload is forced
+    private static final long   RELOAD_MS    = 2_000L; // reload time once the pool runs dry
+    private static final long   FIRE_GAP_MS  = 300L;   // min gap between bolts, so holding RC can't drain instantly
     private static final double MARK_RANGE   = 30.0;   // how far the crosshair-mark reaches
     private static final long   MARK_TTL_MS  = 30_000L;// a playmate is forgotten after ~30s
 
@@ -125,21 +139,22 @@ public final class LaetitiaWeapon implements Weapon {
         }
     }
 
-    /** Right-click: loose a wobbling void bolt, gated by a soft ~1s cooldown. */
+    /** Right-click: spend a charge and loose a wobbling void bolt. An empty pool reloads rather than fires. */
     private void fireBolt(Player player) {
         UUID id = player.getUniqueId();
         long now = System.currentTimeMillis();
+        Magazine m = magazine(id, now);
 
-        Long last = lastFire.get(id);
-        if (last != null) {
-            long remaining = COOLDOWN_MS - (now - last);
-            if (remaining > 0) {
-                player.sendActionBar(EgoHud.cooldown("Winding up", remaining, GLOOM));
-                player.playSound(player.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.4f, 1.8f);
-                return;
-            }
+        if (m.charges <= 0) {                          // dry — the toy is winding a fresh magazine, not firing
+            player.sendActionBar(ammoBar(m, now));
+            player.playSound(player.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.4f, 1.8f);
+            return;
         }
-        lastFire.put(id, now);
+        if (now - m.lastFireAt < FIRE_GAP_MS) return;  // too soon after the last bolt — swallow the extra click
+
+        m.lastFireAt = now;
+        m.charges--;
+        if (m.charges <= 0) m.reloadAt = now + RELOAD_MS; // that was the last charge — start the reload clock
 
         LivingEntity playmate = resolvePlaymate(player);
 
@@ -153,6 +168,40 @@ public final class LaetitiaWeapon implements Weapon {
         giggle(player.getWorld(), player.getEyeLocation());
         player.getWorld().playSound(player.getEyeLocation(), Sound.ENTITY_PHANTOM_FLAP, 0.35f, 0.65f);
         player.getWorld().playSound(player.getEyeLocation(), Sound.ITEM_CROSSBOW_SHOOT, 0.4f, 0.8f);
+
+        player.sendActionBar(ammoBar(m, now)); // reflect the spent charge on the HUD at once
+    }
+
+    /** The caster's magazine, realising a completed reload into a full pool on read. */
+    private Magazine magazine(UUID id, long now) {
+        Magazine m = magazines.computeIfAbsent(id, k -> new Magazine());
+        if (m.charges <= 0 && m.reloadAt != 0L && now >= m.reloadAt) {
+            m.charges = MAX_CHARGES; // the reload finished — the pool is full again
+            m.reloadAt = 0L;
+        }
+        return m;
+    }
+
+    /** The always-on charge readout: the ammo bar, with a reload countdown appended while the pool is dry. */
+    private Component ammoBar(Magazine m, long now) {
+        Component bar = EgoHud.ammo(BODY, "Bolts", m.charges, MAX_CHARGES);
+        if (m.charges <= 0 && m.reloadAt > now) {
+            bar = bar.append(EgoHud.status("  ", FAINT))
+                     .append(EgoHud.cooldown("Reload", m.reloadAt - now, FAINT));
+        }
+        return bar;
+    }
+
+    /**
+     * While Laetitia is held, keep the charge readout on the action bar — always there, never a flash.
+     * Returns false the instant the doll leaves the main hand, so a sheathed toy stops costing ticks.
+     */
+    @Override
+    public boolean onTick(Player player, long tick) {
+        if (!matches(player.getInventory().getItemInMainHand())) return false;
+        long now = System.currentTimeMillis();
+        player.sendActionBar(ammoBar(magazine(player.getUniqueId(), now), now));
+        return true;
     }
 
     /** Sneak + right-click: mark the body under the crosshair (or the nearest in front) as a playmate. */
@@ -467,12 +516,13 @@ public final class LaetitiaWeapon implements Weapon {
             ),
             List.of(
                     new EgoLore.Ability("[Right Click] Curving Shot",
-                            "Fire a weaving maroon shot — 5 damage",
+                            "Fire a weaving maroon shot, 5 damage",
                             "on contact. It curves toward your",
                             "playmate while the shot is within 34",
                             "blocks of them, else flies nearly",
                             "straight. A shield raised toward it",
-                            "blocks it. 1 second cooldown."),
+                            "blocks it. Fires a small magazine,",
+                            "reloading when the pool runs dry."),
                     new EgoLore.Ability("[Shift + Right-click] Mark Playmate",
                             "Mark the body under your crosshair —",
                             "or the nearest one ahead, within 30",
@@ -484,7 +534,7 @@ public final class LaetitiaWeapon implements Weapon {
 
     @Override
     public void onQuit(UUID id) {
-        lastFire.remove(id);
+        magazines.remove(id);
         playmates.remove(id);
     }
 }
