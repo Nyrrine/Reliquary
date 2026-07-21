@@ -14,6 +14,7 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -56,6 +57,22 @@ public final class ChristmasWeapon implements EgoWeapon {
      * and the enemy's gift. Kept small so it stays a delight, not a crutch.
      */
     private static final int GIFT_CHANCE_PERCENT = 18;
+
+    /**
+     * Christmas Spirit: the sleigh is an iron sword, so it takes real Looting at an anvil, and each level makes
+     * it more generous — {@value #LOOTING_GIFT_BONUS}% added to each gift roll per level (capped at Looting III,
+     * so ~27% at most). The gifts are fleeting potion effects, never dropped loot, so this only sweetens the
+     * delight; nothing farms.
+     */
+    private static final int LOOTING_GIFT_BONUS = 3;
+    private static final int LOOTING_GIFT_CAP   = 3;
+
+    /** The per-roll gift chance for the sleigh held right now, base plus its Looting bonus. */
+    private int giftChance(Player attacker) {
+        int looting = Math.min(LOOTING_GIFT_CAP,
+                attacker.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.LOOTING));
+        return GIFT_CHANCE_PERCENT + LOOTING_GIFT_BONUS * Math.max(0, looting);
+    }
 
     public ChristmasWeapon(Reliquary plugin) {
         this.plugin = plugin;
@@ -100,9 +117,10 @@ public final class ChristmasWeapon implements EgoWeapon {
         thwack(victim); // heavy club thud on every landed hit
 
         ThreadLocalRandom rng = ThreadLocalRandom.current();
+        int chance = giftChance(attacker);
 
         SelfBuff self = null;
-        if (rng.nextInt(100) < GIFT_CHANCE_PERCENT) {
+        if (rng.nextInt(100) < chance) {
             self = SelfBuff.VALUES[rng.nextInt(SelfBuff.VALUES.length)];
             attacker.addPotionEffect(self.effect());
             jingleBells(attacker);
@@ -110,7 +128,7 @@ public final class ChristmasWeapon implements EgoWeapon {
         }
 
         EnemyGift enemy = null;
-        if (rng.nextInt(100) < GIFT_CHANCE_PERCENT) {
+        if (rng.nextInt(100) < chance) {
             enemy = EnemyGift.VALUES[rng.nextInt(EnemyGift.VALUES.length)];
             victim.addPotionEffect(enemy.effect());
             jingleBells(attacker);
