@@ -14,13 +14,17 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
@@ -79,7 +83,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * reaped on unequip, quit, timeout and disable, with a tag-sweep backstop. All summon numbers are
  * first-pass, flagged for the balance wave.
  */
-public final class HeavenWeapon implements EgoWeapon {
+public final class HeavenWeapon implements EgoWeapon, Listener {
 
     /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
     @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
@@ -97,6 +101,9 @@ public final class HeavenWeapon implements EgoWeapon {
 
     /** One live eye-tree per wielder — reaped on unequip, quit, timeout and disable. */
     private final Map<UUID, EyeTree> trees = new HashMap<>();
+
+    /** Wielder -> the epoch-millis at which they may summon another tree, set when their last one falls. */
+    private final Map<UUID, Long> summonReadyAt = new HashMap<>();
 
     /** Wielder -> the last living body they struck; a fallback target when they are not aiming at one. */
     private final Map<UUID, UUID> lastHit = new HashMap<>();
@@ -131,6 +138,10 @@ public final class HeavenWeapon implements EgoWeapon {
     private static final double SUMMON_DISTANCE      = 3.0;
     /** Base life of a summoned tree, in ticks (~20s). */
     private static final int    BASE_LIFETIME        = 20 * 20;
+    /** After a tree falls (timed out or destroyed), the wait before another can be summoned (~12s). */
+    private static final long   SUMMON_COOLDOWN_MS   = 12_000L;
+    /** The tree's destroyable heart: how much damage it soaks before it shatters (a handful of hits). */
+    private static final double HEART_HEALTH         = 30.0;
     /** Extra life each hung player-skull grants (~30s). */
     private static final int    KILL_LIFETIME        = 30 * 20;
     /** Most skulls a tree carries — the on-kill effect stacks this far and no further. */
@@ -151,14 +162,14 @@ public final class HeavenWeapon implements EgoWeapon {
     private static final double TREE_FORK_Y          = 1.5;
     private static final double TREE_SPREAD          = 1.6;
 
-    /** Eye positions relative to the anchor (x, y, z): the great central eye first, then scattered ones, in 3D. */
+    /**
+     * Eye positions relative to the anchor (x, y, z): the central eye first, then a couple of smaller ones.
+     * Kept few and modest on purpose — the tree reads as a watching thing, not a wall of eyes.
+     */
     private static final double[][] EYE_OFFSETS = {
-            { 0.00, TREE_FORK_Y + 0.00,  0.00},   // the great central eye (drawn larger)
-            {-0.95, TREE_FORK_Y + 0.85,  0.35},
-            { 1.00, TREE_FORK_Y + 0.75, -0.25},
-            {-0.55, TREE_FORK_Y + 1.45, -0.40},
-            { 0.65, TREE_FORK_Y + 1.35,  0.45},
-            { 0.05, TREE_FORK_Y + 1.75,  0.05},
+            { 0.00, TREE_FORK_Y + 0.10,  0.00},   // the central eye
+            {-0.80, TREE_FORK_Y + 1.05,  0.20},
+            { 0.85, TREE_FORK_Y + 1.30, -0.15},
     };
     /** Branch tip offsets relative to the fork (x, y, z) — fanned in x for the wings, varied in z for depth. */
     private static final double[][] BRANCH_TIPS = {
@@ -174,6 +185,28 @@ public final class HeavenWeapon implements EgoWeapon {
     public HeavenWeapon(Reliquary plugin) {
         this.plugin = plugin;
         this.key = new NamespacedKey(plugin, "heaven");
+        // A tiny listener for one out-of-framework case: blows landing on a summoned tree's heart. The
+        // framework only routes damage to player wielders, so the tree's own hittable body is ours to watch.
+        plugin.getServer().getPluginManager().registerEvents(this, plugin);
+    }
+
+    /**
+     * A blow landed on a tree's heart (its invisible hittable body). We never let it take the vanilla hit
+     * (an armour stand would drop itself and die on its own terms); instead we cancel that and tally the
+     * damage on the tree, striking it down once the wounds pass {@link #HEART_HEALTH}. Works for any attacker
+     * and for arrows, which is the whole point: anyone can bring the Burrowing Heaven down.
+     */
+    @EventHandler(ignoreCancelled = true)
+    public void onHeartDamage(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof ArmorStand as)) return;
+        if (!as.getScoreboardTags().contains(TREE_TAG)) return;
+        event.setCancelled(true);
+        for (EyeTree tree : trees.values()) {
+            if (tree.isHeart(as)) {
+                tree.wound(event.getFinalDamage(), plugin.getServer().getPlayer(tree.ownerId));
+                return;
+            }
+        }
     }
 
     @Override
@@ -387,6 +420,13 @@ public final class HeavenWeapon implements EgoWeapon {
             wielder.sendActionBar(EgoHud.status("Burrowing Heaven already stands.", EYE));
             return;
         }
+        long now = System.currentTimeMillis();
+        Long ready = summonReadyAt.get(id);
+        if (ready != null && now < ready) {
+            wielder.sendActionBar(EgoHud.cooldown("Burrowing Heaven", ready - now, EYE));
+            wielder.playSound(wielder.getLocation(), Sound.BLOCK_SCULK_SPREAD, 0.25f, 0.5f);
+            return;
+        }
 
         Location anchor = summonAnchor(wielder);
         EyeTree tree = new EyeTree(id, anchor);
@@ -438,6 +478,8 @@ public final class HeavenWeapon implements EgoWeapon {
         private final UUID ownerId;
         private final Location anchor;
         private final List<ItemDisplay> skulls = new ArrayList<>();
+        /** The tree's destroyable heart — an invisible, hittable body at the central eye. Kill it, kill the tree. */
+        private final ArmorStand heart;
         private int age = 0;
         private int lifetime = BASE_LIFETIME;
         private int stacks = 0;
@@ -445,6 +487,38 @@ public final class HeavenWeapon implements EgoWeapon {
         EyeTree(UUID ownerId, Location anchor) {
             this.ownerId = ownerId;
             this.anchor = anchor;
+            this.heart = spawnHeart(anchor);
+        }
+
+        /** Damage the heart has soaked so far; at {@link #HEART_HEALTH} the tree is struck down. */
+        private double wounds = 0.0;
+
+        /** An invisible small armour stand at the central eye: something the tree's enemies can strike down. */
+        private ArmorStand spawnHeart(Location anchor) {
+            double[] eye = EYE_OFFSETS[0];
+            Location at = anchor.clone().add(eye[0], eye[1] - 1.0, eye[2]); // the small stand's head sits at the eye
+            return anchor.getWorld().spawn(at, ArmorStand.class, as -> {
+                as.setInvisible(true);
+                as.setGravity(false);
+                as.setBasePlate(false);
+                as.setArms(false);
+                as.setSmall(true);
+                as.setMarker(false);          // a marker can't be hit; this one must be
+                as.setPersistent(false);
+                as.setCanTick(false);         // it only sits there and soaks blows
+                as.addScoreboardTag(TREE_TAG);
+            });
+        }
+
+        /** Is this armour stand this tree's heart? */
+        boolean isHeart(ArmorStand as) {
+            return as.equals(heart);
+        }
+
+        /** Take a blow to the heart. Its own vanilla health is left alone (see onHeartDamage); we tally here. */
+        void wound(double amount, Player owner) {
+            wounds += amount;
+            if (wounds >= HEART_HEALTH) destroyed(owner);
         }
 
         @Override
@@ -457,6 +531,12 @@ public final class HeavenWeapon implements EgoWeapon {
                     || !matches(owner.getInventory().getItemInMainHand())
                     || age > lifetime) {
                 dismiss();
+                return;
+            }
+
+            // Struck down: its heart was killed. Shatter it with a cue rather than a quiet fade.
+            if (heart == null || heart.isDead() || !heart.isValid()) {
+                destroyed(owner);
                 return;
             }
 
@@ -495,16 +575,17 @@ public final class HeavenWeapon implements EgoWeapon {
             anchor.getWorld().playSound(anchor, Sound.ENTITY_WARDEN_HEARTBEAT, 0.40f, 0.6f); // softened with the summon
         }
 
-        /** Hang the killed player's head on the next open branch slot. */
+        /** Hang the killed player's head on the tip of the next branch, so it rests on the tree itself. */
         private void hangSkull(Player victim) {
             ItemStack head = new ItemStack(Material.PLAYER_HEAD);
             if (head.getItemMeta() instanceof SkullMeta sm) {
                 sm.setOwningPlayer(victim);
                 head.setItemMeta(sm);
             }
-            double side = (skulls.size() % 2 == 0) ? -1 : 1;
-            double up = TREE_FORK_Y + 0.4 + skulls.size() * 0.25;
-            Location at = anchor.clone().add(side * TREE_SPREAD * 0.5, up, 0);
+            // Sit the head at a branch tip (fork + tip offset), cycling tips so heads hang off the branches
+            // rather than floating in a column beside the trunk. A little below the tip so it dangles from it.
+            double[] tip = BRANCH_TIPS[skulls.size() % BRANCH_TIPS.length];
+            Location at = anchor.clone().add(0, TREE_FORK_Y, 0).add(tip[0], tip[1] - 0.25, tip[2]);
             ItemDisplay d = anchor.getWorld().spawn(at, ItemDisplay.class, disp -> {
                 disp.setItemStack(head);
                 disp.setBillboard(Display.Billboard.CENTER);
@@ -523,12 +604,24 @@ public final class HeavenWeapon implements EgoWeapon {
             anchor.getWorld().playSound(anchor, Sound.BLOCK_SCULK_SPREAD, 0.25f, 0.5f); // a soft fade, not the Warden's death cry
             reap();
             trees.remove(ownerId, this);
+            summonReadyAt.put(ownerId, System.currentTimeMillis() + SUMMON_COOLDOWN_MS);
         }
 
-        /** Remove the hung skull displays and stop ticking, without touching the registry map (for a bulk sweep). */
+        /** Struck down by an attacker: a red shatter and a cue, then the same teardown as a fade. */
+        private void destroyed(Player owner) {
+            World world = anchor.getWorld();
+            Location eye = anchor.clone().add(0, TREE_FORK_Y + 0.6, 0);
+            world.spawnParticle(Particle.DUST, eye, 30, 0.5, 0.7, 0.5, 0, CRIMSON_DUST);
+            world.playSound(anchor, Sound.BLOCK_SCULK_SHRIEKER_BREAK, 0.7f, 0.7f);
+            if (owner != null) owner.sendActionBar(EgoHud.status("Burrowing Heaven is struck down.", CRIMSON));
+            dismiss();
+        }
+
+        /** Remove the hung skull displays, the heart, and stop ticking, without touching the registry map. */
         void reap() {
             for (ItemDisplay d : skulls) if (d != null && d.isValid()) d.remove();
             skulls.clear();
+            if (heart != null && heart.isValid()) heart.remove();
             cancel();
         }
 
@@ -552,10 +645,10 @@ public final class HeavenWeapon implements EgoWeapon {
                     world.spawnParticle(Particle.DUST, p, 1, 0.02, 0.02, 0.02, 0, CRIMSON_DUST);
                 }
             }
-            // Eyes: the central one larger, the rest smaller, each a golden sphere around a crimson pupil.
+            // Eyes: small and few, the central one only a touch larger, each a golden sphere on a crimson pupil.
             for (int i = 0; i < EYE_OFFSETS.length; i++) {
                 double[] o = EYE_OFFSETS[i];
-                drawEye(world, anchor.clone().add(o[0], o[1], o[2]), i == 0 ? 0.34 : 0.20);
+                drawEye(world, anchor.clone().add(o[0], o[1], o[2]), i == 0 ? 0.19 : 0.13);
             }
         }
 
@@ -671,6 +764,7 @@ public final class HeavenWeapon implements EgoWeapon {
     public void onQuit(UUID id) {
         stunned.remove(id);
         lastHit.remove(id);
+        summonReadyAt.remove(id);
         EyeTree tree = trees.remove(id);
         if (tree != null) tree.reap(); // the wielder left — take their tree down with them
         EyeMark mark = marks.remove(id);
@@ -692,6 +786,7 @@ public final class HeavenWeapon implements EgoWeapon {
             tree.reap();
         }
         trees.clear();
+        summonReadyAt.clear();
         lastHit.clear();
         sweepTreeOrphans();
 
@@ -704,6 +799,10 @@ public final class HeavenWeapon implements EgoWeapon {
     private void sweepTreeOrphans() {
         for (World w : plugin.getServer().getWorlds()) {
             for (Entity e : w.getEntitiesByClass(ItemDisplay.class)) {
+                if (e.getScoreboardTags().contains(TREE_TAG)) e.remove();
+            }
+            // The tree's heart is a tagged armour stand — reap any stray one the same way.
+            for (Entity e : w.getEntitiesByClass(ArmorStand.class)) {
                 if (e.getScoreboardTags().contains(TREE_TAG)) e.remove();
             }
         }
@@ -723,11 +822,13 @@ public final class HeavenWeapon implements EgoWeapon {
     private static final TextColor EYE     = TextColor.color(0xE6C74C);
 
     private static final Color CRIMSON_RGB = Color.fromRGB(0xDC, 0x14, 0x3C); // rising motes / pupil
-    private static final Color DARKRED_RGB = Color.fromRGB(0x8B, 0x00, 0x00); // ground accent
+    private static final Color DARKRED_RGB = Color.fromRGB(0xA5, 0x0F, 0x2E); // trunk — a deeper shade of the SAME red, not a separate brown-red, so the tree reads as one consistent crimson
     private static final Color EYE_RGB     = Color.fromRGB(0xE6, 0xC7, 0x4C); // the staring ring
-    private static final Particle.DustOptions CRIMSON_DUST = new Particle.DustOptions(CRIMSON_RGB, 1.1f);
-    private static final Particle.DustOptions DARKRED_DUST = new Particle.DustOptions(DARKRED_RGB, 1.3f);
-    private static final Particle.DustOptions EYE_DUST     = new Particle.DustOptions(EYE_RGB, 1.2f);
+    // One uniform mote size across the whole tree so the red never looks patchy; the yellow eye ring is the
+    // smallest of all, since the great glaring eye read as too big in playtest.
+    private static final Particle.DustOptions CRIMSON_DUST = new Particle.DustOptions(CRIMSON_RGB, 0.9f);
+    private static final Particle.DustOptions DARKRED_DUST = new Particle.DustOptions(DARKRED_RGB, 0.9f);
+    private static final Particle.DustOptions EYE_DUST     = new Particle.DustOptions(EYE_RGB, 0.65f);
 
     // ---- lore ---------------------------------------------------------------------
 
