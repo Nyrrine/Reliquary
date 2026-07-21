@@ -74,7 +74,7 @@ public final class EgoModels {
     // shield-break, no smash. Penitence and Regret are the only maces left, and both are meant to be.
     public static final Model LANTERN     = melee(Material.NETHERITE_HOE, "lantern", 6.0, 0.9);
     public static final Model FOURTH_MATCH_FLAME = ranged(Material.FLINT_AND_STEEL, "fourth_match_flame");
-    public static final Model RED_EYES    = melee(Material.IRON_SWORD, "red_eyes", 6.0, 1.6);
+    public static final Model RED_EYES    = melee(Material.IRON_SWORD, "red_eyes", 6.5, 1.6);
     public static final Model REGRET      = melee(Material.MACE, "regret", 7.0, 0.9);
     public static final Model BEAK        = ranged(Material.CROSSBOW, "beak");
     public static final Model LOGGING     = melee(Material.NETHERITE_AXE, "logging", 7.0, 0.9);
@@ -87,7 +87,7 @@ public final class EgoModels {
     public static final Model CRIMSON_SCAR = melee(Material.NETHERITE_AXE, "crimson_scar", 7.0, 1.2);
     public static final Model COBALT_SCAR = melee(Material.NETHERITE_SHOVEL, "cobalt_scar", 4.0, 16.0);
     public static final Model OUR_GALAXY  = ranged(Material.BREEZE_ROD, "our_galaxy");
-    public static final Model HARVEST     = melee(Material.NETHERITE_HOE, "harvest", 4.0, 1.0);
+    public static final Model HARVEST     = melee(Material.NETHERITE_HOE, "harvest", 5.0, 1.0);
     public static final Model LIFE_FOR_A_DAREDEVIL = melee(Material.NETHERITE_SWORD, "life_for_a_daredevil", 7.0, 1.6);
     public static final Model LAETITIA    = ranged(Material.CROSSBOW, "laetitia");
     public static final Model GREEN_STEM  = melee(Material.IRON_SWORD, "green_stem", 6.0, 1.6);
