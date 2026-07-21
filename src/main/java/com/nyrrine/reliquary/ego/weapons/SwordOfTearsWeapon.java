@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -127,6 +128,19 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
     private static final double STAB_DAMAGE        = 2.0;    // one rapier's puncture — Double Tag and duel stab alike
     private static final double IMPALE_DAMAGE      = 5.5;    // per committed blade on the Converging Impale
     private static final long   IMPALE_COOLDOWN_MS = 45000L; // the formation-wide commit gate (the old 45s, re-homed)
+
+    // Converging Grief (a custom enchant — id "converging_grief"): grief gathers sooner. Cuts the Converging
+    // Impale gate by 12% per level, up to 36% at level 3 (~28.8s). Utility only — never a blade's damage or
+    // the fan size.
+    private static final double CONVERGING_GRIEF_PER_LEVEL = 0.12;
+    private static final int    CONVERGING_GRIEF_CAP       = 3;
+
+    /** The Impale gate for the sword held right now: the base 45s cut by its Converging Grief bonus. */
+    private static long impaleCooldownMs(Player owner) {
+        int lvl = Math.min(CONVERGING_GRIEF_CAP,
+                EgoEnchants.level(owner.getInventory().getItemInMainHand(), "converging_grief"));
+        return (long) (IMPALE_COOLDOWN_MS * (1.0 - CONVERGING_GRIEF_PER_LEVEL * lvl));
+    }
     private static final double COMMAND_RANGE      = 24.0;   // how far a command reaches for a mark
     private static final double LEASH              = 32.0;   // a duelling blade gives up past this from its wielder
     private static final double LEASH_SQ           = LEASH * LEASH;
@@ -782,7 +796,7 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
             for (int i = 0; i < RAPIER_COUNT; i++) if (state[i] == BladeState.FAN) commit.add(i);
             if (commit.isEmpty()) return 0;                 // nothing in the fan to commit
             if (now < impaleReadyAt) return -1;             // still on the 45s gate
-            impaleReadyAt = now + IMPALE_COOLDOWN_MS;
+            impaleReadyAt = now + impaleCooldownMs(owner); // Converging Grief may shorten the gate
             runImpale(owner, mark, commit);
             return commit.size();
         }
