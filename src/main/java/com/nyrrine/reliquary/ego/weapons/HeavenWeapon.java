@@ -71,9 +71,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * <p>Right-click calls the second power: it summons the <b>Burrowing Heaven</b> itself as a watching
  * eye-tree ({@link EyeTree}) rooted a few blocks ahead. The tree throws homing eyes ({@link HeavenBolt}) at
  * whatever the wielder aims at (or last struck), on a placeholder timer; killing a player hangs their skull
- * on it for more life and faster volleys, up to {@link #MAX_STACKS}. Its eyes and skulls are
- * {@code setPersistent(false)} display entities, tracked and reaped on unequip, quit, timeout and disable,
- * with a tag-sweep backstop. All summon numbers are first-pass, flagged for the balance wave.
+ * on it for more life and faster volleys, up to {@link #MAX_STACKS}. The trunk, branches and eyes are drawn
+ * entirely in particles; only the hung skulls are {@code setPersistent(false)} display entities, tracked and
+ * reaped on unequip, quit, timeout and disable, with a tag-sweep backstop. All summon numbers are
+ * first-pass, flagged for the balance wave.
  */
 public final class HeavenWeapon implements Weapon {
 
@@ -131,6 +132,23 @@ public final class HeavenWeapon implements Weapon {
     /** How the eye-tree stands: fork height and how far the branch-eyes spread. */
     private static final double TREE_FORK_Y          = 1.5;
     private static final double TREE_SPREAD          = 1.6;
+
+    /** Eye positions relative to the anchor (x, y, z): the great central eye first, then scattered ones, in 3D. */
+    private static final double[][] EYE_OFFSETS = {
+            { 0.00, TREE_FORK_Y + 0.00,  0.00},   // the great central eye (drawn larger)
+            {-0.95, TREE_FORK_Y + 0.85,  0.35},
+            { 1.00, TREE_FORK_Y + 0.75, -0.25},
+            {-0.55, TREE_FORK_Y + 1.45, -0.40},
+            { 0.65, TREE_FORK_Y + 1.35,  0.45},
+            { 0.05, TREE_FORK_Y + 1.75,  0.05},
+    };
+    /** Branch tip offsets relative to the fork (x, y, z) — fanned in x for the wings, varied in z for depth. */
+    private static final double[][] BRANCH_TIPS = {
+            {-1.55, 1.15,  0.45}, { 1.55, 1.05, -0.35},
+            {-1.10, 1.55, -0.55}, { 1.20, 1.45,  0.55},
+            {-0.55, 1.80,  0.25}, { 0.60, 1.70, -0.20},
+            { 0.00, 2.00,  0.00},
+    };
 
     /** Scoreboard tag on every display the tree owns — the belt-and-braces reap key. */
     private static final String TREE_TAG = "reliquary_heaven_tree";
@@ -285,20 +303,21 @@ public final class HeavenWeapon implements Weapon {
     private void summon(Player wielder) {
         UUID id = wielder.getUniqueId();
         if (trees.containsKey(id)) {
-            wielder.sendActionBar(EgoHud.status("The heaven already watches.", EYE));
+            wielder.sendActionBar(EgoHud.status("Burrowing Heaven already stands.", EYE));
             return;
         }
 
         Location anchor = summonAnchor(wielder);
         EyeTree tree = new EyeTree(id, anchor);
-        tree.raise();
         trees.put(id, tree);
         tree.runTaskTimer(plugin, 1L, 1L);
 
-        wielder.sendActionBar(EgoHud.status("The heaven opens its eyes.", CRIMSON));
+        wielder.sendActionBar(EgoHud.status("Burrowing Heaven", CRIMSON));
+        // Soft and low: the Warden's emerge-roar read as too loud/harsh in playtest. A quiet sculk burrow
+        // under a faint gaze instead. (Volumes placeholder, flagged for the balance wave.)
         World world = anchor.getWorld();
-        world.playSound(anchor, Sound.ENTITY_WARDEN_EMERGE, 0.9f, 0.7f);
-        world.playSound(anchor, Sound.ENTITY_ENDERMAN_STARE, 0.8f, 0.6f);
+        world.playSound(anchor, Sound.BLOCK_SCULK_SPREAD, 0.30f, 0.7f);
+        world.playSound(anchor, Sound.ENTITY_ENDERMAN_STARE, 0.25f, 0.6f);
     }
 
     /** The tree's root spot: {@link #SUMMON_DISTANCE} blocks ahead of the wielder along their flat facing. */
@@ -337,7 +356,6 @@ public final class HeavenWeapon implements Weapon {
     private final class EyeTree extends BukkitRunnable {
         private final UUID ownerId;
         private final Location anchor;
-        private final List<ItemDisplay> eyes = new ArrayList<>();
         private final List<ItemDisplay> skulls = new ArrayList<>();
         private int age = 0;
         private int lifetime = BASE_LIFETIME;
@@ -346,21 +364,6 @@ public final class HeavenWeapon implements Weapon {
         EyeTree(UUID ownerId, Location anchor) {
             this.ownerId = ownerId;
             this.anchor = anchor;
-        }
-
-        /** Spawn the eye displays: one great eye at the fork, a scatter of smaller ones out along the branches. */
-        void raise() {
-            eyes.add(spawnEye(anchor.clone().add(0, TREE_FORK_Y, 0), 0.9f)); // the great central eye
-            double[][] slots = {
-                    {-TREE_SPREAD,        TREE_FORK_Y + 0.7},
-                    { TREE_SPREAD,        TREE_FORK_Y + 0.6},
-                    {-TREE_SPREAD * 0.6,  TREE_FORK_Y + 1.2},
-                    { TREE_SPREAD * 0.7,  TREE_FORK_Y + 1.1},
-                    { 0.0,                TREE_FORK_Y + 1.6},
-            };
-            for (double[] s : slots) {
-                eyes.add(spawnEye(anchor.clone().add(s[0], s[1], 0), 0.4f));
-            }
         }
 
         @Override
@@ -376,7 +379,7 @@ public final class HeavenWeapon implements Weapon {
                 return;
             }
 
-            if (age % 4 == 0) drawBranches();
+            if (age % 3 == 0) drawTree();
 
             if (age % fireTicks() == 0) {
                 LivingEntity target = currentTarget(owner);
@@ -395,11 +398,10 @@ public final class HeavenWeapon implements Weapon {
             return 1 + stacks / 2; // 0-1 skulls -> 1, 2-3 -> 2, 4-5 -> 3
         }
 
-        /** Launch one eye from a random point on the tree toward the target. */
+        /** Launch one eye from a random eye position on the tree toward the target. */
         private void throwEye(Player owner, LivingEntity target) {
-            Location origin = eyes.isEmpty()
-                    ? anchor.clone().add(0, TREE_FORK_Y, 0)
-                    : eyes.get(ThreadLocalRandom.current().nextInt(eyes.size())).getLocation();
+            double[] o = EYE_OFFSETS[ThreadLocalRandom.current().nextInt(EYE_OFFSETS.length)];
+            Location origin = anchor.clone().add(o[0], o[1], o[2]);
             new HeavenBolt(this, owner.getUniqueId(), origin, target).runTaskTimer(plugin, 1L, 1L);
         }
 
@@ -409,7 +411,7 @@ public final class HeavenWeapon implements Weapon {
             stacks++;
             lifetime += KILL_LIFETIME;
             hangSkull(victim);
-            anchor.getWorld().playSound(anchor, Sound.ENTITY_WARDEN_HEARTBEAT, 1.0f, 0.6f);
+            anchor.getWorld().playSound(anchor, Sound.ENTITY_WARDEN_HEARTBEAT, 0.40f, 0.6f); // softened with the summon
         }
 
         /** Hang the killed player's head on the next open branch slot. */
@@ -435,56 +437,58 @@ public final class HeavenWeapon implements Weapon {
             skulls.add(d);
         }
 
-        /** Take the tree down: remove every display it owns, drop it from the registry, and stop ticking. */
+        /** Take the tree down: remove the skulls it hung, drop it from the registry, and stop ticking. */
         void dismiss() {
-            anchor.getWorld().playSound(anchor, Sound.ENTITY_WARDEN_DEATH, 0.7f, 1.2f);
+            anchor.getWorld().playSound(anchor, Sound.BLOCK_SCULK_SPREAD, 0.25f, 0.5f); // a soft fade, not the Warden's death cry
             reap();
             trees.remove(ownerId, this);
         }
 
-        /** Remove every display and stop ticking, without touching the registry map (for a bulk sweep). */
+        /** Remove the hung skull displays and stop ticking, without touching the registry map (for a bulk sweep). */
         void reap() {
-            for (ItemDisplay d : eyes)   if (d != null && d.isValid()) d.remove();
             for (ItemDisplay d : skulls) if (d != null && d.isValid()) d.remove();
-            eyes.clear();
             skulls.clear();
             cancel();
         }
 
-        /** The crimson branch silhouette: a trunk and two fanned wings of dark-red motes around the anchor. */
-        private void drawBranches() {
+        /**
+         * The eye-tree, drawn in particles: a dark-red trunk, a 3D fan of crimson branches with real depth
+         * (fanned in x, varied in z, bowed upward), and eyes of a golden sclera sphere around a crimson pupil.
+         */
+        private void drawTree() {
             World world = anchor.getWorld();
-            for (double y = 0.0; y <= TREE_FORK_Y; y += 0.3) {
-                world.spawnParticle(Particle.DUST, anchor.clone().add(0, y, 0), 1, 0.03, 0.03, 0.03, 0, DARKRED_DUST);
+
+            // Trunk: a dark-red column up to the fork.
+            for (double y = 0.0; y <= TREE_FORK_Y; y += 0.25) {
+                world.spawnParticle(Particle.DUST, anchor.clone().add(0, y, 0), 1, 0.02, 0.02, 0.02, 0, DARKRED_DUST);
             }
-            final int branches = 5;
-            for (int side = -1; side <= 1; side += 2) {
-                for (int b = 0; b < branches; b++) {
-                    double t = (b + 1) / (double) branches;
-                    double outX = side * TREE_SPREAD * t;
-                    double topY = TREE_FORK_Y + t * 1.4;
-                    for (double s = 0.0; s <= 1.0; s += 0.34) {
-                        Location p = anchor.clone().add(outX * s, TREE_FORK_Y + (topY - TREE_FORK_Y) * s, 0);
-                        world.spawnParticle(Particle.DUST, p, 1, 0.02, 0.02, 0.02, 0, CRIMSON_DUST);
-                    }
+            // Branches: from the fork out to each tip, bowed so they arc rather than run straight.
+            Location fork = anchor.clone().add(0, TREE_FORK_Y, 0);
+            for (double[] tip : BRANCH_TIPS) {
+                for (double s = 0.15; s <= 1.0; s += 0.15) {
+                    double bow = Math.sin(s * Math.PI) * 0.20;
+                    Location p = fork.clone().add(tip[0] * s, tip[1] * s + bow, tip[2] * s);
+                    world.spawnParticle(Particle.DUST, p, 1, 0.02, 0.02, 0.02, 0, CRIMSON_DUST);
                 }
             }
+            // Eyes: the central one larger, the rest smaller, each a golden sphere around a crimson pupil.
+            for (int i = 0; i < EYE_OFFSETS.length; i++) {
+                double[] o = EYE_OFFSETS[i];
+                drawEye(world, anchor.clone().add(o[0], o[1], o[2]), i == 0 ? 0.34 : 0.20);
+            }
         }
-    }
 
-    /** Spawn one eye display (an ender eye, billboarded flat) at {@code at}, scaled to {@code scale}. */
-    private ItemDisplay spawnEye(Location at, float scale) {
-        ItemStack eye = new ItemStack(Material.ENDER_EYE);
-        return at.getWorld().spawn(at, ItemDisplay.class, d -> {
-            d.setItemStack(eye);
-            d.setBillboard(Display.Billboard.CENTER);
-            d.setBrightness(new Display.Brightness(15, 15));
-            d.setTransformation(new Transformation(
-                    new Vector3f(), new Quaternionf(),
-                    new Vector3f(scale, scale, scale), new Quaternionf()));
-            d.setPersistent(false);
-            d.addScoreboardTag(TREE_TAG);
-        });
+        /** One eye: two crossed rings of golden sclera motes (a little sphere) around a crimson pupil. */
+        private void drawEye(World world, Location centre, double radius) {
+            final int points = 6;
+            for (int i = 0; i < points; i++) {
+                double a = (Math.PI * 2 * i) / points;
+                double c = Math.cos(a) * radius, s = Math.sin(a) * radius;
+                world.spawnParticle(Particle.DUST, centre.clone().add(c, s, 0), 1, 0, 0, 0, 0, EYE_DUST);
+                world.spawnParticle(Particle.DUST, centre.clone().add(c, 0, s), 1, 0, 0, 0, 0, EYE_DUST);
+            }
+            world.spawnParticle(Particle.DUST, centre, 1, 0.01, 0.01, 0.01, 0, CRIMSON_DUST); // the pupil
+        }
     }
 
     /**
