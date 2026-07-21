@@ -15,6 +15,7 @@ import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Tameable;
@@ -38,27 +39,32 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Lamp — the E.G.O of <b>Big Bird</b>, the abnormality that gained one more eye for every creature it
  * "saved". This is no little handheld light: it is a great warm lantern whose radiant pride spills out
- * over everyone who stands near it. The item is a LANTERN — it does no real melee damage of its own; its
- * only blow is the SLAM, and its true work is the protective glow it hangs over its allies.
+ * over everyone who stands near it. The item is a LANTERN — it does no real melee damage of its own; every
+ * blow it lands is one of its skills, and its true work is the protective glow it hangs over its allies.
  *
  * <ul>
  *   <li><b>Aura</b> (passive, {@link #onTick}) — a circular lantern-glow of radius {@value #AURA_RADIUS}.
  *       Every player and every tamed ally standing inside it (the wielder included) is bathed in warm
  *       light and kept under {@link PotionEffectType#RESISTANCE Resistance} I, refreshed continuously. A
  *       Gaze-marked enemy is <em>excluded</em> from this benefit until the fight is over.</li>
- *   <li><b>Gaze</b> — <b>sneak + right-click</b>. Big Bird fixes another eye on the looked-at target and
- *       {@code marks} it. Every harmful effect on the WIELDER is transferred onto the marked body — a
- *       snapshot on the cast, then any freshly-received debuff for a short window ({@value #TRANSFER_WINDOW_MS}
- *       ms). A marked enemy earns no aura Resistance until it has been out of combat for
- *       {@value #COMBAT_CLEAR_MS} ms, at which point the mark is forgotten.</li>
- *   <li><b>Slam</b> — plain <b>right-click</b> (non-sneak), a {@value #SLAM_COOLDOWN_MS}-ms cooldown. The
- *       heavy lantern is driven onto the looked-at / nearby body: a blunt CLANG and impact-dust, LOTS of
- *       knockback and very LITTLE damage. Not spammable (cooldown shown via {@link EgoHud#cooldown}).</li>
- *   <li>Left-click ({@code onSwing}) does nothing special — it is a lantern.</li>
+ *   <li><b>Hammer Slam</b> — plain <b>left-click</b> ({@link #onSwing}), a {@value #HAMMER_COOLDOWN_MS}-ms
+ *       cooldown. The lantern comes down two-handed for an AoE ground pound, catching every foe within
+ *       {@value #HAMMER_RADIUS} blocks for {@value #HAMMER_DAMAGE} damage and a heave upward.</li>
+ *   <li><b>Slam</b> — <b>sneak + left-click</b>, a {@value #SLAM_COOLDOWN_MS}-ms cooldown. The old single-body
+ *       heave: the heavy lantern driven onto the looked-at / nearby body — LOTS of knockback, very LITTLE
+ *       damage. A miss costs none of the cooldown.</li>
+ *   <li><b>Chasing Flames</b> — plain <b>right-click</b> ({@link #onInteract}), a {@value #FLAME_COOLDOWN_MS}-ms
+ *       cooldown. Looses {@value #FLAME_COUNT} yellow flames that home onto the Gaze-marked body and bite on
+ *       contact for {@value #FLAME_DAMAGE} each; with nothing marked they simply float up and dissipate.</li>
+ *   <li><b>Gaze</b> — <b>sneak + right-click</b>, a {@value #GAZE_COOLDOWN_MS}-ms cooldown. Big Bird fixes
+ *       another eye on the looked-at target and {@code marks} it. Every harmful effect on the WIELDER is
+ *       transferred onto the marked body — a snapshot on the cast, then any freshly-received debuff for a
+ *       short window ({@value #TRANSFER_WINDOW_MS} ms). A marked enemy earns no aura Resistance until it has
+ *       been out of combat for {@value #COMBAT_CLEAR_MS} ms, at which point the mark is forgotten.</li>
  * </ul>
  *
- * <p>The slam's {@code victim.damage(...)} re-enters {@link #onHit}, so a {@link #slamming} fence stops
- * any loop. All per-player state — the Gaze marks and the slam cooldowns — is dropped in {@link #onQuit},
+ * <p>Each skill's {@code victim.damage(...)} re-enters {@link #onHit}, so a {@link #slamming} fence stops
+ * any loop. All per-player state — the Gaze marks and the ability cooldowns — is dropped in {@link #onQuit},
  * both for a quitting wielder and for a quitting marked target.
  */
 public final class LampWeapon implements EgoWeapon {
@@ -121,6 +127,26 @@ public final class LampWeapon implements EgoWeapon {
     private static final double SLAM_KB_HORIZONTAL = 1.7;
     private static final double SLAM_KB_UP = 0.55;
 
+    // ---- hammer slam tuning (left-click) — PLACEHOLDERS, balance wave -----------------
+    /** Left-click brings the lantern down two-handed: an AoE ground pound around the wielder. */
+    private static final double HAMMER_RADIUS      = 3.5;   // everything within this of the impact is caught
+    private static final long   HAMMER_COOLDOWN_MS = 4_000L;
+    private static final double HAMMER_DAMAGE      = 4.0;   // ~2 hearts — a real hit, unlike the heave-only slam
+    private static final double HAMMER_KB_UP       = 0.55;  // pops the caught bodies up and back
+
+    // ---- chasing flame tuning (right-click) — PLACEHOLDERS, balance wave --------------
+    /** Right-click looses yellow flames that hunt the Gaze-marked body; with none marked they float and die. */
+    private static final long   FLAME_COOLDOWN_MS  = 5_000L;
+    private static final int    FLAME_COUNT        = 3;     // little flames loosed per cast
+    private static final double FLAME_DAMAGE       = 2.0;   // per flame that reaches the mark (1 heart)
+    private static final double FLAME_SPEED        = 0.55;  // blocks/tick as it homes
+    private static final int    FLAME_MAX_TICKS    = 70;    // it always gives up and fades by here
+    private static final double FLAME_HIT_RADIUS   = 1.0;   // contact reach on the mark
+
+    // ---- gaze cooldown ---------------------------------------------------------------
+    /** Fixing a fresh eye rests this long — a proper cooldown, so the mark cannot be re-fixed every tick. */
+    private static final long   GAZE_COOLDOWN_MS   = 5_000L;
+
     /** Harmful potion effects the Gaze copies from the wielder onto the marked body. */
     private static final Set<PotionEffectType> HARMFUL = Set.of(
             PotionEffectType.SLOWNESS,
@@ -139,8 +165,14 @@ public final class LampWeapon implements EgoWeapon {
     /** Wielder UUID -> the eye Big Bird has fixed on a target. */
     private final Map<UUID, Gaze> gazes = new HashMap<>();
 
-    /** Wielder UUID -> epoch-millis at which the next slam is allowed. */
+    /** Wielder UUID -> epoch-millis at which the next (shift-left) slam is allowed. */
     private final Map<UUID, Long> slamCd = new HashMap<>();
+    /** Wielder UUID -> epoch-millis at which the next (left-click) hammer slam is allowed. */
+    private final Map<UUID, Long> hammerCd = new HashMap<>();
+    /** Wielder UUID -> epoch-millis at which the next (right-click) flame cast is allowed. */
+    private final Map<UUID, Long> flameCd = new HashMap<>();
+    /** Wielder UUID -> epoch-millis at which the next (shift-right) Gaze mark is allowed. */
+    private final Map<UUID, Long> gazeCd = new HashMap<>();
 
     /**
      * Targets whose slam-damage is currently resolving. The slam's {@code victim.damage(...)} re-enters
@@ -237,15 +269,18 @@ public final class LampWeapon implements EgoWeapon {
      * flashing a lone timer, so the two states never stomp each other as the wielder acts.
      */
     private void renderBar(Player player) {
-        player.sendActionBar(EgoHud.row(slamReadout(player), gazeReadout(player)));
+        player.sendActionBar(EgoHud.row(
+                cdReadout(player, hammerCd, "Hammer"),
+                cdReadout(player, slamCd, "Slam"),
+                cdReadout(player, flameCd, "Flames"),
+                gazeReadout(player)));
     }
 
-    /** The slam half: its cooldown while resting, else ready. */
-    private Component slamReadout(Player player) {
+    /** One ability's half of the line: its cooldown while resting, else null so row() drops it — an idle lantern stays quiet. */
+    private Component cdReadout(Player player, Map<UUID, Long> cds, String name) {
         long now = System.currentTimeMillis();
-        long ready = slamCd.getOrDefault(player.getUniqueId(), 0L);
-        if (now < ready) return EgoHud.cooldown("Slam", ready - now, FAINT);
-        return EgoHud.ready("Slam", EMBER);
+        long ready = cds.getOrDefault(player.getUniqueId(), 0L);
+        return now < ready ? EgoHud.cooldown(name, ready - now, FAINT) : null;
     }
 
     /** The gaze half: the mark it currently holds, else null so row() drops it from the line. */
@@ -333,29 +368,48 @@ public final class LampWeapon implements EgoWeapon {
         }
     }
 
-    // ---- right-click routing: slam (plain) / gaze (sneak) --------------------------
+    // ---- input routing -------------------------------------------------------------
+    // Left-click       -> hammer slam (AoE ground pound)
+    // Shift-left-click -> the old lantern slam (single body, big heave)
+    // Right-click      -> loose chasing flames at the Gaze mark (or float + fade with none)
+    // Shift-right-click-> Gaze: fix an eye on the looked-at body
 
     @Override
     public void onInteract(Player player, boolean sneaking) {
         if (sneaking) gaze(player);
-        else slam(player);
+        else summonFlames(player);
+    }
+
+    @Override
+    public void onSwing(Player player) {
+        if (!matches(player.getInventory().getItemInMainHand())) return; // abilities are main-hand only
+        if (player.isSneaking()) slam(player);
+        else hammerSlam(player);
     }
 
     /** Sneak + right-click: fix an eye on the looked-at target and pour the wielder's debuffs onto it. */
     private void gaze(Player player) {
+        long now = System.currentTimeMillis();
+        long ready = gazeCd.getOrDefault(player.getUniqueId(), 0L);
+        if (now < ready) {
+            renderBar(player); // the composed line already shows the Gaze cooldown counting down
+            player.playSound(player.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_HIT, 0.35f, 0.6f);
+            return;
+        }
+
         LivingEntity target = pickTarget(player, GAZE_RANGE);
         if (target == null) {
             player.sendActionBar(EgoHud.status(ABILITY_NAME + " — no target", FAINT));
             player.playSound(player.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_HIT, 0.4f, 0.7f);
-            return;
+            return; // a whiff costs no cooldown
         }
 
-        long now = System.currentTimeMillis();
         gazes.put(player.getUniqueId(), new Gaze(target.getUniqueId(), now + TRANSFER_WINDOW_MS, now));
+        gazeCd.put(player.getUniqueId(), now + GAZE_COOLDOWN_MS);
         transferDebuffs(player, target); // snapshot on the cast
 
         gazeFx(player, target);
-        renderBar(player); // the composed line now carries the mark alongside the slam state
+        renderBar(player); // the composed line now carries the mark alongside the ability cooldowns
     }
 
     /** A radiant eye opening over the marked body — warm dust, a soft chime, an eye-like ring. */
@@ -427,6 +481,155 @@ public final class LampWeapon implements EgoWeapon {
         Location impact = at.clone().add(0, 0.6, 0);
         world.spawnParticle(Particle.DUST, impact, 14, 0.35, 0.25, 0.35, 0.0, IMPACT);
         world.spawnParticle(Particle.CRIT, impact, 8, 0.30, 0.20, 0.30, 0.05);
+    }
+
+    // ---- hammer slam: the lantern comes down two-handed (left-click) ----------------
+
+    /** Left-click: an AoE ground pound around the wielder — a real hit, catching every foe in reach. */
+    private void hammerSlam(Player player) {
+        long now = System.currentTimeMillis();
+        long ready = hammerCd.getOrDefault(player.getUniqueId(), 0L);
+        if (now < ready) {
+            renderBar(player); // the composed line already shows the hammer cooldown counting down
+            player.playSound(player.getLocation(), Sound.BLOCK_LANTERN_STEP, 0.35f, 0.7f);
+            return;
+        }
+        hammerCd.put(player.getUniqueId(), now + HAMMER_COOLDOWN_MS);
+
+        Location at = player.getLocation();
+        Gaze g = gazes.get(player.getUniqueId());
+        for (Entity e : player.getNearbyEntities(HAMMER_RADIUS, HAMMER_RADIUS, HAMMER_RADIUS)) {
+            if (e.getUniqueId().equals(player.getUniqueId()) || !(e instanceof LivingEntity le) || le.isDead()) continue;
+            if (e instanceof Tameable t && t.isTamed()) continue; // spare the wielder's own pets
+
+            UUID tid = le.getUniqueId();
+            slamming.add(tid); // fence: the damage below re-enters onHit — don't let it loop
+            try {
+                le.damage(HAMMER_DAMAGE, player);
+            } finally {
+                slamming.remove(tid);
+            }
+
+            Vector out = le.getLocation().toVector().subtract(at.toVector()).setY(0);
+            if (out.lengthSquared() < 1.0e-6) out = new Vector(1, 0, 0);
+            out.normalize().multiply(SLAM_KB_HORIZONTAL * 0.7);
+            le.setVelocity(le.getVelocity().add(new Vector(out.getX(), HAMMER_KB_UP, out.getZ())));
+
+            if (g != null && g.target.equals(tid)) g.lastCombatAt = now; // a pounded mark stays in the fight
+        }
+
+        clang(at);
+        World world = at.getWorld();
+        world.spawnParticle(Particle.DUST, at.clone().add(0, 0.2, 0), 24, HAMMER_RADIUS * 0.5, 0.15, HAMMER_RADIUS * 0.5, 0.0, IMPACT);
+        renderBar(player);
+    }
+
+    // ---- chasing flames: yellow fire that hunts the mark (right-click) ---------------
+
+    /** Right-click: loose yellow flames at the Gaze-marked body. With none marked they float up and fade. */
+    private void summonFlames(Player player) {
+        long now = System.currentTimeMillis();
+        long ready = flameCd.getOrDefault(player.getUniqueId(), 0L);
+        if (now < ready) {
+            renderBar(player); // the composed line already shows the flame cooldown counting down
+            player.playSound(player.getLocation(), Sound.BLOCK_LANTERN_STEP, 0.35f, 0.7f);
+            return;
+        }
+        flameCd.put(player.getUniqueId(), now + FLAME_COOLDOWN_MS);
+
+        Gaze g = gazes.get(player.getUniqueId());
+        LivingEntity mark = null;
+        if (g != null && plugin.getServer().getEntity(g.target) instanceof LivingEntity le
+                && !le.isDead() && le.isValid() && le.getWorld().equals(player.getWorld())) {
+            mark = le;
+            g.lastCombatAt = now; // loosing flames at the mark keeps the fight (and its aura-exclusion) alive
+        }
+
+        Location muzzle = player.getEyeLocation();
+        player.getWorld().playSound(muzzle, Sound.ITEM_FIRECHARGE_USE, 0.6f, 1.2f);
+        player.getWorld().playSound(muzzle, Sound.BLOCK_FIRE_AMBIENT, 0.5f, 0.9f);
+        for (int i = 0; i < FLAME_COUNT; i++) {
+            new FlameChaser(player.getUniqueId(), muzzle.clone(), mark).runTaskTimer(plugin, i * 2L, 1L);
+        }
+        renderBar(player);
+    }
+
+    /** A little yellow flame: it homes onto the mark and bites on contact, or simply rises and dies with none. */
+    private final class FlameChaser extends BukkitRunnable {
+        private final UUID ownerId;
+        private final Location pos;
+        private final LivingEntity mark; // null -> no one to chase: float up and dissipate
+        private final Vector vel;
+        private int ticks = 0;
+
+        FlameChaser(UUID ownerId, Location start, LivingEntity mark) {
+            this.ownerId = ownerId;
+            this.pos = start;
+            this.mark = mark;
+            ThreadLocalRandom rng = ThreadLocalRandom.current();
+            this.vel = (mark != null)
+                    ? aimAt(mark).multiply(FLAME_SPEED)
+                    : new Vector(rng.nextDouble(-0.10, 0.10), FLAME_SPEED * 0.6, rng.nextDouble(-0.10, 0.10));
+        }
+
+        private Vector aimAt(LivingEntity t) {
+            Vector to = t.getLocation().add(0, t.getHeight() * 0.6, 0).toVector().subtract(pos.toVector());
+            return to.lengthSquared() < 1.0e-6 ? new Vector(0, 1, 0) : to.normalize();
+        }
+
+        @Override
+        public void run() {
+            if (++ticks > FLAME_MAX_TICKS) { fizzle(); cancel(); return; }
+            if (mark != null && (mark.isDead() || !mark.isValid() || !mark.getWorld().equals(pos.getWorld()))) {
+                fizzle(); cancel(); return; // the quarry is gone -> the flame gutters out
+            }
+
+            if (mark != null) {
+                Vector desired = aimAt(mark).multiply(FLAME_SPEED);
+                vel.add(desired.subtract(vel).multiply(0.30)); // ease toward the aim so it curves, not snaps
+                if (vel.lengthSquared() > FLAME_SPEED * FLAME_SPEED) vel.normalize().multiply(FLAME_SPEED);
+            }
+            pos.add(vel);
+            flameFx(pos);
+
+            if (mark != null) {
+                Location centre = mark.getLocation().add(0, mark.getHeight() * 0.6, 0);
+                if (pos.distanceSquared(centre) <= FLAME_HIT_RADIUS * FLAME_HIT_RADIUS) {
+                    Player owner = plugin.getServer().getPlayer(ownerId);
+                    UUID tid = mark.getUniqueId();
+                    slamming.add(tid);
+                    try {
+                        if (owner != null) mark.damage(FLAME_DAMAGE, owner);
+                        else mark.damage(FLAME_DAMAGE);
+                    } finally {
+                        slamming.remove(tid);
+                    }
+                    burst(centre);
+                    cancel();
+                }
+            }
+        }
+
+        /** The flame guttering out with nothing to bite: a small puff of smoke and a dying ember. */
+        private void fizzle() {
+            pos.getWorld().spawnParticle(Particle.SMOKE, pos, 4, 0.10, 0.10, 0.10, 0.01);
+            pos.getWorld().spawnParticle(Particle.DUST, pos, 2, 0.06, 0.06, 0.06, 0, FLAME_DUST);
+        }
+    }
+
+    /** The yellow flame's body as it travels: a lick of fire wrapped in warm yellow motes. */
+    private void flameFx(Location at) {
+        World world = at.getWorld();
+        world.spawnParticle(Particle.SMALL_FLAME, at, 2, 0.05, 0.05, 0.05, 0.0);
+        world.spawnParticle(Particle.DUST, at, 2, 0.06, 0.06, 0.06, 0.0, FLAME_DUST);
+    }
+
+    /** A flame reaching its mark: a bright burst of fire and a crackle. */
+    private void burst(Location at) {
+        World world = at.getWorld();
+        world.spawnParticle(Particle.FLAME, at, 14, 0.25, 0.25, 0.25, 0.03);
+        world.spawnParticle(Particle.DUST, at, 8, 0.25, 0.25, 0.25, 0.0, FLAME_DUST);
+        world.playSound(at, Sound.ENTITY_BLAZE_HURT, 0.5f, 1.4f);
     }
 
     // ---- shared: pick the looked-at / nearest-in-front living body ------------------
@@ -501,6 +704,9 @@ public final class LampWeapon implements EgoWeapon {
         // Drop the quitter's own wielder state...
         gazes.remove(id);
         slamCd.remove(id);
+        hammerCd.remove(id);
+        flameCd.remove(id);
+        gazeCd.remove(id);
         slamming.remove(id);
         // ...and forget any mark that was fixed on them as a target.
         gazes.values().removeIf(g -> g.target.equals(id));
@@ -526,6 +732,9 @@ public final class LampWeapon implements EgoWeapon {
     /** Warm dust kicked up by the blunt slam. */
     private static final Particle.DustOptions IMPACT =
             new Particle.DustOptions(Color.fromRGB(0xC9, 0x9A, 0x5A), 1.3f);
+    /** The bright yellow of the chasing flames. */
+    private static final Particle.DustOptions FLAME_DUST =
+            new Particle.DustOptions(Color.fromRGB(0xFF, 0xE0, 0x4A), 1.0f);
 
     // The moveset below is written from the code, not from the old lore block it replaces: the aura also
     // covers the wielder and tamed pets and burns in either hand, the slam refunds its cooldown on a whiff,
@@ -545,16 +754,27 @@ public final class LampWeapon implements EgoWeapon {
                             "within 5 blocks are kept under",
                             "Resistance I. Burns in either hand.",
                             "A " + ABILITY_NAME + "-marked foe is excluded."),
-                    new EgoLore.Ability("[Right Click] Slam",
-                            "Drives the lantern onto a body within",
-                            "5 blocks: heavy knockback, half a",
-                            "heart of damage. 3 second cooldown,",
-                            "though a miss costs none of it."),
+                    new EgoLore.Ability("[Left Click] Hammer Slam",
+                            "Brings the lantern down for a ground",
+                            "pound, catching every foe within 3.5",
+                            "blocks: two hearts and a heave up.",
+                            "4 second cooldown."),
+                    new EgoLore.Ability("[Shift + Left-click] Slam",
+                            "Drives the lantern onto a single body",
+                            "within 5 blocks: heavy knockback,",
+                            "half a heart. 3 second cooldown, and",
+                            "a miss costs none of it."),
+                    new EgoLore.Ability("[Right Click] Chasing Flames",
+                            "Looses yellow flames that hunt the",
+                            ABILITY_NAME + "-marked body and bite on",
+                            "contact. With no one marked they just",
+                            "float up and fade. 5 second cooldown."),
                     new EgoLore.Ability("[Shift + Right-click] " + ABILITY_NAME,
                             "Marks a target within 16 blocks and",
                             "copies your harmful effects onto it —",
                             "at once, then again for 8 seconds.",
                             "The mark denies it your aura until it",
-                            "has been out of the fight 10 seconds.")
+                            "has been out of the fight 10 seconds.",
+                            "5 second cooldown.")
             ));
 }
