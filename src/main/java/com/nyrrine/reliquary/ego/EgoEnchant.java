@@ -66,6 +66,34 @@ public record EgoEnchant(String id, String displayName, int maxLevel, String des
     // Arcana Focus: the current form's ultimate returns sooner — -15s to its cooldown per level, floor 60s.
     public static final EgoEnchant ARCANA_FOCUS = reg("arcana_focus", "Arcana Focus", 3,
             "Love & Hate: -15s to the current form's ult cooldown per level (floor 60s).");
+    // Hair Trigger: Regret winds up faster — -300ms to its charge time per level, floored at 1.5s. Cadence only.
+    public static final EgoEnchant HAIR_TRIGGER = reg("hair_trigger", "Hair Trigger", 3,
+            "Regret: -300ms to the charge time per level (floor 1.5s).");
+    // Adrenaline: Life for a Daredevil fights harder cornered — Speed + Resistance while at or below 35% HP.
+    // Survival, not damage: it helps the daredevil live, per level a little longer/stronger.
+    public static final EgoEnchant ADRENALINE = reg("adrenaline", "Adrenaline", 3,
+            "Life for a Daredevil: Speed + Resistance per level while at or below 35% health.");
+    // Grove: a summoned Burrowing Heaven carries more heads — +1 to its skull cap per level (base 5, up to 8).
+    public static final EgoEnchant GROVE = reg("grove", "Grove", 3,
+            "Heaven: +1 to a summoned tree's skull cap per level (up to 8).");
+    // All-Seeing: the heaven opens more readily — +10% stasis chance on a looking hit per level (up to +30%).
+    public static final EgoEnchant ALL_SEEING = reg("all_seeing", "All-Seeing", 3,
+            "Heaven: +10% stasis chance on a looking hit per level.");
+    // Rampant Bloom: Faint Aroma carries more petals — +3 to the petal cap per level (a slow, gated build).
+    public static final EgoEnchant RAMPANT_BLOOM = reg("rampant_bloom", "Rampant Bloom", 3,
+            "Faint Aroma: +3 to the petal cap per level (a slow, gated bloom).");
+    // Ram the Powder: Crimson Scar's flintlock reloads faster — -12% to its reload per level. Cadence only.
+    public static final EgoEnchant RAM_THE_POWDER = reg("ram_the_powder", "Ram the Powder", 3,
+            "Crimson Scar: -12% to the flintlock reload per level.");
+    // Long Hair: the Screaming Wedge's strand reaches farther — +25% reach per level. Reach only, no damage.
+    public static final EgoEnchant LONG_HAIR = reg("long_hair", "Long Hair", 3,
+            "Screaming Wedge: +25% strand reach per level.");
+    // Converging Grief: Sword of Tears' Impale returns sooner — -12% to its cooldown per level. Cadence only.
+    public static final EgoEnchant CONVERGING_GRIEF = reg("converging_grief", "Converging Grief", 3,
+            "Sword of Tears: -12% to the Converging Impale cooldown per level.");
+    // Refracted Step: Fragments' return window lingers — +1s to the refraction window per level.
+    public static final EgoEnchant REFRACTED_STEP = reg("refracted_step", "Refracted Step", 3,
+            "Fragments: +1s to the refraction return window per level.");
 
     /** The enchant with this id, or {@code null} if no such enchant is catalogued. */
     public static EgoEnchant get(String id) {
