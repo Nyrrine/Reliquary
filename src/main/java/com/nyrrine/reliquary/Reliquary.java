@@ -48,6 +48,7 @@ import com.nyrrine.reliquary.ego.weapons.SodaWeapon;
 import com.nyrrine.reliquary.ego.weapons.SolemnLamentWeapon;
 import com.nyrrine.reliquary.ego.weapons.SolitudeWeapon;
 import com.nyrrine.reliquary.ego.weapons.SwordOfTearsWeapon;
+import com.nyrrine.reliquary.ego.weapons.TwilightWeapon;
 import com.nyrrine.reliquary.ego.weapons.WristCutterWeapon;
 import com.nyrrine.reliquary.weapons.arayashiki.ArayashikiWeapon;
 import com.nyrrine.reliquary.weapons.laevateinn.LaevateinnDoubleJump;
@@ -135,6 +136,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         weapons.register(new JustitiaWeapon(this));
         weapons.register(new MimicryWeapon(this));
         weapons.register(new CensoredWeapon(this));
+        weapons.register(new TwilightWeapon(this));
 
         // ---- bus ego ----
         FlowerBuryingWedgeWeapon flowerWedge = new FlowerBuryingWedgeWeapon(this);
