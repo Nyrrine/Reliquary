@@ -6,6 +6,7 @@ import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.core.WeaponManager;
 import com.nyrrine.reliquary.ego.EgoEnchant;
 import com.nyrrine.reliquary.ego.EgoEnchants;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.enchantments.Enchantment;
 import com.nyrrine.reliquary.data.PlayerDataListener;
 import com.nyrrine.reliquary.data.PlayerStore;
@@ -178,7 +179,22 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         this.distortion = new com.nyrrine.reliquary.distortion.Distortion(this);
         distortion.enable();
 
-        getLogger().info("Reliquary opens. Its relics stir.");
+        announceStartup();
+    }
+
+    /** A literal gold startup block on the console — what loaded, nothing flowery. Reliquary's brand is gold. */
+    private void announceStartup() {
+        TextColor gold = TextColor.color(0xF2C94C);
+        var console = getServer().getConsoleSender();
+        console.sendMessage(Component.text("========================================", gold));
+        console.sendMessage(Component.text("  RELIQUARY loaded.", gold));
+        console.sendMessage(Component.text("  Loaded:", gold));
+        console.sendMessage(Component.text("    - E.G.O Equipment, relics, and the bus ego", gold));
+        console.sendMessage(Component.text("    - A Beautiful Voice", gold));
+        console.sendMessage(Component.text("    - The Index (Prescripts)", gold));
+        console.sendMessage(Component.text("    - Cogito (extraction)", gold));
+        console.sendMessage(Component.text("  Contact Nyrrine for any issues.", gold));
+        console.sendMessage(Component.text("========================================", gold));
     }
 
     @Override
