@@ -105,4 +105,36 @@ public final class EgoLore {
 
         return new Tooltip(line(name, primary), lore);
     }
+
+    /** Colour of the enchantments block appended to the bottom of an enchanted E.G.O tooltip. */
+    private static final TextColor ENCHANT_COLOR = TextColor.color(0xB0A0D0);
+    private static final String ENCHANT_HEADER = "Enchantments";
+
+    /** One applied enchant for the bottom-of-tooltip block: its display name and level. */
+    public record EnchantLine(String name, int level) {}
+
+    /**
+     * Rebuild {@code base}'s lore with an Enchantments block appended at the very bottom (after the footer),
+     * one line per applied enchant. Always rebuilt from the immutable {@code base}, so the block never stacks
+     * stale entries when enchants change. An empty list returns the base tooltip untouched.
+     */
+    public static Tooltip withEnchants(Tooltip base, List<EnchantLine> enchants) {
+        if (enchants.isEmpty()) return base;
+        List<Component> lore = new ArrayList<>(base.lore());
+        lore.add(Component.empty());
+        lore.add(line(ENCHANT_HEADER, ENCHANT_COLOR));
+        for (EnchantLine e : enchants) {
+            lore.add(line("  " + e.name() + " " + roman(e.level()), BODY));
+        }
+        return new Tooltip(base.displayName(), lore);
+    }
+
+    /** Roman numeral for enchant levels 1..10; the plain number beyond. */
+    private static String roman(int level) {
+        return switch (level) {
+            case 1 -> "I";   case 2 -> "II";  case 3 -> "III"; case 4 -> "IV"; case 5 -> "V";
+            case 6 -> "VI";  case 7 -> "VII"; case 8 -> "VIII"; case 9 -> "IX"; case 10 -> "X";
+            default -> Integer.toString(level);
+        };
+    }
 }
