@@ -69,7 +69,7 @@ public final class HarvestWeapon implements Weapon {
     // ---- reaping-slash tuning (the nerfed special) --------------------------------
     private static final int STRIKES_PER_SLASH = 3;    // only every 3rd strike can slash
     private static final long SLASH_CD_MS = 4000L;     // …and only if this cooldown has come up
-    private static final double SLASH_DAMAGE = 5.0;    // modest bonus on top of the base-4 hoe blow (~9, in band)
+    private static final double SLASH_DAMAGE = 7.0;    // bonus on top of the hoe blow; clears i-frames so it lands in full
     private static final double SLASH_RANGE = 3.6;     // how far the arc reaches
     private static final double SLASH_CONE_DEG = 150.0;// wide frontal fan
     private static final int SLASH_MAX_TARGETS = 8;    // cap the scan so a crowd can't blow up the tick
@@ -213,6 +213,7 @@ public final class HarvestWeapon implements Weapon {
                 Vector to = target.getLocation().add(0, 1, 0).toVector().subtract(eye.toVector());
                 if (to.lengthSquared() < 1.0e-6) continue;
                 if (to.clone().normalize().dot(dir) < cosLimit) continue;
+                target.setNoDamageTicks(0); // the melee blow ~5t ago still has them in i-frames; clear so the slash lands
                 target.damage(SLASH_DAMAGE, player);
                 if (++felled >= SLASH_MAX_TARGETS) break;
             }
