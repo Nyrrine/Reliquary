@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -23,6 +24,7 @@ import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.inventory.ItemStack;
@@ -154,6 +156,34 @@ public final class FaintAromaWeapon implements EgoWeapon {
     /** Each petal is worth this much weapon damage: +1% per petal, so +30% at full bloom. */
     private static final double PETAL_DAMAGE_PER_STACK = 0.01;
     private static final int PETAL_DAMAGE_PER_STACK_PCT = 1; // the same number, for docs and the HUD
+
+    // ---- enchants ------------------------------------------------------------------
+    // Quicker Scent (a vanilla enchant — a crossbow holds Quick Charge at an anvil, so this needs no
+    // catalogue entry): a faster-blooming bird cuts its Full Bloom rest by 15% per level, up to 45% at
+    // Quick Charge III. Cadence only — it never touches a petal, a heal, or an arrow's blow.
+    private static final double QUICKER_SCENT_PER_LEVEL = 0.15;
+    private static final int    QUICKER_SCENT_CAP       = 3;
+
+    // Rampant Bloom (a custom enchant — id "rampant_bloom"): a wider bloom raises the petal ceiling by
+    // RAMPANT_BLOOM_PER_LEVEL per level, up to +9 at level 3. Gated hard by construction: petals grow one per
+    // strike, so a higher ceiling only means a slower, LATER full bloom — [Magnificent End] unlocks at the
+    // raised cap, never sooner. It buys a deeper bloom, not a faster one.
+    private static final int RAMPANT_BLOOM_PER_LEVEL = 3;
+    private static final int RAMPANT_BLOOM_CAP       = 3;
+
+    /** The Full Bloom cooldown for the bird held right now: the base rest cut by its Quicker Scent bonus. */
+    private long fullBloomCooldownMs(Player player) {
+        int qc = Math.min(QUICKER_SCENT_CAP,
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.QUICK_CHARGE));
+        return (long) (FULL_BLOOM_COOLDOWN_MS * (1.0 - QUICKER_SCENT_PER_LEVEL * qc));
+    }
+
+    /** The petal cap for the bird held right now: {@link #PETAL_CAP} plus Rampant Bloom's per-level bonus. */
+    private int petalCap(Player player) {
+        int lvl = Math.min(RAMPANT_BLOOM_CAP,
+                EgoEnchants.level(player.getInventory().getItemInMainHand(), "rampant_bloom"));
+        return PETAL_CAP + lvl * RAMPANT_BLOOM_PER_LEVEL;
+    }
 
     // ---- faint aroma (the charge meter + its Weakness payload) ---------------------
 
@@ -513,7 +543,7 @@ public final class FaintAromaWeapon implements EgoWeapon {
             player.playSound(player.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.4f, 1.7f);
             return;
         }
-        bloom.fullBloomCd = now + FULL_BLOOM_COOLDOWN_MS;
+        bloom.fullBloomCd = now + fullBloomCooldownMs(player);
 
         for (int i = 0; i < FULL_BLOOM_ARROWS; i++) {
             scheduleBloomArrow(player, i * FULL_BLOOM_GAP_TICKS);
@@ -558,9 +588,10 @@ public final class FaintAromaWeapon implements EgoWeapon {
      * instant it leaves — the shot is paid for up front and carries what it bought.
      */
     private void magnificentEnd(Player player, Bloom bloom) {
-        if (bloom.petals < PETAL_CAP) {
+        int cap = petalCap(player);
+        if (bloom.petals < cap) {
             player.sendActionBar(EgoHud.status(
-                    "Magnificent End — " + bloom.petals + "/" + PETAL_CAP + " petals", WILT));
+                    "Magnificent End — " + bloom.petals + "/" + cap + " petals", WILT));
             player.playSound(player.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.45f, 1.4f);
             return;
         }
@@ -589,9 +620,10 @@ public final class FaintAromaWeapon implements EgoWeapon {
     private void feedUnwitheringFlower(Player wielder) {
         Bloom bloom = blooms.computeIfAbsent(wielder.getUniqueId(), k -> new Bloom());
         healWielder(wielder);
-        if (bloom.petals < PETAL_CAP) {
+        int cap = petalCap(wielder);
+        if (bloom.petals < cap) {
             bloom.petals++;
-            if (bloom.petals == PETAL_CAP) fullBloomChime(wielder); // the moment Magnificent End unlocks
+            if (bloom.petals == cap) fullBloomChime(wielder); // the moment Magnificent End unlocks
         }
     }
 
@@ -631,9 +663,9 @@ public final class FaintAromaWeapon implements EgoWeapon {
         applyFaintAroma(victim);
     }
 
-    /** The petal multiplier a shot rides: +1% weapon damage per petal, so x1.30 at full bloom. */
+    /** The petal multiplier a shot rides: +1% weapon damage per petal (petals are gain-capped at the bloom cap). */
     private static double petalMultiplier(int petals) {
-        return 1.0 + Math.min(petals, PETAL_CAP) * PETAL_DAMAGE_PER_STACK;
+        return 1.0 + petals * PETAL_DAMAGE_PER_STACK;
     }
 
     /**
@@ -1126,20 +1158,21 @@ public final class FaintAromaWeapon implements EgoWeapon {
      * catches".
      */
     private void renderBar(Player player, Bloom bloom) {
-        player.sendActionBar(EgoHud.row(petalReadout(bloom), aromaReadout(bloom), fullBloomReadout(bloom)));
+        player.sendActionBar(EgoHud.row(petalReadout(player, bloom), aromaReadout(bloom), fullBloomReadout(bloom)));
     }
 
     /** The petals gauge: the live +N% it is worth, and the Magnificent End unlock cue once at full bloom. */
-    private Component petalReadout(Bloom bloom) {
-        boolean bloomed = bloom.petals >= PETAL_CAP;
+    private Component petalReadout(Player player, Bloom bloom) {
+        int cap = petalCap(player);
+        boolean bloomed = bloom.petals >= cap;
         TextColor fill = bloomed ? CYAN : LAVENDER;
-        Component label = plain("Petals  " + bloom.petals + "/" + PETAL_CAP, COUNT)
+        Component label = plain("Petals  " + bloom.petals + "/" + cap, COUNT)
                 .append(plain("  +" + (bloom.petals * PETAL_DAMAGE_PER_STACK_PCT) + "%",
                         bloomed ? CYAN : FAINT));
         if (bloomed) {
             label = label.append(plain("  ", COUNT)).append(EgoHud.ready("Magnificent End", CYAN));
         }
-        return EgoHud.gauge(fill, (double) bloom.petals / PETAL_CAP, label);
+        return EgoHud.gauge(fill, (double) bloom.petals / cap, label);
     }
 
     /** The aroma charge gathering toward its next Weakness. */
