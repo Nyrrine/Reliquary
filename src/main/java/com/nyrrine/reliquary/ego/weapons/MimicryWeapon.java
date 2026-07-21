@@ -63,10 +63,11 @@ import java.util.concurrent.ThreadLocalRandom;
  *       remembers, not the wounds it gave. The pool itself is never clamped; what it can <em>buy</em> is
  *       (see below). It evaporates after {@link #RESERVOIR_DECAY_MS} without a fresh wound (whether the
  *       wielder is logged in for that lull or not).</li>
- *   <li><b>Two heart-rows</b> ({@link #applyHold}, passive) — while the blade is held the wielder's max
- *       health doubles by {@link #HOLD_MAX_HEALTH_BONUS}, a keyed {@link Attribute#MAX_HEALTH} modifier
- *       lent on equip and taken back the instant the blade is sheathed, on death, on join, and on plugin
- *       disable — so no wielder outlives the blade at two heart-rows.</li>
+ *   <li><b>Held boons</b> ({@link #applyHold}, passive) — while the blade is held the wielder's max health
+ *       doubles by {@link #HOLD_MAX_HEALTH_BONUS} and their melee reach extends by {@link #HOLD_REACH_BONUS},
+ *       two keyed attribute modifiers lent on equip and taken back the instant the blade is sheathed, on
+ *       death, on join, and on plugin disable — so no wielder outlives the blade at two heart-rows or with a
+ *       longer arm than the sword grants.</li>
  *   <li><b>Nothing There</b> ({@link #onInteract}, shift + right-click) — the downswing. Empties the
  *       reservoir as one cleave around the wielder, dealing {@link #RELEASE_FRACTION} of the pooled total
  *       — never more than {@link #RELEASE_CAP} — to everything inside {@link #cleaveRadius}. Past
@@ -154,8 +155,18 @@ public final class MimicryWeapon implements Weapon {
 
     /** Keys the doubled-max-health modifier Mimicry lays on its wielder while the blade is held. */
     private final NamespacedKey holdHealthKey;
+    /** Keys the extended-melee-reach modifier Mimicry lays on its wielder while the blade is held. */
+    private final NamespacedKey holdReachKey;
 
     // ---- tuning: the passive drink -------------------------------------------------
+
+    /**
+     * PLACEHOLDER (balance wave): how much harder the regular M1 slices (beats 1-3) hit. A multiplier on the
+     * vanilla swing in {@link #onHit}, so enchants/crits still scale (never a flat set — not the Regret bug).
+     * The finisher beat is left at its base number by design (its payoff is the deeper drink, lunge, reach).
+     * Exact value is in Nyrrine's balance doc.
+     */
+    private static final double M1_REGULAR_DAMAGE_MULT = 1.35;
 
     /** Fraction of a landed blow's damage the weapon drinks back into its wielder. */
     private static final double LIFESTEAL_FRACTION = 0.25;
@@ -286,6 +297,15 @@ public final class MimicryWeapon implements Weapon {
      */
     private static final double HOLD_MAX_HEALTH_BONUS = 20.0;
 
+    /**
+     * PLACEHOLDER (balance wave): extra melee reach the blade lends while held — a keyed
+     * {@link Attribute#ENTITY_INTERACTION_RANGE} modifier on top of the vanilla 3.0, extending the swing "a
+     * little" (Nyrrine's tweak). No existing dial sets this attribute, so a held modifier is its sole and
+     * correct home. Managed with the heart-row modifier: applied on hold, stripped on release/death/join/
+     * disable, so no wielder keeps reach the blade no longer lends.
+     */
+    private static final double HOLD_REACH_BONUS = 0.75;
+
     // ---- tuning: the show ----------------------------------------------------------
     //
     // This block is the cosmetic half of the weapon, and every number in it is a ceiling on COST rather than
@@ -355,11 +375,11 @@ public final class MimicryWeapon implements Weapon {
     private static final int GASH_FADE = 5;
 
     /**
-     * How far in front of the wielder the M1 slice is thrown. Pushing the swing arc off the body is what
-     * separates it from the on-hit splash that lands on the struck target (Nyrrine round-3: the swing must
-     * read apart from the impact).
+     * How far in front of the wielder the M1 slice is thrown. Enough to still read apart from the on-hit
+     * splash that lands on the struck target (Nyrrine round-3), but pulled in close so the regular slices
+     * connect near the player rather than way out front (her tweak). PLACEHOLDER — feel value for her wave.
      */
-    private static final double FORWARD_SLICE_OFFSET = 2.2;
+    private static final double FORWARD_SLICE_OFFSET = 1.0;
 
     /** The chain forgets itself after this long, and the next swing starts from the first beat again. */
     private static final long COMBO_RESET_MS = 1_200L;
@@ -403,6 +423,7 @@ public final class MimicryWeapon implements Weapon {
         this.plugin = plugin;
         this.key = new NamespacedKey(plugin, "mimicry");
         this.holdHealthKey = new NamespacedKey(plugin, "mimicry_hold_health");
+        this.holdReachKey = new NamespacedKey(plugin, "mimicry_hold_reach");
     }
 
     @Override
@@ -500,6 +521,13 @@ public final class MimicryWeapon implements Weapon {
 
         long now = System.currentTimeMillis();
 
+        // Which M1 beat this swing is: the finisher was primed on its draw. The regular slices (beats 1-3)
+        // hit harder — a multiplier, so enchants still scale — while the finisher's blow keeps its base
+        // number, its payoff being the deeper drink, the lunge and the reach rather than a bigger cut.
+        Combo combo = combos.get(aid);
+        boolean finisher = combo != null && combo.finisherPrimed;
+        if (!finisher) event.setDamage(event.getDamage() * M1_REGULAR_DAMAGE_MULT);
+
         // The damage the blow actually lands, after armour and resistances — what the weapon really took.
         double dealt = event.getFinalDamage();
         if (dealt <= 0.0) return;
@@ -508,8 +536,7 @@ public final class MimicryWeapon implements Weapon {
         mark(aid, victim, now);
 
         // The finisher's landing blow drinks deeper, once. A normal swing takes the ordinary throttled sip.
-        Combo combo = combos.get(aid);
-        if (combo != null && combo.finisherPrimed) {
+        if (finisher) {
             combo.finisherPrimed = false;
             drink(attacker, dealt, now, FINISHER_LIFESTEAL_FRACTION, true);
         } else {
@@ -990,31 +1017,42 @@ public final class MimicryWeapon implements Weapon {
     // ---- the held heart-row ------------------------------------------------------------
 
     /**
-     * Lend the wielder the second heart-row while the blade is held. Idempotent and remove-before-add, so
-     * calling it every tick can neither stack the bonus nor leave a foreign copy of it behind; it also
-     * re-heals the modifier if something else stripped it out from under a live holder.
+     * Lend the wielder the second heart-row and the extended reach while the blade is held. Idempotent and
+     * remove-before-add per modifier, so calling it every tick can neither stack a bonus nor leave a foreign
+     * copy behind; it also re-heals a modifier if something else stripped it out from under a live holder.
      */
     private void applyHold(Player player) {
         holders.add(player.getUniqueId());
-        AttributeInstance inst = player.getAttribute(Attribute.MAX_HEALTH);
-        if (inst == null) return;
-        for (AttributeModifier m : inst.getModifiers()) {
-            if (holdHealthKey.equals(m.getKey())) return;    // already lent — nothing to do
-        }
-        inst.addModifier(new AttributeModifier(
-                holdHealthKey, HOLD_MAX_HEALTH_BONUS, AttributeModifier.Operation.ADD_NUMBER));
+        ensureHoldModifier(player, Attribute.MAX_HEALTH, holdHealthKey, HOLD_MAX_HEALTH_BONUS);
+        ensureHoldModifier(player, Attribute.ENTITY_INTERACTION_RANGE, holdReachKey, HOLD_REACH_BONUS);
     }
 
-    /** Take the lent heart-row back and clamp the wielder down into the smaller frame it leaves. */
+    /** Add a keyed hold modifier if it is not already present — never stacks, re-heals if stripped. */
+    private void ensureHoldModifier(Player player, Attribute attr, NamespacedKey holdKey, double amount) {
+        AttributeInstance inst = player.getAttribute(attr);
+        if (inst == null) return;
+        for (AttributeModifier m : inst.getModifiers()) {
+            if (holdKey.equals(m.getKey())) return;          // already lent — nothing to do
+        }
+        inst.addModifier(new AttributeModifier(holdKey, amount, AttributeModifier.Operation.ADD_NUMBER));
+    }
+
+    /** Take the lent heart-row and reach back; clamp the wielder down into the smaller max HP it leaves. */
     private void releaseHold(Player player) {
         holders.remove(player.getUniqueId());
-        AttributeInstance inst = player.getAttribute(Attribute.MAX_HEALTH);
+        removeHoldModifier(player, Attribute.ENTITY_INTERACTION_RANGE, holdReachKey, false);
+        removeHoldModifier(player, Attribute.MAX_HEALTH, holdHealthKey, true);
+    }
+
+    /** Strip a keyed hold modifier if present; when {@code clampHealth}, pull the wielder into the new max. */
+    private void removeHoldModifier(Player player, Attribute attr, NamespacedKey holdKey, boolean clampHealth) {
+        AttributeInstance inst = player.getAttribute(attr);
         if (inst == null) return;
         boolean removed = false;
         for (AttributeModifier m : new java.util.ArrayList<>(inst.getModifiers())) {
-            if (holdHealthKey.equals(m.getKey())) { inst.removeModifier(m); removed = true; }
+            if (holdKey.equals(m.getKey())) { inst.removeModifier(m); removed = true; }
         }
-        if (removed && player.getHealth() > inst.getValue()) {
+        if (clampHealth && removed && player.getHealth() > inst.getValue()) {
             player.setHealth(Math.max(0.0, inst.getValue()));    // don't leave health hanging above the new max
         }
     }
@@ -1573,8 +1611,9 @@ public final class MimicryWeapon implements Weapon {
                     new EgoLore.Ability("[Passive] While Held",
                             "Your max health doubles to 40, two",
                             "heart-rows that fall away the moment",
-                            "you sheathe. Landing a hit heals you",
-                            "for 25% of the damage dealt, once",
+                            "you sheathe, and your melee reach",
+                            "extends a little. Landing a hit heals",
+                            "you for 25% of the damage dealt, once",
                             "every 5s; the finisher heals more."),
                     new EgoLore.Ability("[Passive] Hello.",
                             "Damage dealt TO you pools in the",
