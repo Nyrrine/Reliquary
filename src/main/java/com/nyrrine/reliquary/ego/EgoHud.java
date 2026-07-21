@@ -82,4 +82,25 @@ public final class EgoHud {
     public static Component status(String text, TextColor color) {
         return plain(text, color);
     }
+
+    /** The gap between two state readouts sharing one line. */
+    private static final String GAP = "   ";
+
+    /**
+     * Compose several state readouts into ONE action-bar line, in the order given, separated by a small gap.
+     * Null parts are skipped, so a weapon passes every state it might show and lets the absent ones drop out.
+     *
+     * <p>This is the whole standard: instead of one cooldown flashing in and replacing another as the player
+     * acts, a weapon builds its complete readout every tick — all charges, all cooldowns, at once — and hands
+     * it to {@code sendActionBar}. Read {@link #row}'s arguments top-to-bottom and that is exactly what the
+     * player sees, always in the same order, so the HUD never rearranges itself under them.
+     */
+    public static Component row(Component... parts) {
+        Component line = null;
+        for (Component part : parts) {
+            if (part == null) continue;
+            line = (line == null) ? part : line.append(plain(GAP, FRAME)).append(part);
+        }
+        return (line == null ? Component.empty() : line).decoration(TextDecoration.ITALIC, false);
+    }
 }

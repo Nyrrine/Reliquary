@@ -9,6 +9,7 @@ import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.FluidCollisionMode;
@@ -161,8 +162,7 @@ public final class OurGalaxyWeapon implements EgoWeapon {
 
         int left = charges.getOrDefault(id, max);
         if (left <= 0) {
-            long remaining = refill != null ? refill - now : COMET_RECHARGE_MS;
-            player.sendActionBar(EgoHud.cooldown("Comet", remaining, AZURE));
+            renderBar(player); // the composed line already shows the comet recharge counting down
             player.playSound(player.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_HIT, 0.4f, 1.7f);
             return;
         }
@@ -190,8 +190,44 @@ public final class OurGalaxyWeapon implements EgoWeapon {
         liveComets.add(comet); // tracked so onDisable can reap an in-flight comet's marker on reload
         comet.runTaskTimer(plugin, 0L, 1L);
 
-        // Show remaining charges (and, at empty, the pips read as spent — the recharge cue).
-        player.sendActionBar(EgoHud.pips("Comet", STAR, left, max));
+        renderBar(player); // reflect the spent comet on the composed line at once
+    }
+
+    /**
+     * The always-on composed readout: the comet pool (pips, or the recharge counting down while dry) and the
+     * blink state (ready, or its cooldown), on ONE line via {@link EgoHud#row}. Every path that used to send a
+     * lone pip or cooldown now sends this, so a comet shot and a blink never flash one readout over the other.
+     */
+    private void renderBar(Player player) {
+        long now = System.currentTimeMillis();
+        UUID id = player.getUniqueId();
+        player.sendActionBar(EgoHud.row(cometReadout(player, id, now), blinkReadout(id, now)));
+    }
+
+    /** The comet half of the line: pips while loaded, the recharge cooldown while the pool is dry. */
+    private Component cometReadout(Player player, UUID id, long now) {
+        int max = maxComets(player);
+        Long refill = rechargeAt.get(id);
+        int left = charges.getOrDefault(id, max);
+        if (left <= 0 && refill != null && now < refill) {
+            return EgoHud.cooldown("Comet", refill - now, AZURE);
+        }
+        if (left <= 0 && refill != null) left = max; // recharge elapsed; realised for real on the next fire
+        return EgoHud.pips("Comet", STAR, left, max);
+    }
+
+    /** The blink half of the line: its cooldown while recharging, else ready. */
+    private Component blinkReadout(UUID id, long now) {
+        Long ready = blinkReadyAt.get(id);
+        if (ready != null && now < ready) return EgoHud.cooldown("Blink", ready - now, AZURE);
+        return EgoHud.ready("Blink", STAR);
+    }
+
+    @Override
+    public boolean onTick(Player player, long tick) {
+        if (!matches(player.getInventory().getItemInMainHand())) return false;
+        renderBar(player);
+        return true;
     }
 
     /** Sneak + right-click: a short line-of-sight blink in the look direction — never through walls. */
@@ -201,7 +237,7 @@ public final class OurGalaxyWeapon implements EgoWeapon {
 
         Long ready = blinkReadyAt.get(id);
         if (ready != null && now < ready) {
-            player.sendActionBar(EgoHud.cooldown("Blink", ready - now, AZURE));
+            renderBar(player); // composed line already shows the blink cooldown alongside the comet pool
             player.playSound(player.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_HIT, 0.4f, 1.3f);
             return;
         }
