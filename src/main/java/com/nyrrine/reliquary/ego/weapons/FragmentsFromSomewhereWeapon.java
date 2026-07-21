@@ -5,6 +5,7 @@ import com.nyrrine.reliquary.core.Blink;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -136,6 +137,12 @@ public final class FragmentsFromSomewhereWeapon implements EgoWeapon {
 
     /** How long the recorded spot stays returnable after a lunge. */
     private static final long REFRACTION_WINDOW_MS = 6_000L;
+
+    // Refracted Step (a custom enchant — id "refracted_step"): the echo lingers longer. +1s of returnable
+    // window per level, up to +3s at level 3 (a 9s window). Utility only — a wider escape window, never the
+    // lunge's damage, reach or the refraction cooldown.
+    private static final long REFRACTED_STEP_PER_LEVEL_MS = 1_000L;
+    private static final int  REFRACTED_STEP_CAP          = 3;
 
     /** How long Refraction stays dark after a completed return. */
     private static final long REFRACTION_COOLDOWN_MS = 7_000L;
@@ -344,13 +351,20 @@ public final class FragmentsFromSomewhereWeapon implements EgoWeapon {
         world.spawnParticle(Particle.DUST, at, 5, 0.14, 0.14, 0.14, 0.0, ROSE_DUST);
     }
 
+    /** The returnable window for the spear held right now: the base window widened by its Refracted Step bonus. */
+    private long refractionWindowMs(Player player) {
+        int lvl = Math.min(REFRACTED_STEP_CAP,
+                EgoEnchants.level(player.getInventory().getItemInMainHand(), "refracted_step"));
+        return REFRACTION_WINDOW_MS + REFRACTED_STEP_PER_LEVEL_MS * lvl;
+    }
+
     /** Record the wielder's current spot and stand a refracted after-image on it. Replaces any older one. */
     private void openWindow(Player player) {
         UUID id = player.getUniqueId();
         dropAnchor(id); // a fresh lunge supersedes the last record; never stack two echoes on one wielder
 
         Anchor anchor = new Anchor(player, spawnEcho(player.getWorld(),
-                player.getLocation().clone().add(0, ECHO_HEIGHT, 0)));
+                player.getLocation().clone().add(0, ECHO_HEIGHT, 0)), refractionWindowMs(player));
         anchors.put(id, anchor);
 
         World world = player.getWorld();
@@ -447,10 +461,10 @@ public final class FragmentsFromSomewhereWeapon implements EgoWeapon {
         private final ItemDisplay echo;
         private int spin = 0;
 
-        Anchor(Player owner, ItemDisplay echo) {
+        Anchor(Player owner, ItemDisplay echo, long windowMs) {
             this.where = owner.getLocation().clone();
             this.worldId = owner.getWorld().getUID();
-            this.expiresAt = System.currentTimeMillis() + REFRACTION_WINDOW_MS;
+            this.expiresAt = System.currentTimeMillis() + windowMs;
             this.echo = echo;
         }
 
