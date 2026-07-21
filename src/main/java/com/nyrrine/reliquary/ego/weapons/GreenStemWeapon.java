@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -62,7 +63,10 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <p>Per-player state — the bite cooldown — is cleared on quit.
  */
-public final class GreenStemWeapon implements Weapon {
+public final class GreenStemWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
 

@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -63,7 +64,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * its own AoE never recurses back into {@link #onHit}; it is a non-vanilla ability, so it wears the
  * weapon through {@link EgoDurability#wearMainHand(Player)}. Normal strikes wear via vanilla.
  */
-public final class RedEyesWeapon implements Weapon {
+public final class RedEyesWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
 

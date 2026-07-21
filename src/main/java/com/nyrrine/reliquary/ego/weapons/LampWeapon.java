@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
@@ -59,7 +60,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * any loop. All per-player state — the Gaze marks and the slam cooldowns — is dropped in {@link #onQuit},
  * both for a quitting wielder and for a quitting marked target.
  */
-public final class LampWeapon implements Weapon {
+public final class LampWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
 

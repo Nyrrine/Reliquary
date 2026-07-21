@@ -2,6 +2,7 @@ package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Blink;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -95,7 +96,10 @@ import java.util.UUID;
  * re-enters {@link #onHit}. The victim-keyed {@link #striking} fence makes those re-entrant calls a no-op,
  * so a blow this class already amplified is never amplified twice and never loops.
  */
-public final class DiscordWeapon implements Weapon {
+public final class DiscordWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
 

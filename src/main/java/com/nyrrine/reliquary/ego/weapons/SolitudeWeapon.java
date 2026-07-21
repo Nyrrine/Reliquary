@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -69,7 +70,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * only has to cancel the ability burst. No world edits: damage is routed through
  * {@code victim.damage(...)} so other plugins can cancel it.
  */
-public final class SolitudeWeapon implements Weapon {
+public final class SolitudeWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
     private final NamespacedKey key;

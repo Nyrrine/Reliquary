@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
@@ -60,7 +61,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * state is per-wielder (digest tally, nibble tally) plus the short-lived digest tasks, all dropped in
  * {@link #onQuit} and {@link #onDisable}.
  */
-public final class LanternWeapon implements Weapon {
+public final class LanternWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
 

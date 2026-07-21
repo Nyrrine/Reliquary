@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
@@ -40,7 +41,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * <p>Every gift is a fleeting potion effect, never a dropped item, so nothing can be farmed or
  * littered on a busy server. Holds no per-player state, so there is nothing to clear on quit.
  */
-public final class ChristmasWeapon implements Weapon {
+public final class ChristmasWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
 

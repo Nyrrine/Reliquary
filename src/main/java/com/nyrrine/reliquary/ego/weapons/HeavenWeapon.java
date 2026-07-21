@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
@@ -78,7 +79,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * reaped on unequip, quit, timeout and disable, with a tag-sweep backstop. All summon numbers are
  * first-pass, flagged for the balance wave.
  */
-public final class HeavenWeapon implements Weapon {
+public final class HeavenWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
 

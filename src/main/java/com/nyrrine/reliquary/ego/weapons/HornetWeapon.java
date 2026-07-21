@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -94,7 +95,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * repainted. The stance lives in memory, not on the item — which is precisely why Hornet keeps vanilla
  * enchants where a per-tick repaint would silently strip them.
  */
-public final class HornetWeapon implements Weapon {
+public final class HornetWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
     private final NamespacedKey key;

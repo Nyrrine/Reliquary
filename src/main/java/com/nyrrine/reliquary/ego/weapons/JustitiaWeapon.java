@@ -2,6 +2,7 @@ package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Blink;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -106,7 +107,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * disable (plus a world sweep) so no orphan is ever left behind. Player roots are best-effort — see
  * {@link RootTask}.
  */
-public final class JustitiaWeapon implements Weapon {
+public final class JustitiaWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
 

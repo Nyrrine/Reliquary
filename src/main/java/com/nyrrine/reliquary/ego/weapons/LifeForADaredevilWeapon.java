@@ -2,6 +2,7 @@ package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Blink;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -103,7 +104,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * keyed modifier is remove-before-add and can exist at most once per player; it is also cleared on quit,
  * on death, on join (defensively), and on plugin disable, so it can never stack or leak.
  */
-public final class LifeForADaredevilWeapon implements Weapon {
+public final class LifeForADaredevilWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
 

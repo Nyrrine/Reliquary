@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -56,7 +57,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * No world edits; each bolt is a single cheap runnable that always caps its lifetime and cancels itself
  * on end / when its caster goes offline.
  */
-public final class LaetitiaWeapon implements Weapon {
+public final class LaetitiaWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
     private final NamespacedKey key;

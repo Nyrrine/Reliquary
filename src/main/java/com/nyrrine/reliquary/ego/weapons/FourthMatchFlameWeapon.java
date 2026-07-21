@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -70,7 +71,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * cancels itself; a player not holding the weapon pays nothing per tick. The wielder is skipped in the scan,
  * so their own fire never touches them.
  */
-public final class FourthMatchFlameWeapon implements Weapon {
+public final class FourthMatchFlameWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
     private final NamespacedKey key;

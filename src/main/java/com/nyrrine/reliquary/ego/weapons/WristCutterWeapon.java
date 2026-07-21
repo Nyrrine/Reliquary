@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -48,7 +49,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * just bumps the stack counter on the existing state, never spawns a second task. State is cleared
  * when the victim dies/goes invalid, on quit, and on {@link #onDisable}.
  */
-public final class WristCutterWeapon implements Weapon {
+public final class WristCutterWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
 

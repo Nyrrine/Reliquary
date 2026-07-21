@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -70,7 +71,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * flying images down the aim — small butterfly "fly" images for the base weapon, the big "True…" photos
  * for the admin variant — each non-persistent, tracked, and swept on quit/disable.
  */
-public final class SolemnLamentWeapon implements Weapon {
+public final class SolemnLamentWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
     private final NamespacedKey key;      // marks the item as Solemn Lament

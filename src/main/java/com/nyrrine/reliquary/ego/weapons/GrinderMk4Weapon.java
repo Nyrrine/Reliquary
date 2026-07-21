@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -67,7 +68,10 @@ import java.util.UUID;
  * <p>No longer unbreakable — the grind, the burst and the mining are all non-vanilla uses, so the tool
  * wears mildly via {@link EgoDurability}: once per left-click burst and about once per second of grinding.
  */
-public final class GrinderMk4Weapon implements Weapon {
+public final class GrinderMk4Weapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
 

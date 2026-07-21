@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -91,7 +92,10 @@ import java.util.UUID;
  * is that it works while you do not. Normal thrusts wear via the vanilla swing. The weapon is not
  * unbreakable and its meta is set exactly once, in {@link #createItem()}.
  */
-public final class SwordOfTearsWeapon implements Weapon {
+public final class SwordOfTearsWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
 

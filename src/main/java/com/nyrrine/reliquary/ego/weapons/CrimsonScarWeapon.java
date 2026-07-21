@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -62,7 +63,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * (so the bullet can't chain), and a {@code lastFire} reload-clock map. Both cleared on quit. No world
  * edits; nothing runs for non-wielders.
  */
-public final class CrimsonScarWeapon implements Weapon {
+public final class CrimsonScarWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
 

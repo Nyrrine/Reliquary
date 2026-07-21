@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -95,7 +96,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * cancel it. The Obsession toll can never be lethal: the gate guarantees the wielder is above 10% max HP,
  * and the toll only ever removes 10% of what they currently hold. No block is ever changed.
  */
-public final class HarmonyWeapon implements Weapon {
+public final class HarmonyWeapon implements EgoWeapon {
+
+    /** The base E.G.O tooltip, exposed so the enchant renderer can append applied enchants beneath it. */
+    @Override public EgoLore.Tooltip egoTooltip() { return TOOLTIP; }
 
     private final Reliquary plugin;
     private final NamespacedKey key;
