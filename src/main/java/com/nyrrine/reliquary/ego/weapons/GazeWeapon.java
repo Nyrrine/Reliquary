@@ -16,6 +16,7 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -140,6 +141,17 @@ public final class GazeWeapon implements EgoWeapon {
      */
     private static final long FIXATION_GRACE_PER_LEVEL = 1_500L;
     private static final int  FIXATION_CAP = 2;
+
+    /**
+     * ENCHANT — Gloat (vanilla {@link Enchantment#FIRE_ASPECT}): the watcher savours the wound. Each Fire
+     * Aspect level lays {@value #GLOAT_PER_LEVEL_TICKS} ticks (1s) of fire on the struck body, capped at
+     * {@link #GLOAT_CAP} levels — a 3s burn at most. Duration only: it extends how long they burn and adds
+     * no weapon damage, so it can't lift Gaze past the netherite band. Mirrors GreenStem's Rot exactly, the
+     * same read-and-set pattern QA already blessed; applied once per attack, never on hit two.
+     * PLACEHOLDER values for the balance wave.
+     */
+    private static final int GLOAT_PER_LEVEL_TICKS = 20;
+    private static final int GLOAT_CAP = 3;
 
     // ---- Constant Surveillance tuning ---------------------------------------------
 
@@ -327,8 +339,23 @@ public final class GazeWeapon implements EgoWeapon {
         feed(d, now);
         if (!wasCapped && d.stacks >= MAX_DELIGHT) delightedCue(attacker);
 
+        applyGloat(attacker, victim); // once per attack — the follow-up is fenced out at the top of onHit
         watchedFx(victim);
         sendDelightBar(attacker, now);
+    }
+
+    /**
+     * ENCHANT — Gloat (vanilla {@link Enchantment#FIRE_ASPECT}): lay a short fire on the struck body for the
+     * blade held right now — one second per Fire Aspect level, capped at {@link #GLOAT_CAP}. Only extends how
+     * long they burn (never weapon damage), and only when the blade carries Fire Aspect; off the enchant it
+     * does nothing. Delight and the two-cut balance are left wholly untouched.
+     */
+    private void applyGloat(Player attacker, LivingEntity victim) {
+        int fa = Math.min(GLOAT_CAP,
+                attacker.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.FIRE_ASPECT));
+        if (fa <= 0) return;
+        int ticks = GLOAT_PER_LEVEL_TICKS * fa;
+        if (victim.getFireTicks() < ticks) victim.setFireTicks(ticks);
     }
 
     /** Queue hit two. Kept in {@link #followUps} so a shutdown mid-flight can cancel it. */

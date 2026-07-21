@@ -123,6 +123,15 @@ public final class LoveAndHateWeapon implements EgoWeapon {
     private static final int    LASER_TICKS    = 200;    // the laser channels for 10s
     private static final double LASER_RANGE    = 40.0;   // how far the beam reaches / carves
     private static final double LASER_RADIUS   = 1.8;    // how close to the line counts as struck
+
+    /**
+     * ENCHANT — Heart's Reach (custom id {@code "hearts_reach"}): each level lengthens the Reverse Arcana
+     * beam by this many blocks, capped at {@link #HEARTS_REACH_CAP} — max +8, a 40→48 lance. Pure reach:
+     * the per-pulse damage ({@link #LASER_DAMAGE}), its cadence, radius and the {@link #CARVE_MAX} carve
+     * budget are all unchanged, so a longer beam costs nothing but its own length. Read once at cast so the
+     * drawn beam and the scanned line are always the same length. PLACEHOLDER (balance wave). */
+    private static final double HEARTS_REACH_PER_LEVEL = 4.0;
+    private static final int    HEARTS_REACH_CAP       = 2;
     private static final int    LASER_DMG_PERIOD = 8;    // tick-damage cadence (respects i-frames)
     private static final double LASER_DAMAGE   = 4.0;    // per pulse, no knockback
     private static final int    LASER_MAX_TARGETS = 12;
@@ -701,7 +710,17 @@ public final class LoveAndHateWeapon implements EgoWeapon {
     private void startLaser(Player owner) {
         CarveBatch batch = new CarveBatch(owner.getUniqueId());
         batches.add(batch);
-        new ReverseArcanaLaser(owner.getUniqueId(), batch).runTaskTimer(plugin, 0L, 1L);
+        new ReverseArcanaLaser(owner.getUniqueId(), batch, laserRange(owner)).runTaskTimer(plugin, 0L, 1L);
+    }
+
+    /**
+     * ENCHANT — Heart's Reach (custom id {@code "hearts_reach"}): the beam length after the enchant extends
+     * it, capped. Read once at cast time so the whole channel draws and scans to one consistent length.
+     */
+    private double laserRange(Player owner) {
+        int level = Math.min(HEARTS_REACH_CAP,
+                EgoEnchants.level(owner.getInventory().getItemInMainHand(), "hearts_reach"));
+        return LASER_RANGE + Math.max(0, level) * HEARTS_REACH_PER_LEVEL;
     }
 
     /**
@@ -713,11 +732,13 @@ public final class LoveAndHateWeapon implements EgoWeapon {
     private final class ReverseArcanaLaser extends BukkitRunnable {
         private final UUID ownerId;
         private final CarveBatch batch;
+        private final double range; // Heart's Reach — fixed for the whole channel
         private int ticks = 0;
 
-        ReverseArcanaLaser(UUID ownerId, CarveBatch batch) {
+        ReverseArcanaLaser(UUID ownerId, CarveBatch batch, double range) {
             this.ownerId = ownerId;
             this.batch = batch;
+            this.range = range;
         }
 
         @Override
@@ -743,7 +764,7 @@ public final class LoveAndHateWeapon implements EgoWeapon {
             if (batch.size() >= CARVE_MAX) return;
             Vector[] b = perp(dir);
             Vector[] offsets = { new Vector(0, 0, 0), b[0], b[0].clone().multiply(-1), b[1], b[1].clone().multiply(-1) };
-            for (double d = 1.5; d <= LASER_RANGE; d += 1.0) {
+            for (double d = 1.5; d <= range; d += 1.0) {
                 Location p = origin.clone().add(dir.clone().multiply(d));
                 for (Vector off : offsets) {
                     if (batch.size() >= CARVE_MAX) return;
@@ -757,7 +778,7 @@ public final class LoveAndHateWeapon implements EgoWeapon {
 
         private void drawBeam(World world, Location origin, Vector dir) {
             int idx = 0;
-            for (double d = 0.5; d <= LASER_RANGE; d += 0.6, idx++) {
+            for (double d = 0.5; d <= range; d += 0.6, idx++) {
                 Location p = origin.clone().add(dir.clone().multiply(d));
                 world.spawnParticle(Particle.DUST, p, 1, 0.12, 0.12, 0.12, 0, LASER_CORE);
                 if (idx % 2 == 0) world.spawnParticle(Particle.DUST, p, 1, 0.25, 0.25, 0.25, 0, LASER_EDGE);
@@ -768,8 +789,8 @@ public final class LoveAndHateWeapon implements EgoWeapon {
 
         /** Scan the beam line and deal tick damage to bodies near it — capped, and with no knockback. */
         private void scorch(Player owner, Location origin, Vector dir) {
-            Location mid = origin.clone().add(dir.clone().multiply(LASER_RANGE * 0.5));
-            double half = LASER_RANGE * 0.5 + 2.0;
+            Location mid = origin.clone().add(dir.clone().multiply(range * 0.5));
+            double half = range * 0.5 + 2.0;
             World world = owner.getWorld();
             int struck = 0;
             for (Entity e : world.getNearbyEntities(mid, half, half, half)) {
@@ -777,7 +798,7 @@ public final class LoveAndHateWeapon implements EgoWeapon {
                 if (!(e instanceof LivingEntity le) || le.isDead() || !le.isValid()) continue;
                 Vector v = center(le).subtract(origin.toVector());
                 double t = v.dot(dir);
-                if (t < 0 || t > LASER_RANGE) continue;
+                if (t < 0 || t > range) continue;
                 double perpDist = v.clone().subtract(dir.clone().multiply(t)).length();
                 if (perpDist > LASER_RADIUS) continue;
 

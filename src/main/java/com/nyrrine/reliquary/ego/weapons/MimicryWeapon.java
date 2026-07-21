@@ -21,6 +21,7 @@ import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.attribute.AttributeModifier;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
@@ -194,6 +195,10 @@ public final class MimicryWeapon implements EgoWeapon {
      */
     private static final double BLOODTHIRST_PER_LEVEL = 0.05;
     private static final int BLOODTHIRST_CAP = 3;
+
+    /** ENCHANT — Cleave Radius (vanilla Sweeping Edge): reach added per level, before the ceiling clamp. See {@link #sweepReach}. */
+    private static final double SWEEP_REACH_PER_LEVEL = 0.6;
+    private static final int    SWEEP_REACH_CAP       = 3;
 
     // ---- tuning: Nothing There (the reservoir) -------------------------------------
 
@@ -758,7 +763,7 @@ public final class MimicryWeapon implements EgoWeapon {
 
         // The two clamped reads. Everything the victim actually feels is decided on these two lines.
         double perTarget = Math.min(amount * RELEASE_FRACTION, RELEASE_CAP);
-        double radius = cleaveRadius(amount);
+        double radius = cleaveRadius(amount, sweepReach(player));
 
         // Spend the pool first: whatever happens below, this cast owns it and nothing can double-dip it.
         reservoirs.remove(id);
@@ -810,9 +815,23 @@ public final class MimicryWeapon implements EgoWeapon {
      * body count is not a capped ability, it is the same absurdity through a side door. {@code sqrt} so the
      * first wounds are felt immediately and the last ones taper.
      */
-    private static double cleaveRadius(double amount) {
-        double grown = SLASH_BASE_RADIUS * (1.0 + Math.sqrt(Math.max(0.0, amount) / SLASH_REF));
-        return Math.min(RELEASE_RADIUS_MAX, Math.max(RELEASE_RADIUS_BASE, grown));
+    private static double cleaveRadius(double amount, double reachBonus) {
+        double grown = SLASH_BASE_RADIUS * (1.0 + Math.sqrt(Math.max(0.0, amount) / SLASH_REF))
+                + Math.max(0.0, reachBonus);                 // Cleave Radius — reach comes online sooner...
+        return Math.min(RELEASE_RADIUS_MAX, Math.max(RELEASE_RADIUS_BASE, grown)); // ...never past the ceiling
+    }
+
+    /**
+     * ENCHANT — Cleave Radius (vanilla {@link Enchantment#SWEEPING_EDGE}): each level adds
+     * {@value #SWEEP_REACH_PER_LEVEL} block to the cleave's reach, before the {@link #RELEASE_RADIUS_MAX}
+     * clamp. It does NOT raise that ceiling — the scan box and per-body cap that bound the ability are
+     * untouched; it only lets the reach grow honestly at smaller pools. Fed to {@link #cleaveRadius} at both
+     * the scan and the draw, so the cut still cuts exactly what it draws. PLACEHOLDER (balance wave).
+     */
+    private static double sweepReach(Player player) {
+        int level = Math.min(SWEEP_REACH_CAP,
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.SWEEPING_EDGE));
+        return Math.max(0, level) * SWEEP_REACH_PER_LEVEL;
     }
 
     // ---- Onrush: the rush you don't see coming --------------------------------------
@@ -1452,7 +1471,7 @@ public final class MimicryWeapon implements EgoWeapon {
         Location feet = player.getLocation();
         Location pivot = feet.clone().add(0, 1.2, 0);
 
-        final double radius = cleaveRadius(amount);
+        final double radius = cleaveRadius(amount, sweepReach(player));
         float thick = slashThickness(amount);
         int points = slashPoints(radius);
 

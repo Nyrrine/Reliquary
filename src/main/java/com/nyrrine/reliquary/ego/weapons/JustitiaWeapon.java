@@ -222,6 +222,15 @@ public final class JustitiaWeapon implements EgoWeapon {
     private static final long PERSECUTION_COOLDOWN_MS = 15_000L;
 
     /**
+     * ENCHANT — Contempt of Court (custom id {@code "contempt_of_court"}): each level lengthens the parry
+     * window ({@link #PERSECUTION_WINDOW_MS}) by this much, capped at {@link #CONTEMPT_CAP} — max +0.9s, a
+     * 3.0s→3.9s read. Defensive cadence only: it widens the window to bait a swing, never the counter's bite,
+     * and the 15s {@link #PERSECUTION_COOLDOWN_MS} still gates uptime so it can't approach standing immunity.
+     * PLACEHOLDER (balance wave). */
+    private static final long CONTEMPT_PER_LEVEL_MS = 300L;
+    private static final int  CONTEMPT_CAP          = 3;
+
+    /**
      * PLACEHOLDER (balance wave): the retribution the counter deals the striker as the verdict lands. It
      * ignores the same {@link #JUDGEMENT_ARMOR_IGNORE} armour fraction a verdict cut does — the counter used
      * to be pure control (0 damage); now it bites.
@@ -503,9 +512,20 @@ public final class JustitiaWeapon implements EgoWeapon {
         }
 
         w.scales = new Scales(player);
-        w.stanceEndsAt = now + PERSECUTION_WINDOW_MS;
+        w.stanceEndsAt = now + persecutionWindow(player);
         EgoDurability.wearMainHand(player);
         summonFx(player);
+    }
+
+    /**
+     * ENCHANT — Contempt of Court (custom id {@code "contempt_of_court"}): the parry window after the enchant
+     * lengthens it, capped. The counter's damage and the cooldown are untouched — only how long the scales
+     * hang waiting for a case.
+     */
+    private long persecutionWindow(Player player) {
+        int level = Math.min(CONTEMPT_CAP,
+                EgoEnchants.level(player.getInventory().getItemInMainHand(), "contempt_of_court"));
+        return PERSECUTION_WINDOW_MS + Math.max(0, level) * CONTEMPT_PER_LEVEL_MS;
     }
 
     /**
