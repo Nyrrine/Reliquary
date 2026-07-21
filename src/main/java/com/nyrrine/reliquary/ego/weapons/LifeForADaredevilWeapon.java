@@ -5,6 +5,7 @@ import com.nyrrine.reliquary.core.Blink;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -31,6 +32,8 @@ import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
@@ -130,6 +133,13 @@ public final class LifeForADaredevilWeapon implements EgoWeapon {
 
     /** How far past the victim's back the wielder arrives — a step, not a stride. */
     private static final double BEHIND_DISTANCE = 1.2;
+
+    // Adrenaline (ego-enchant): while the wielder is genuinely low (the HP burden makes that common), grant
+    // survival buffs only — Speed + Resistance, never damage. Gated to low HP and refreshed each tick, so it
+    // drops the moment they climb back up. It helps you live long enough to land the execute, not hit harder.
+    private static final int    ADRENALINE_MAX_LVL   = 3;
+    private static final double ADRENALINE_HP_FRACTION = 0.35; // "low" = at/below this fraction of max HP
+    private static final int    ADRENALINE_TICKS     = 20;     // short; refreshed each 2-tick onTick
 
     /** HP-fraction thresholds below which a struck target qualifies for the decapitation. */
     private static final double THRESH_MOB    = 0.25; // a normal mob under a quarter
@@ -463,8 +473,10 @@ public final class LifeForADaredevilWeapon implements EgoWeapon {
      */
     @Override
     public boolean onTick(Player player, long tick) {
-        if (matches(player.getInventory().getItemInMainHand())) {
+        ItemStack held = player.getInventory().getItemInMainHand();
+        if (matches(held)) {
             applyBurden(player);
+            applyAdrenaline(player, held);                    // survival buffs while genuinely low, if enchanted
             renderBar(player);                                // keep the dash readout on-screen, not just on cast
             return true;                                      // still held — keep ticking
         }
@@ -498,6 +510,22 @@ public final class LifeForADaredevilWeapon implements EgoWeapon {
         }
         inst.addModifier(new AttributeModifier(healthKey, HEALTH_PENALTY, AttributeModifier.Operation.ADD_NUMBER));
         burdened.add(player.getUniqueId());
+    }
+
+    /**
+     * Adrenaline (ego-enchant): while the wielder is at or below {@link #ADRENALINE_HP_FRACTION} of their max
+     * health, refresh a short Speed + Resistance so they can survive and reposition into the execute. Never
+     * damage; gated to low HP; short-lived so it lapses the instant they heal back up.
+     */
+    private void applyAdrenaline(Player player, ItemStack item) {
+        int lvl = Math.min(EgoEnchants.level(item, "adrenaline"), ADRENALINE_MAX_LVL);
+        if (lvl <= 0) return;
+        AttributeInstance max = player.getAttribute(Attribute.MAX_HEALTH);
+        double maxHp = max != null ? max.getValue() : 20.0;
+        if (player.getHealth() > maxHp * ADRENALINE_HP_FRACTION) return; // only while genuinely low
+        int speedAmp = Math.min(lvl - 1, 1); // Speed I at I-II, Speed II at III
+        player.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, ADRENALINE_TICKS, speedAmp, false, false, true));
+        player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, ADRENALINE_TICKS, 0, false, false, true));
     }
 
     /** Strip the keyed burden from a live player, if present. */

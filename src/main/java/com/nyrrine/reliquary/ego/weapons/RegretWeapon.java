@@ -3,6 +3,7 @@ package com.nyrrine.reliquary.ego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -90,6 +91,11 @@ public final class RegretWeapon implements EgoWeapon {
     private static final long   CHARGE_MS = 2_500L; // empty -> full recharge time while held (~2.5s)
     private static final double DMG_FLOOR = 3.0;    // damage at empty charge — a limp tap
     private static final double DMG_MAX   = 12.5;   // damage at full charge — deliberately over the band
+    // Hair Trigger (ego-enchant): shaves the charge time only — the DMG ceiling is untouched, so it raises
+    // cadence, not the peak. Capped + floored so a heavy hit always takes a real wind-up.
+    private static final long   HAIR_TRIGGER_CUT_MS   = 300L; // charge shaved per level
+    private static final int    HAIR_TRIGGER_MAX_LVL  = 3;    // levels that count
+    private static final long   CHARGE_MS_FLOOR       = 1_500L; // never winds up faster than this
 
     /**
      * The weapon's own flat base attack, as stamped by {@link EgoModels#stampWeapon} — the item modifier is
@@ -147,13 +153,19 @@ public final class RegretWeapon implements EgoWeapon {
     // ---- charge -------------------------------------------------------------------
 
     /** Current charge fraction [0,1] for this wielder — how far the heavy hit has wound up. */
-    private double charge(UUID id) {
+    private double charge(UUID id, long chargeMs) {
         Long since = chargeSince.get(id);
         if (since == null) return 0.0;
         long elapsed = System.currentTimeMillis() - since;
         if (elapsed <= 0) return 0.0;
-        if (elapsed >= CHARGE_MS) return 1.0;
-        return (double) elapsed / CHARGE_MS;
+        if (elapsed >= chargeMs) return 1.0;
+        return (double) elapsed / chargeMs;
+    }
+
+    /** The wielder's effective charge time — Hair Trigger shaves it per level, floored. */
+    private long chargeMs(ItemStack item) {
+        int lvl = Math.min(EgoEnchants.level(item, "hair_trigger"), HAIR_TRIGGER_MAX_LVL);
+        return Math.max(CHARGE_MS_FLOOR, CHARGE_MS - lvl * HAIR_TRIGGER_CUT_MS);
     }
 
     /** Start (or restart) the charge cycle from empty for this wielder. */
@@ -174,7 +186,7 @@ public final class RegretWeapon implements EgoWeapon {
     @Override
     public void onSwing(Player player) {
         ThreadLocalRandom rng = ThreadLocalRandom.current();
-        double charge = charge(player.getUniqueId());
+        double charge = charge(player.getUniqueId(), chargeMs(player.getInventory().getItemInMainHand()));
         Location at = player.getLocation();
         World world = player.getWorld();
 
@@ -218,7 +230,7 @@ public final class RegretWeapon implements EgoWeapon {
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
         UUID id = attacker.getUniqueId();
-        double charge = charge(id);
+        double charge = charge(id, chargeMs(attacker.getInventory().getItemInMainHand()));
 
         // Everything vanilla put on this swing above the weapon's own flat base. The MACE fall-slam lives
         // here — this is the same number PenitenceWeapon caps to defeat its own mace-ness. Regret keeps it.
@@ -250,7 +262,7 @@ public final class RegretWeapon implements EgoWeapon {
         // First tick since drawing it — begin winding up from empty.
         if (!chargeSince.containsKey(id)) resetCharge(id);
 
-        double frac = charge(id);
+        double frac = charge(id, chargeMs(player.getInventory().getItemInMainHand()));
         if (frac >= 1.0) {
             if (readyCued.add(id)) readyCue(player); // once, the instant it tops out
             player.sendActionBar(EgoHud.gauge(IRON, 1.0, label("Hammer — ready")));

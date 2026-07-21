@@ -17,6 +17,7 @@ import org.bukkit.World;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -89,6 +90,12 @@ public final class CobaltScarWeapon implements EgoWeapon {
     private final Set<UUID> offhandNotified = new HashSet<>();
     /** Dash cooldown — seven seconds. */
     private static final long DASH_COOLDOWN_MS = 7_000L;
+    // Whirring Claws (Efficiency): shaves the dash cooldown per level, floored so it never trivialises. This
+    // is Cobalt's ONLY enchant on purpose — its 16 attack speed makes any per-hit enchant compound wildly, so
+    // the enchant slot is pure mobility utility, never damage.
+    private static final long WHIRRING_CD_CUT_MS   = 1_000L; // shaved per Efficiency level
+    private static final int  WHIRRING_MAX_LEVELS  = 5;      // cap the levels that count
+    private static final long DASH_COOLDOWN_FLOOR_MS = 3_000L; // the dash never comes back faster than this
     /** Dash impulse — a short lunge, not a leap. */
     private static final double DASH_POWER = 0.9;
 
@@ -253,7 +260,7 @@ public final class CobaltScarWeapon implements EgoWeapon {
             player.playSound(player.getLocation(), Sound.ITEM_AXE_SCRAPE, 0.3f, 1.6f + jitter());
             return;
         }
-        dashReadyAt.put(id, now + DASH_COOLDOWN_MS);
+        dashReadyAt.put(id, now + dashCooldownMs(player.getInventory().getItemInMainHand()));
 
         Vector dir = player.getEyeLocation().getDirection();
         Vector vel = dir.multiply(DASH_POWER);
@@ -268,6 +275,14 @@ public final class CobaltScarWeapon implements EgoWeapon {
         world.playSound(player.getLocation(), Sound.ITEM_AXE_SCRAPE, 0.6f, 1.5f + jitter());
         world.spawnParticle(Particle.DUST, player.getLocation().add(0, 1.0, 0), 12, 0.3, 0.4, 0.3, 0.0,
                 new Particle.DustOptions(COBALT_ICE, 1.0f));
+    }
+
+    /** Whirring Claws: the dash cooldown, shaved by Efficiency and floored so it can never trivialise. */
+    private long dashCooldownMs(ItemStack item) {
+        int eff = item == null ? 0 : item.getEnchantmentLevel(Enchantment.EFFICIENCY);
+        if (eff <= 0) return DASH_COOLDOWN_MS;
+        long cut = Math.min(eff, WHIRRING_MAX_LEVELS) * WHIRRING_CD_CUT_MS;
+        return Math.max(DASH_COOLDOWN_FLOOR_MS, DASH_COOLDOWN_MS - cut);
     }
 
     // ---- SFX / VFX ----------------------------------------------------------------

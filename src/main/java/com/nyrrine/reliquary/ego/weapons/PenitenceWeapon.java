@@ -12,9 +12,11 @@ import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
+import org.bukkit.Tag;
 import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -131,10 +133,18 @@ public final class PenitenceWeapon implements EgoWeapon {
         // still lands only the cap, but half the target's armour is ignored, so the slam is worth throwing
         // without turning Penitence into a mace. The slam scales the cap through the framework's pierceInput
         // on the event, keeping the mace's fall-slam knockback and sweep (no cancel, no re-deal).
-        if (attacker.getFallDistance() > FALL_SLAM_MIN_FALL) {
-            event.setDamage(plugin.weapons().pierceInput(victim, MACE_DAMAGE_CAP, FALL_SLAM_ARMOR_PIERCE));
-        } else {
-            event.setDamage(Math.min(event.getDamage(), MACE_DAMAGE_CAP));
+        // The Truly Damned (Smite, vs UNDEAD only): a Smited mace lifts the cap entirely against the undead,
+        // so its holy bonus lands in full. Undead-gated, so it can never be turned on a player — the cap still
+        // holds for everything else. When it applies we leave the vanilla damage untouched (it already carries
+        // Smite's undead bonus).
+        boolean trulyDamned = Tag.ENTITY_TYPES_UNDEAD.isTagged(victim.getType())
+                && attacker.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.SMITE) > 0;
+        if (!trulyDamned) {
+            if (attacker.getFallDistance() > FALL_SLAM_MIN_FALL) {
+                event.setDamage(plugin.weapons().pierceInput(victim, MACE_DAMAGE_CAP, FALL_SLAM_ARMOR_PIERCE));
+            } else {
+                event.setDamage(Math.min(event.getDamage(), MACE_DAMAGE_CAP));
+            }
         }
 
         // TODO(flavor): "Special: against any wielder of 'Paradise Lost', deals 50000% more damage."

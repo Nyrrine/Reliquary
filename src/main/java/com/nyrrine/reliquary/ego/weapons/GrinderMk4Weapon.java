@@ -23,6 +23,7 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.inventory.ItemFlag;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -121,6 +122,10 @@ public final class GrinderMk4Weapon implements EgoWeapon {
     private static final double GRIND_RATE      = 0.05;
     /** Game ticks each onTick run represents — progress accrues per game tick, applied 2 at a time. */
     private static final double TICKS_PER_RUN   = 2.0;
+    // Overclock (Efficiency): speeds the 3x3 DIG only — never a combat number. Each level adds this much
+    // dig rate, capped, so a maxed grinder mines fast without touching its per-bite or per-second damage.
+    private static final double OVERCLOCK_PER_LEVEL = 0.35;
+    private static final int    OVERCLOCK_MAX_LEVELS = 5;
 
     public GrinderMk4Weapon(Reliquary plugin) {
         this.plugin = plugin;
@@ -326,12 +331,19 @@ public final class GrinderMk4Weapon implements EgoWeapon {
 
     // ---- sustained grind: 3x3 mining ----------------------------------------------
 
+    /** Overclock (Efficiency): the dig-rate multiplier, capped. Read here so it only ever scales mining. */
+    private static double overclockFactor(ItemStack held) {
+        int eff = held == null ? 0 : held.getEnchantmentLevel(Enchantment.EFFICIENCY);
+        return 1.0 + OVERCLOCK_PER_LEVEL * Math.min(eff, OVERCLOCK_MAX_LEVELS);
+    }
+
     /**
-     * Chew the 3x3 face of blocks the wielder is looking at. Progress accrues per block at a fixed, slow,
-     * steady rate ({@link #GRIND_RATE}) that only the block's own hardness slows further — never instant,
-     * never enchant-scaled — and a block is guaranteed to reach 1.0 and break (dropping with the tool, so a
-     * netherite pickaxe harvests stone into cobblestone) once enough runs accumulate. Returns the highest
-     * live progress fraction across the face (for the action-bar gauge), or -1 if there's no block in front.
+     * Chew the 3x3 face of blocks the wielder is looking at. Progress accrues per block at a slow, steady
+     * base rate ({@link #GRIND_RATE}) that only the block's own hardness slows further — never instant — and
+     * a block is guaranteed to reach 1.0 and break (dropping with the tool, so a netherite pickaxe harvests
+     * stone into cobblestone) once enough runs accumulate. Overclock (Efficiency) speeds the dig, mining
+     * only. Returns the highest live progress fraction across the face (for the action-bar gauge), or -1 if
+     * there's no block in front.
      */
     private double grindBlocks(Player player, ItemStack held, GrindSession s) {
         RayTraceResult ray = player.rayTraceBlocks(MINE_RANGE);
@@ -365,10 +377,10 @@ public final class GrinderMk4Weapon implements EgoWeapon {
                     continue;
                 }
 
-                // Fixed, deliberately slow accumulation — the same steady rate for every wielder; only the
-                // block's own hardness slows it. Stone (1.5) → ~15 runs (~1.5s). No tool/enchant scaling.
-                // TODO: scale with Efficiency/Haste later
-                double perRun = GRIND_RATE / hardness * TICKS_PER_RUN;
+                // Steady accumulation slowed only by the block's own hardness — stone (1.5) → ~15 runs
+                // (~1.5s) unenchanted. Overclock (Efficiency) speeds the dig, and the dig ONLY: this is the
+                // mining path, so it never touches a combat number.
+                double perRun = GRIND_RATE / hardness * TICKS_PER_RUN * overclockFactor(held);
                 double prog = s.progress.getOrDefault(bk, 0.0) + perRun;
 
                 if (prog >= 1.0) {

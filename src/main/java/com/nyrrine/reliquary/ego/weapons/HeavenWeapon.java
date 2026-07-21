@@ -3,6 +3,7 @@ package com.nyrrine.reliquary.ego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -118,6 +119,11 @@ public final class HeavenWeapon implements EgoWeapon, Listener {
     private static final double DAMAGE_MULT    = 1.1;
     /** Chance, on a looking hit, that the heaven opens and pins the victim. */
     private static final double STUN_CHANCE    = 0.25;
+    // All-Seeing (ego-enchant): each level lifts the stasis chance on a looking hit, capped so it never
+    // becomes a permastun. Grove (ego-enchant): each level lets a summoned tree carry this many more skulls.
+    private static final double ALL_SEEING_PER_LVL = 0.10;
+    private static final int    ALL_SEEING_MAX_LVL = 3;
+    private static final int    GROVE_MAX_LVL      = 3;
     /** How long the stasis holds — ~1.5s. */
     private static final int    STASIS_TICKS   = 30;
     /** Slowness amplifier during stasis — 6 → Slowness VII, a near-total crawl on top of the velocity zero. */
@@ -271,7 +277,10 @@ public final class HeavenWeapon implements EgoWeapon, Listener {
             event.setDamage(dmg); // not pinned or looking: just the marked bonus, armour applies as normal
         }
 
-        if (looking && ThreadLocalRandom.current().nextDouble() < STUN_CHANCE) {
+        // All-Seeing lifts the stasis chance per level, capped.
+        double stunChance = STUN_CHANCE + ALL_SEEING_PER_LVL * Math.min(
+                EgoEnchants.level(attacker.getInventory().getItemInMainHand(), "all_seeing"), ALL_SEEING_MAX_LVL);
+        if (looking && ThreadLocalRandom.current().nextDouble() < stunChance) {
             openHeaven(victim);
         }
     }
@@ -429,7 +438,10 @@ public final class HeavenWeapon implements EgoWeapon, Listener {
         }
 
         Location anchor = summonAnchor(wielder);
-        EyeTree tree = new EyeTree(id, anchor);
+        // Grove lets this tree carry more skulls than the base cap — fixed at summon from the wielder's level.
+        int maxStacks = MAX_STACKS + Math.min(
+                EgoEnchants.level(wielder.getInventory().getItemInMainHand(), "grove"), GROVE_MAX_LVL);
+        EyeTree tree = new EyeTree(id, anchor, maxStacks);
         trees.put(id, tree);
         tree.runTaskTimer(plugin, 1L, 1L);
 
@@ -483,10 +495,13 @@ public final class HeavenWeapon implements EgoWeapon, Listener {
         private int age = 0;
         private int lifetime = BASE_LIFETIME;
         private int stacks = 0;
+        /** The most skulls this tree can carry — the base cap plus the wielder's Grove level at summon. */
+        private final int maxStacks;
 
-        EyeTree(UUID ownerId, Location anchor) {
+        EyeTree(UUID ownerId, Location anchor, int maxStacks) {
             this.ownerId = ownerId;
             this.anchor = anchor;
+            this.maxStacks = maxStacks;
             this.heart = spawnHeart(anchor);
         }
 
@@ -568,7 +583,7 @@ public final class HeavenWeapon implements EgoWeapon, Listener {
 
         /** A player fell to the tree or its eyes: hang their skull, extend the hold, and quicken the volley. */
         void onKilledPlayer(Player victim) {
-            if (stacks >= MAX_STACKS) return;
+            if (stacks >= maxStacks) return;
             stacks++;
             lifetime += KILL_LIFETIME;
             hangSkull(victim);
