@@ -85,7 +85,7 @@ public final class EgoModels {
     public static final Model FROST_SPLINTER = melee(Material.NETHERITE_SWORD, "frost_splinter", 6.5, 1.5);
     public static final Model GRINDER_MK4 = melee(Material.NETHERITE_PICKAXE, "grinder_mk4", 5.0, 1.2);
     public static final Model CRIMSON_SCAR = melee(Material.NETHERITE_AXE, "crimson_scar", 7.0, 1.2);
-    public static final Model COBALT_SCAR = melee(Material.NETHERITE_SHOVEL, "cobalt_scar", 5.0, 16.0);
+    public static final Model COBALT_SCAR = melee(Material.NETHERITE_SHOVEL, "cobalt_scar", 4.0, 16.0);
     public static final Model OUR_GALAXY  = ranged(Material.BREEZE_ROD, "our_galaxy");
     public static final Model HARVEST     = melee(Material.NETHERITE_HOE, "harvest", 4.0, 1.0);
     public static final Model LIFE_FOR_A_DAREDEVIL = melee(Material.NETHERITE_SWORD, "life_for_a_daredevil", 7.0, 1.6);
