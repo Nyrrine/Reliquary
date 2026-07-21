@@ -64,9 +64,11 @@ import java.util.concurrent.ThreadLocalRandom;
  * best-effort root: per-tick velocity zero + Slowness 6 + the same heavy VFX. A determined player can
  * still nudge themselves, but only barely.
  *
- * <p>The bonus damage is applied via {@code event.setDamage(...)} (never {@code victim.damage()} — that
- * would re-enter this dispatch). Per-victim stasis state is tracked so overlapping procs don't stack tasks
- * or leak a mob's AI-off flag; it is cleared on quit and on disable.
+ * <p>Damage bonuses that keep armour in play are applied via {@code event.setDamage(...)}; the armour-pierce
+ * of <b>Held in Heaven</b> instead replaces the vanilla blow with the framework's fenced {@code pierceDamage}
+ * (never a raw {@code victim.damage()}, which would re-enter this dispatch). Per-victim stasis and eye-mark
+ * state is tracked so overlapping procs don't stack tasks or leak a mob's AI-off flag; all of it is cleared
+ * on quit and on disable.
  *
  * <p>Right-click calls the second power: it summons the <b>Burrowing Heaven</b> itself as a watching
  * eye-tree ({@link EyeTree}) rooted a few blocks ahead. The tree throws homing eyes ({@link HeavenBolt}) at
@@ -95,6 +97,9 @@ public final class HeavenWeapon implements Weapon {
     /** Wielder -> the last living body they struck; a fallback target when they are not aiming at one. */
     private final Map<UUID, UUID> lastHit = new HashMap<>();
 
+    /** The Unblinking Eye: bodies currently eye-marked, victim UUID -> its mark task. Reaped on quit/disable. */
+    private final Map<UUID, EyeMark> marks = new HashMap<>();
+
     // Tuning — the gaze rewards striking a victim who is looking at you.
     /** Dot of the victim's facing vs. the direction to the attacker above which they count as "looking". */
     private static final double LOOK_THRESHOLD = 0.4;
@@ -106,6 +111,15 @@ public final class HeavenWeapon implements Weapon {
     private static final int    STASIS_TICKS   = 30;
     /** Slowness amplifier during stasis — 6 → Slowness VII, a near-total crawl on top of the velocity zero. */
     private static final int    SLOWNESS_AMP   = 6;
+
+    // ---- skill tuning: Held in Heaven + The Unblinking Eye ------------------------
+    // Balance-approved shape (§5-A / §5-C, 2026-07-21); magnitudes flagged for the balance wave.
+    /** Held in Heaven: fraction of armour a hit on a pinned or looking body ignores (via pierceDamage). */
+    private static final double HELD_PIERCE      = 0.40;
+    /** The Unblinking Eye: extra Heaven damage a hit on an already eye-marked body deals (+15%). */
+    private static final double UNBLINKING_MULT  = 1.15;
+    /** How long an eye-mark lasts, in ticks (~6s); refreshed by each hit. */
+    private static final int    UNBLINKING_TICKS = 120;
 
     // ---- summon tuning ------------------------------------------------------------
     // PLACEHOLDER NUMBERS — every value below is a first-pass guess, flagged for Nyrrine's balance wave.
@@ -187,21 +201,84 @@ public final class HeavenWeapon implements Weapon {
     // ---- gimmick: the gaze rewards being seen --------------------------------------
 
     /**
-     * A landed blow. Vanilla netherite damage (and its one point of blade wear) is left intact. If the
-     * victim is roughly facing the attacker — looking into the eye — the blow bites +10% harder, and on a
-     * {@link #STUN_CHANCE} roll the heaven opens beneath them: a brief stasis that pins them in place.
+     * A landed blow, carrying Heaven's melee passives:
+     * <ul>
+     *   <li><b>Eye Contact</b> — a hit on a victim facing the attacker bites +10% harder.</li>
+     *   <li><b>Held in Heaven</b> — a hit on a pinned or looking body ignores ~40% of its armour, dealt as a
+     *       fenced, i-frame-clearing {@code pierceDamage} blow in place of the vanilla one.</li>
+     *   <li><b>The Unblinking Eye</b> — every hit eye-marks the body for ~6s; a marked body cannot turn
+     *       invisible and takes +15% from Heaven.</li>
+     * </ul>
+     * A looking hit still rolls {@link #STUN_CHANCE} to open the stasis beneath the victim.
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
-        lastHit.put(attacker.getUniqueId(), victim.getUniqueId()); // remembered as the tree's fallback target
+        UUID vid = victim.getUniqueId();
+        lastHit.put(attacker.getUniqueId(), vid); // remembered as the tree's fallback target
 
-        if (!isLookingAt(victim, attacker)) return;
+        boolean marked = marks.containsKey(vid); // Unblinking Eye: already eye-marked before this blow?
+        markTarget(victim);                       // (re)mark the body for the watch
 
-        // Struck while staring into the eye — the wound bites harder.
-        event.setDamage(event.getDamage() * DAMAGE_MULT);
+        boolean looking = isLookingAt(victim, attacker);
+        boolean pinned  = stunned.contains(vid);
 
-        if (ThreadLocalRandom.current().nextDouble() < STUN_CHANCE) {
+        double dmg = event.getDamage();
+        if (marked)  dmg *= UNBLINKING_MULT; // +15% on an eye-marked body
+        if (looking) dmg *= DAMAGE_MULT;     // +10% for meeting the eye
+
+        if (looking || pinned) {
+            // Held in Heaven: replace the vanilla blow with an armour-piercing one (fenced, i-frames cleared).
+            event.setCancelled(true);
+            plugin.weapons().pierceDamage(victim, dmg, HELD_PIERCE, attacker);
+        } else if (marked) {
+            event.setDamage(dmg); // not pinned or looking: just the marked bonus, armour applies as normal
+        }
+
+        if (looking && ThreadLocalRandom.current().nextDouble() < STUN_CHANCE) {
             openHeaven(victim);
+        }
+    }
+
+    /**
+     * The Unblinking Eye: mark (or refresh) a body for {@link #UNBLINKING_TICKS}. While marked it cannot hold
+     * an invisibility effect and wears a small eye; a hit on an already-marked body deals {@link #UNBLINKING_MULT}.
+     */
+    private void markTarget(LivingEntity victim) {
+        EyeMark m = marks.get(victim.getUniqueId());
+        if (m != null) {
+            m.refresh();
+        } else {
+            m = new EyeMark(victim.getUniqueId());
+            marks.put(victim.getUniqueId(), m);
+            m.runTaskTimer(plugin, 2L, 2L);
+        }
+    }
+
+    /** A live eye-mark: every 2 ticks it strips invisibility and paints a small eye, for {@link #UNBLINKING_TICKS}. */
+    private final class EyeMark extends BukkitRunnable {
+        private final UUID victimId;
+        private int ticksLeft = UNBLINKING_TICKS;
+
+        EyeMark(UUID victimId) { this.victimId = victimId; }
+
+        void refresh() { ticksLeft = UNBLINKING_TICKS; }
+
+        @Override
+        public void run() {
+            ticksLeft -= 2;
+            if (!(plugin.getServer().getEntity(victimId) instanceof LivingEntity victim)
+                    || victim.isDead() || ticksLeft <= 0) {
+                end();
+                return;
+            }
+            victim.removePotionEffect(PotionEffectType.INVISIBILITY); // the watched cannot hide
+            victim.getWorld().spawnParticle(Particle.DUST,
+                    victim.getLocation().add(0, victim.getHeight() + 0.4, 0), 1, 0.05, 0.05, 0.05, 0, EYE_DUST);
+        }
+
+        void end() {
+            marks.remove(victimId, this);
+            cancel();
         }
     }
 
@@ -592,6 +669,8 @@ public final class HeavenWeapon implements Weapon {
         lastHit.remove(id);
         EyeTree tree = trees.remove(id);
         if (tree != null) tree.reap(); // the wielder left — take their tree down with them
+        EyeMark mark = marks.remove(id);
+        if (mark != null) mark.cancel(); // the quitting body was eye-marked — drop the mark
     }
 
     @Override
@@ -611,6 +690,10 @@ public final class HeavenWeapon implements Weapon {
         trees.clear();
         lastHit.clear();
         sweepTreeOrphans();
+
+        // Cancel every live eye-mark so no strip-invisibility task survives a reload.
+        for (EyeMark mark : marks.values()) mark.cancel();
+        marks.clear();
     }
 
     /** Belt-and-braces: reap any display carrying the tree tag across all loaded worlds. */
@@ -644,11 +727,11 @@ public final class HeavenWeapon implements Weapon {
 
     // ---- lore ---------------------------------------------------------------------
 
-    // The two [Left Click] entries are the melee gaze (onHit); the [Right Click] entry is the Burrowing
-    // Heaven summon (onInteract). Sneak-right-click does nothing yet, held for Heaven's later skills. The
-    // old how-to read "Its gaze may pin them in stasis", which suggested the pin was its own thing; the
-    // roll in onHit sits INSIDE the isLookingAt guard, so a foe who is not facing you can never be
-    // pinned at all. The moveset follows the code.
+    // The passive entries are the melee gaze (onHit): Eye Contact / Held in Heaven, the Stasis Pin, and the
+    // Unblinking Eye mark. The [Right Click] entry is the Burrowing Heaven summon (onInteract); sneak-right-
+    // click does nothing yet, held for Heaven's later skills. The old how-to read "Its gaze may pin them in
+    // stasis", which suggested the pin was its own thing; the roll in onHit sits INSIDE the isLookingAt guard,
+    // so a foe who is not facing you can never be pinned at all. The moveset follows the code.
 
     private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
             "Heaven",
@@ -660,16 +743,20 @@ public final class HeavenWeapon implements Weapon {
                     "A great yellow eye watches within."
             ),
             List.of(
-                    new EgoLore.Ability("[Left Click] Eye Contact Bonus",
-                            "Melee hits on a foe who is facing",
-                            "you deal +10% damage. A foe looking",
-                            "away takes no bonus."),
-                    new EgoLore.Ability("[Left Click] Stasis Pin",
+                    new EgoLore.Ability("[Passive] Eye Contact",
+                            "Hits on a foe facing you deal +10%.",
+                            "A hit on a facing or pinned foe also",
+                            "ignores about 40% of their armor."),
+                    new EgoLore.Ability("[Passive] Stasis Pin",
                             "Each hit that lands the eye contact",
                             "bonus has a 25% chance to open the",
                             "heaven: the foe is pinned in place",
                             "for 1.5 seconds, crushed to a crawl.",
                             "Mobs also lose their AI for the hold."),
+                    new EgoLore.Ability("[Passive] The Unblinking Eye",
+                            "Your hits mark a foe for 6s. Marked",
+                            "foes cannot turn invisible and take",
+                            "+15% damage from Heaven."),
                     new EgoLore.Ability("[Right Click] Burrowing Heaven",
                             "Summon a watching eye-tree ahead of",
                             "you. It throws eyes at whatever you",
