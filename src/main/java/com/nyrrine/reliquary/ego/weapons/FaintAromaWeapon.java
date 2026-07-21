@@ -208,6 +208,11 @@ public final class FaintAromaWeapon implements EgoWeapon {
     private static final int FAINT_AROMA_WEAKNESS_SECONDS = 5; // the same number, for docs
     private static final int FAINT_AROMA_WEAKNESS_AMP = 0;     // Weakness I — a sapping, not a crippling
 
+    // Cloying Scent (a custom enchant — id "cloying_scent"): the scent clings longer. +2s of Weakness per
+    // level, up to +6s at level 3 (an 11s sap). Duration only — never the amplifier, an arrow's blow, or a petal.
+    private static final int CLOYING_SCENT_PER_LEVEL_TICKS = 40;
+    private static final int CLOYING_SCENT_CAP             = 3;
+
     // ---- [Left Click] Blossoming Fragrance -----------------------------------------
 
     /**
@@ -660,7 +665,7 @@ public final class FaintAromaWeapon implements EgoWeapon {
         Bloom bloom = blooms.computeIfAbsent(wielder.getUniqueId(), k -> new Bloom());
         if (++bloom.aroma < AROMA_CHARGE_STRIKES) return;
         bloom.aroma = 0;
-        applyFaintAroma(victim);
+        applyFaintAroma(wielder, victim);
     }
 
     /** The petal multiplier a shot rides: +1% weapon damage per petal (petals are gain-capped at the bloom cap). */
@@ -675,8 +680,11 @@ public final class FaintAromaWeapon implements EgoWeapon {
      * <p>Fired by {@link #feedAroma} once the wielder's charge has gathered
      * {@value #AROMA_CHARGE_STRIKES} arrow strikes.
      */
-    private void applyFaintAroma(LivingEntity victim) {
-        victim.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, FAINT_AROMA_WEAKNESS_TICKS,
+    private void applyFaintAroma(Player wielder, LivingEntity victim) {
+        int lvl = Math.min(CLOYING_SCENT_CAP,
+                EgoEnchants.level(wielder.getInventory().getItemInMainHand(), "cloying_scent"));
+        int ticks = FAINT_AROMA_WEAKNESS_TICKS + lvl * CLOYING_SCENT_PER_LEVEL_TICKS;
+        victim.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, ticks,
                 FAINT_AROMA_WEAKNESS_AMP, false, true, true));
 
         World world = victim.getWorld();
