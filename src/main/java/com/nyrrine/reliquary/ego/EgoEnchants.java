@@ -2,6 +2,7 @@ package com.nyrrine.reliquary.ego;
 
 import com.nyrrine.reliquary.core.EgoWeapon;
 import org.bukkit.NamespacedKey;
+import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
@@ -65,17 +66,24 @@ public final class EgoEnchants {
     }
 
     /**
-     * Rebuild {@code item}'s tooltip so its current ego-enchants show in a block at the bottom, from the
-     * weapon's immutable base tooltip (so nothing stacks). Call after {@link #set} changes an enchant.
+     * Rebuild {@code item}'s tooltip so ALL of its enchants — the real vanilla ones AND the custom ego-enchants
+     * — show together in one block at the bottom, from the weapon's immutable base tooltip (so nothing stacks).
+     * The vanilla enchants' own default lore line is hidden ({@link ItemFlag#HIDE_ENCHANTS}) so they read only
+     * in our block, not twice. Call after {@link #set} or after a vanilla enchant is applied.
      */
     public static void reapplyLore(EgoWeapon weapon, ItemStack item) {
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return;
         List<EgoLore.EnchantLine> lines = new ArrayList<>();
+        // Vanilla enchants first (from the real map), pulled down beneath the ego like the customs.
+        meta.getEnchants().forEach((ench, lvl) ->
+                lines.add(new EgoLore.EnchantLine(pretty(ench.getKey().getKey()), lvl)));
+        // Then the custom ego-enchants.
         all(item).forEach((id, lvl) -> {
             EgoEnchant def = EgoEnchant.get(id);
             lines.add(new EgoLore.EnchantLine(def != null ? def.displayName() : pretty(id), lvl));
         });
+        meta.addItemFlags(ItemFlag.HIDE_ENCHANTS); // vanilla enchants read in our block, not their default spot
         EgoLore.withEnchants(weapon.egoTooltip(), lines).applyTo(meta);
         item.setItemMeta(meta);
     }

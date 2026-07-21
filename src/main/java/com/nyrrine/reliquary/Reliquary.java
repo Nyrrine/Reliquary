@@ -6,6 +6,7 @@ import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.core.WeaponManager;
 import com.nyrrine.reliquary.ego.EgoEnchant;
 import com.nyrrine.reliquary.ego.EgoEnchants;
+import org.bukkit.enchantments.Enchantment;
 import com.nyrrine.reliquary.data.PlayerDataListener;
 import com.nyrrine.reliquary.data.PlayerStore;
 import com.nyrrine.reliquary.data.YamlPlayerStore;
@@ -305,6 +306,10 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
             sender.sendMessage(Component.text("Only a player can enchant a held weapon.").color(NamedTextColor.RED));
             return;
         }
+        if (args.length >= 2 && args[1].equalsIgnoreCase("all")) {
+            enchantAll(player);
+            return;
+        }
         if (args.length < 3) {
             sender.sendMessage(Component.text("Usage: /reliquary enchant <id> <level>  (level 0 removes it)")
                     .color(NamedTextColor.GRAY));
@@ -355,6 +360,49 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
                         .append(Component.text(def.displayName() + " " + level).color(NamedTextColor.WHITE))
                         .append(Component.text(" to ").color(NamedTextColor.GRAY));
         sender.sendMessage(verb
+                .append(Component.text(weapon.id()).color(NamedTextColor.WHITE))
+                .append(Component.text(".").color(NamedTextColor.GRAY)));
+    }
+
+    /** The vanilla enchants an E.G.O weapon may reinterpret — the set {@code /reliquary enchant all} maxes. */
+    private static final Enchantment[] EGO_VANILLA_ENCHANTS = {
+            Enchantment.MULTISHOT, Enchantment.PIERCING, Enchantment.QUICK_CHARGE,
+            Enchantment.SHARPNESS, Enchantment.FIRE_ASPECT, Enchantment.SWEEPING_EDGE,
+            Enchantment.LOOTING, Enchantment.SMITE, Enchantment.EFFICIENCY,
+    };
+
+    /**
+     * {@code /reliquary enchant all} — max every enchant the held E.G.O weapon reads: each applicable vanilla
+     * enchant at its max, plus every custom ego-enchant that belongs to this weapon at its max, then render them
+     * all together beneath the tooltip. For testing a fully-loaded weapon in one command.
+     */
+    private void enchantAll(Player player) {
+        ItemStack item = player.getInventory().getItemInMainHand();
+        Weapon weapon = weapons.fromItem(item);
+        if (!(weapon instanceof EgoWeapon egoWeapon)) {
+            player.sendMessage(Component.text("Hold an E.G.O weapon — relics and bus-egos can't be enchanted.")
+                    .color(NamedTextColor.RED));
+            return;
+        }
+
+        int vanilla = 0;
+        for (Enchantment ench : EGO_VANILLA_ENCHANTS) {
+            if (ench.canEnchantItem(item)) {
+                item.addUnsafeEnchantment(ench, ench.getMaxLevel());
+                vanilla++;
+            }
+        }
+
+        var meta = item.getItemMeta();
+        var customs = EgoEnchant.forWeapon(weapon.id());
+        for (EgoEnchant e : customs) EgoEnchants.set(meta, e.id(), e.maxLevel());
+        item.setItemMeta(meta);
+        EgoEnchants.reapplyLore(egoWeapon, item);
+
+        player.sendMessage(Component.text("Maxed ").color(NamedTextColor.GRAY)
+                .append(Component.text(vanilla + " vanilla + " + customs.size() + " custom")
+                        .color(NamedTextColor.WHITE))
+                .append(Component.text(" enchants on ").color(NamedTextColor.GRAY))
                 .append(Component.text(weapon.id()).color(NamedTextColor.WHITE))
                 .append(Component.text(".").color(NamedTextColor.GRAY)));
     }
@@ -510,6 +558,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         help(sender, "/reliquary list", "list relic ids");
         help(sender, "/reliquary give <id> [player]", "give a relic to yourself or a player");
         help(sender, "/reliquary enchant <id> <level>", "enchant the E.G.O weapon in your hand (level 0 removes)");
+        help(sender, "/reliquary enchant all", "max every enchant the held E.G.O weapon reads (test a fully-loaded weapon)");
         help(sender, "/reliquary giveall <relics|egoequipment|busego> [player]", "give every weapon of a category");
         help(sender, "/reliquary admin <id> [player]", "give an admin/debug variant (e.g. Worthy Lævateinn)");
         help(sender, "/reliquary track", "list every relic and who holds it");
@@ -549,6 +598,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("enchant")) {
             List<String> ids = new ArrayList<>();
+            ids.add("all");
             for (EgoEnchant e : EgoEnchant.all()) ids.add(e.id());
             return filter(ids, args[1]);
         }
