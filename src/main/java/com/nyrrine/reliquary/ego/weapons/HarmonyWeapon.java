@@ -19,6 +19,7 @@ import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.BlockFace;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -141,6 +142,15 @@ public final class HarmonyWeapon implements EgoWeapon {
      * class Balance note for the sustained figures this buys.
      */
     private static final long   NOTE_COOLDOWN_OBSESSED_MS = 4000L;
+
+    // Tempo (a vanilla enchant — Harmony's crossbow base holds Quick Charge at an anvil, so this needs no
+    // catalogue entry): a machine kept in tempo refreshes the Note faster, cutting the recharge 15% per level,
+    // up to 45% at Quick Charge III. It scales whichever clock is live — the seven-second idle refresh and the
+    // four-second Obsession one alike — so it moves only the rate, never the per-instance damage band. The
+    // shot itself, its pierce and its ricochet are untouched. See noteCooldown, which the action bar reads.
+    private static final double TEMPO_PER_LEVEL = 0.15;
+    private static final int    TEMPO_CAP       = 3;
+
     private static final double NOTE_RANGE        = 40.0;   // total travel budget, shared across ricochets
     private static final double NOTE_RADIUS       = 1.1;    // how near the line a body must be to be struck
     private static final int    NOTE_MAX_TARGETS  = 8;      // cap on bodies one shot can pierce
@@ -358,9 +368,15 @@ public final class HarmonyWeapon implements EgoWeapon {
      * deliberate and reads correctly in both directions: taking Obsession mid-wait shortens the remaining
      * wait to the four-second clock, and dropping it lengthens the wait back out to seven. The stance is
      * the thing being paid for in blood, so the stance is what the clock answers to.
+     *
+     * <p>The Tempo enchant (Quick Charge, capped) is read live off the main hand here too, so the same cut
+     * lands on the gate and the action bar at once — never one without the other.
      */
-    private static long noteCooldown(Performance perf) {
-        return perf.obsession ? NOTE_COOLDOWN_OBSESSED_MS : NOTE_COOLDOWN_MS;
+    private static long noteCooldown(Player player, Performance perf) {
+        long base = perf.obsession ? NOTE_COOLDOWN_OBSESSED_MS : NOTE_COOLDOWN_MS;
+        int qc = Math.min(TEMPO_CAP,
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.QUICK_CHARGE));
+        return (long) (base * (1.0 - TEMPO_PER_LEVEL * qc));
     }
 
     // ---- the Note (left-click) -----------------------------------------------------
@@ -380,7 +396,7 @@ public final class HarmonyWeapon implements EgoWeapon {
 
         Performance perf = performance(player);
         long now = System.currentTimeMillis();
-        if (remaining(perf.lastNote, noteCooldown(perf), now) > 0) {
+        if (remaining(perf.lastNote, noteCooldown(player, perf), now) > 0) {
             // Still winding: the machine only clicks. The bar already shows the whole-second remainder.
             player.playSound(player.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.35f, 0.7f);
             hud(player, perf);
@@ -666,7 +682,7 @@ public final class HarmonyWeapon implements EgoWeapon {
      */
     private void hud(Player player, Performance perf) {
         player.sendActionBar(EgoHud.row(
-                rhythmReadout(perf), stanceReadout(perf), noteReadout(perf)));
+                rhythmReadout(perf), stanceReadout(perf), noteReadout(player, perf)));
     }
 
     /** The Rhythm pips — reddening to the ember accent once the seventh stack lands. */
@@ -681,8 +697,8 @@ public final class HarmonyWeapon implements EgoWeapon {
     }
 
     /** The Note's refresh: counting down while it winds, else ready to fire. */
-    private static Component noteReadout(Performance perf) {
-        long rem = remaining(perf.lastNote, noteCooldown(perf), System.currentTimeMillis());
+    private static Component noteReadout(Player player, Performance perf) {
+        long rem = remaining(perf.lastNote, noteCooldown(player, perf), System.currentTimeMillis());
         return rem > 0 ? EgoHud.cooldown("Note", rem, STEEL) : EgoHud.ready("Note", STEEL);
     }
 

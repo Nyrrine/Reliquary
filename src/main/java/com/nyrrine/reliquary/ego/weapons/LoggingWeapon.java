@@ -17,6 +17,7 @@ import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.block.data.BlockData;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -74,6 +75,14 @@ public final class LoggingWeapon implements EgoWeapon {
 
     /** Charge added by each qualifying (spaced) hit on a foe. 0.20 -> ~5 hits fill the bar. */
     private static final double CHARGE_PER_HIT = 0.20;
+
+    // Sharpened Axe (a vanilla enchant — Logging is a netherite axe and holds Efficiency at an anvil, so this
+    // needs no catalogue entry): a keener edge sinks the heart charge in faster, +10% charge per qualifying
+    // hit per level, up to +30% at Efficiency III (~4 spaced hits to full from ~5). Pace only — it never
+    // touches the rip's burst, its bleed or its debuffs, only how quickly the bar fills. The live gauge shows
+    // the charge itself, so it stays truthful with no readout change. See chargePerHit.
+    private static final double SHARPENED_PER_LEVEL = 0.10;
+    private static final int    SHARPENED_CAP       = 3;
     /** A hit inside this window of the wielder's last COUNTED hit is mash — it doesn't build charge. */
     private static final long MIN_HIT_INTERVAL_MS = 350L;
     /** How long the "most-recent foe" pointer stays a valid rip target after the last hit. */
@@ -178,10 +187,18 @@ public final class LoggingWeapon implements EgoWeapon {
 
         double c = charge.getOrDefault(aid, 0.0);
         boolean wasFull = c >= 1.0;
-        c = Math.min(1.0, c + CHARGE_PER_HIT);
+        c = Math.min(1.0, c + chargePerHit(attacker));
         charge.put(aid, c);
         if (c >= 1.0 && !wasFull) fullChargeCue(attacker); // just topped off
         sendChargeBar(attacker); // fresh readout right on the qualifying hit
+    }
+
+    /** The charge one qualifying hit adds for the axe held now: the base raised by its Sharpened Axe bonus
+     *  (Efficiency, capped). Damage is untouched — only the fill rate moves. */
+    private double chargePerHit(Player player) {
+        int eff = Math.min(SHARPENED_CAP,
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.EFFICIENCY));
+        return CHARGE_PER_HIT * (1.0 + SHARPENED_PER_LEVEL * eff);
     }
 
     /**

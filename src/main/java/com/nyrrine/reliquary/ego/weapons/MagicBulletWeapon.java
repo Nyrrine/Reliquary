@@ -22,6 +22,7 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.data.BlockData;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.FallingBlock;
 import org.bukkit.entity.LivingEntity;
@@ -103,6 +104,14 @@ public final class MagicBulletWeapon implements EgoWeapon {
 
     // ---- tuning --------------------------------------------------------------------
     private static final int    CHARGE_STEPS   = 24;    // onTick steps to full charge → ~2.4s (weighty, dramatic)
+
+    // Swift Vow (a vanilla enchant — the musket's crossbow base holds Quick Charge at an anvil, so this needs
+    // no catalogue entry): a swifter vow inscribes the sigil faster, cutting only the arming charge 15% per
+    // level, up to 45% at Quick Charge III (~1.3s to arm from ~2.4s). It never touches the post-shot reload
+    // gate (SHOT_COOLDOWN_MS) or the Seventh Bullet's downtime lockout, and never the shot itself — cadence
+    // to the vow only. See chargeSteps, which the charge HUD reads so its gauge fills in step with the cut.
+    private static final double SWIFT_VOW_PER_LEVEL = 0.15;
+    private static final int    SWIFT_VOW_CAP       = 3;
     private static final long   SHOT_COOLDOWN_MS = 6500L;  // real post-shot reload before the next charge (~6.5s; halved from 13s in playtest)
     private static final double RANGE          = 48.0;  // hitscan reach
     private static final double RAY_SIZE       = 0.6;   // entity ray fatness (forgiving aim) when unmarked
@@ -303,6 +312,15 @@ public final class MagicBulletWeapon implements EgoWeapon {
 
     // ---- charge & fire loop --------------------------------------------------------
 
+    /** The steps to a full arming charge for the musket held now: the base cut by its Swift Vow bonus (Quick
+     *  Charge, capped). Floored at one step so a fully-enchanted musket still takes a tick to arm. */
+    private int chargeSteps(Player player) {
+        int qc = Math.min(SWIFT_VOW_CAP,
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.QUICK_CHARGE));
+        int steps = (int) Math.round(CHARGE_STEPS * (1.0 - SWIFT_VOW_PER_LEVEL * qc));
+        return Math.max(1, steps);
+    }
+
     @Override
     public boolean onTick(Player player, long tick) {
         UUID id = player.getUniqueId();
@@ -338,13 +356,14 @@ public final class MagicBulletWeapon implements EgoWeapon {
         if (st.casting) return true; // the ult wind-up / orb drives its own action bar
 
         if (st.charging) {
+            int steps = chargeSteps(player);       // Swift Vow shortens the arming charge; the HUD reads it too
             st.chargeStep++;
             st.spin += 0.35;
-            double frac = Math.min(1.0, (double) st.chargeStep / CHARGE_STEPS);
+            double frac = Math.min(1.0, (double) st.chargeStep / steps);
             renderCircles(player, st, frac);
             chargeTickFx(player, frac);
             player.sendActionBar(chargeBar(frac, st.bullets));
-            if (st.chargeStep >= CHARGE_STEPS) {
+            if (st.chargeStep >= steps) {
                 st.charging = false;
                 fire(player, st);
             }

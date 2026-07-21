@@ -14,6 +14,7 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Enemy;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
@@ -71,6 +72,13 @@ public final class SodaWeapon implements EgoWeapon {
     private static final long   CHARGE_MS   = 2200L; // sneak-hold time to a full charge
     private static final double SPRAY_RANGE = 9.0;   // reach of the healing fan
     private static final double CONE_COS    = 0.55;  // ~57° half-angle — a wide, fat spray cone
+
+    // Fizzier (a vanilla enchant — Soda's crossbow base holds Quick Charge at an anvil, so this needs no
+    // catalogue entry): a fizzier can builds pressure faster, cutting the sneak-hold charge time 15% per
+    // level, up to 45% at Quick Charge III (~1.2s to bank a shot from 2.2s). Only the pace changes — the
+    // heal, the buffs and the spray reach are all untouched. See chargeMs, which the charge gauge reads.
+    private static final double FIZZIER_PER_LEVEL = 0.15;
+    private static final int    FIZZIER_CAP       = 3;
 
     // Ally buffs on a hit (never applied to the wielder).
     private static final int HEAL_AMP    = 0;        // Instant Health I ≈ 4 HP
@@ -139,6 +147,14 @@ public final class SodaWeapon implements EgoWeapon {
         }
     }
 
+    /** The sneak-hold time to a full charge for the can held now: the base cut by its Fizzier bonus (Quick
+     *  Charge, capped). */
+    private long chargeMs(Player player) {
+        int qc = Math.min(FIZZIER_CAP,
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.QUICK_CHARGE));
+        return (long) (CHARGE_MS * (1.0 - FIZZIER_PER_LEVEL * qc));
+    }
+
     @Override
     public boolean onTick(Player player, long tick) {
         boolean held = matches(player.getInventory().getItemInMainHand());
@@ -162,7 +178,7 @@ public final class SodaWeapon implements EgoWeapon {
                 fizzleOut(player);
                 return true;
             }
-            double frac = Math.min(1.0, (double) (System.currentTimeMillis() - c.start) / CHARGE_MS);
+            double frac = Math.min(1.0, (double) (System.currentTimeMillis() - c.start) / chargeMs(player));
             chargingFx(player, frac, c);
             if (frac >= 1.0) {
                 c.charging = false;
