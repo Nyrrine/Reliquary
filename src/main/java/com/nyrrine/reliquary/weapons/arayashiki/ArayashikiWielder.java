@@ -31,9 +31,11 @@ public final class ArayashikiWielder {
     private final Reliquary plugin;
     private final ArayashikiWeapon weapon;
 
-    // Per 2-tick step. Full drain over 3 min of holding; full regen in ~45s of rest.
+    // Per 2-tick step. Full drain over 9 min of holding; full regen in ~45s of rest. The drain was
+    // tripled (over the 10800-tick pool) so the memory lasts 3x; regen is scaled to match the larger
+    // pool so recovery still takes ~45s, unchanged.
     private static final int DRAIN_PER_STEP = 2;
-    private static final int REGEN_PER_STEP = 8;
+    private static final int REGEN_PER_STEP = 24;
 
     private final Map<UUID, Integer> lastLevel = new HashMap<>();
     private final Set<UUID> hollowSeen = new HashSet<>();

@@ -9,6 +9,7 @@ import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -49,10 +50,31 @@ public final class ArayashikiErasure {
         UUID killer = weapon.consumeErasedMark(victim.getUniqueId());
         if (killer == null) return;
 
-        event.deathMessage(Component.text(victim.getName() + " was erased from existence.")
-                .color(NamedTextColor.WHITE));
+        event.deathMessage(erasureDeathMessage(victim.getName(), killer));
         erase(victim);
         weapon.onErasedKill(killer);
+    }
+
+    /**
+     * "&lt;victim&gt; was erased from existence using [Arayashiki] by &lt;killer&gt;", where the killer's
+     * name erodes with the blade's remaining memory the same way its own text does — the full name at full
+     * charge, down to the leading letter as the memory empties. The blade's own label stays whole; only the
+     * hand that swung it is being erased along with what it cut.
+     */
+    private Component erasureDeathMessage(String victimName, UUID killerId) {
+        String killerName = resolveName(killerId);
+        String eroded = weapon.erodedActorName(killerName, weapon.useTicksOf(killerId));
+        return Component.text(victimName + " was erased from existence using ["
+                        + ArayashikiWeapon.BLADE_NAME + "] by " + eroded)
+                .color(NamedTextColor.WHITE);
+    }
+
+    /** The killer's name if we can resolve it (online, then offline), else a plain fallback. */
+    private String resolveName(UUID killerId) {
+        Player online = plugin.getServer().getPlayer(killerId);
+        if (online != null) return online.getName();
+        String offline = plugin.getServer().getOfflinePlayer(killerId).getName();
+        return offline != null ? offline : "someone";
     }
 
     /** Plays the rising fade-to-white dissolve at the victim's body. */

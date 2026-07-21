@@ -52,7 +52,7 @@ public final class ArayashikiWeapon implements Weapon {
      * memory of whoever holds it (per the lore): holding it drains this toward 0,
      * sheathing it lets it regenerate. At 0 the blade is fully erased and won't cut.
      */
-    public static final int MAX_USE_TICKS = 3600; // 3 minutes of continuous use
+    public static final int MAX_USE_TICKS = 10800; // 9 minutes of continuous use (3x — the memory drains slower)
     private final Map<UUID, Integer> useTicks = new HashMap<>();
 
     /** A fixed, scattered order in which the name's letters decay into blank space. */
@@ -216,6 +216,23 @@ public final class ArayashikiWeapon implements Weapon {
         }
         int k = (int) Math.round(fraction * n);
         for (int i = 0; i < k; i++) c[pos.get(i)] = ' ';
+        return new String(c);
+    }
+
+    /**
+     * A killer's name as it reads in an Arayashiki death message: it erodes with the blade's remaining
+     * memory, keeping the leading letters and blanking the rest into nothing. Full name at full charge,
+     * down to the leading letter alone as the memory empties (e.g. "Nyrrine" -> "N"). The same fade-into-
+     * blank the blade wears on its own text, but anchored at the FRONT on purpose — a death line always
+     * keeps a first letter to read by, where the blade's own name may erase completely.
+     */
+    public String erodedActorName(String name, int remainingTicks) {
+        double f = erosionFraction(remainingTicks);
+        if (f <= 0 || name.isEmpty()) return name;
+        char[] c = name.toCharArray();
+        // ceil keeps at least one leading letter for any charge still left, and the whole name at full.
+        int keep = (int) Math.ceil((1.0 - f) * c.length);
+        for (int i = keep; i < c.length; i++) c[i] = ' ';
         return new String(c);
     }
 
