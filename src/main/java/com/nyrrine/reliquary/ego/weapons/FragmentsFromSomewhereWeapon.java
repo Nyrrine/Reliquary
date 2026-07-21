@@ -147,6 +147,11 @@ public final class FragmentsFromSomewhereWeapon implements EgoWeapon {
     /** How long Refraction stays dark after a completed return. */
     private static final long REFRACTION_COOLDOWN_MS = 7_000L;
 
+    // Return Vector (a custom enchant — id "return_vector"): the echo answers sooner. Cuts the Refraction
+    // cooldown 12% per level, up to 36% at level 3 (~4.5s). Cadence only — never the lunge's damage or reach.
+    private static final double RETURN_VECTOR_PER_LEVEL = 0.12;
+    private static final int    RETURN_VECTOR_CAP       = 3;
+
     /** Fall-damage waiver after a lunge or a return — neither should be paid for on landing. */
     private static final long FALL_GRACE_MS = 1_500L;
 
@@ -358,6 +363,13 @@ public final class FragmentsFromSomewhereWeapon implements EgoWeapon {
         return REFRACTION_WINDOW_MS + REFRACTED_STEP_PER_LEVEL_MS * lvl;
     }
 
+    /** The Refraction cooldown for the spear held right now: the base dark cut by its Return Vector bonus. */
+    private long refractionCooldownMs(Player player) {
+        int lvl = Math.min(RETURN_VECTOR_CAP,
+                EgoEnchants.level(player.getInventory().getItemInMainHand(), "return_vector"));
+        return (long) (REFRACTION_COOLDOWN_MS * (1.0 - RETURN_VECTOR_PER_LEVEL * lvl));
+    }
+
     /** Record the wielder's current spot and stand a refracted after-image on it. Replaces any older one. */
     private void openWindow(Player player) {
         UUID id = player.getUniqueId();
@@ -435,7 +447,7 @@ public final class FragmentsFromSomewhereWeapon implements EgoWeapon {
         dest.setYaw(player.getLocation().getYaw());
         dest.setPitch(player.getLocation().getPitch());
 
-        refractionReadyAt.put(id, now + REFRACTION_COOLDOWN_MS);
+        refractionReadyAt.put(id, now + refractionCooldownMs(player));
         fallGraceUntil.put(id, now + FALL_GRACE_MS);
         EgoDurability.wearMainHand(player);
 
