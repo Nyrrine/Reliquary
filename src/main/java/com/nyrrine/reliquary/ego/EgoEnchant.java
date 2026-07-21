@@ -34,6 +34,9 @@ public record EgoEnchant(String id, String displayName, int maxLevel, String des
     // custom enchant: +1 comet in the pool per level before the recharge.
     public static final EgoEnchant CONSTELLATION = reg("constellation", "Constellation", 2,
             "Our Galaxy: +1 comet in the pool per level before a recharge.");
+    // Hemorrhage: a deeper wound on Wrist Cutter — +1 to the bleed-stack cap per level (a longer, larger bleed).
+    public static final EgoEnchant HEMORRHAGE = reg("hemorrhage", "Hemorrhage", 3,
+            "Wrist Cutter: +1 to the bleed-stack cap per level (a deeper, longer wound).");
 
     /** The enchant with this id, or {@code null} if no such enchant is catalogued. */
     public static EgoEnchant get(String id) {

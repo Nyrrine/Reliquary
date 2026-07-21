@@ -3,6 +3,7 @@ package com.nyrrine.reliquary.ego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
 import net.kyori.adventure.text.format.TextColor;
@@ -72,6 +73,12 @@ public final class WristCutterWeapon implements EgoWeapon {
     private static final int    STACKS_PER_HIT = 1;       // each landed cut deepens the wound by one stack
     private static final int    MAX_STACKS = 8;           // cap: <=8.0 accumulated, bled out over <=8s (true bleed — ignores plate)
 
+    // Hemorrhage (a custom enchant — no vanilla equivalent): a deeper wound that holds more stacks, +1 to the
+    // cap per level, up to +3 (an 11-stack cap). It lengthens and deepens the bleed's TOTAL without touching
+    // BLEED_TICK_DAMAGE, so the per-second true damage stays ~1 (band-safe, ignores plate) — the wound just
+    // takes longer to close. Applied with /reliquary enchant hemorrhage.
+    private static final int    HEMORRHAGE_CAP = 3;
+
     public WristCutterWeapon(Reliquary plugin) {
         this.plugin = plugin;
         this.key = new NamespacedKey(plugin, "wrist_cutter");
@@ -130,7 +137,9 @@ public final class WristCutterWeapon implements EgoWeapon {
         } else {
             bleed.attackerId = attacker.getUniqueId(); // latest cutter takes the credit for the drain
         }
-        bleed.addStacks();
+        int cap = MAX_STACKS + Math.min(HEMORRHAGE_CAP,
+                EgoEnchants.level(attacker.getInventory().getItemInMainHand(), "hemorrhage"));
+        bleed.addStacks(cap);
     }
 
     /**
@@ -150,9 +159,9 @@ public final class WristCutterWeapon implements EgoWeapon {
             this.victim = victim;
         }
 
-        /** Add a hit's worth of stacks, clamped to the cap so accumulated bleed can't run away. */
-        private void addStacks() {
-            stacks = Math.min(MAX_STACKS, stacks + STACKS_PER_HIT);
+        /** Add a hit's worth of stacks, clamped to the (possibly Hemorrhage-raised) cap so bleed can't run away. */
+        private void addStacks(int cap) {
+            stacks = Math.min(cap, stacks + STACKS_PER_HIT);
         }
 
         @Override
