@@ -14,6 +14,7 @@ import com.nyrrine.reliquary.extraction.ExtractionCommand;
 import com.nyrrine.reliquary.busego.weapons.FlowerBuryingWedgeReckoning;
 import com.nyrrine.reliquary.busego.weapons.FlowerBuryingWedgeWeapon;
 import com.nyrrine.reliquary.ego.weapons.BeakWeapon;
+import com.nyrrine.reliquary.ego.weapons.CensoredWeapon;
 import com.nyrrine.reliquary.ego.weapons.ChristmasWeapon;
 import com.nyrrine.reliquary.ego.weapons.CobaltScarWeapon;
 import com.nyrrine.reliquary.ego.weapons.CrimsonScarWeapon;
@@ -133,6 +134,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         // ALEPH
         weapons.register(new JustitiaWeapon(this));
         weapons.register(new MimicryWeapon(this));
+        weapons.register(new CensoredWeapon(this));
 
         // ---- bus ego ----
         FlowerBuryingWedgeWeapon flowerWedge = new FlowerBuryingWedgeWeapon(this);
