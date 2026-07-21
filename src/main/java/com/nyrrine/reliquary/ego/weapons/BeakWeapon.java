@@ -45,7 +45,8 @@ import java.util.concurrent.ThreadLocalRandom;
  *       the victim's velocity is captured and restored around the hit — and a crisp peck rings at the
  *       body it lands in. A short red spiked tracer + a chirpy muzzle puff sells the sting.</li>
  *   <li><b>Multishot</b> — a single trigger becomes a rapid three-round burst: three consecutive pecks
- *       fired straight down the aim line a couple ticks apart, each its own hitscan, for one bullet.</li>
+ *       fired straight down the aim line a couple ticks apart, each its own hitscan, each spending its own
+ *       bullet (a short mag stops the burst early).</li>
  *   <li><b>Piercing</b> — each pellet punches through the first body and on into up to {@code level} more
  *       living entities along its line.</li>
  *   <li>When the magazine runs dry it reloads over {@value #RELOAD_MS}ms; firing is disabled meanwhile
@@ -67,7 +68,7 @@ public final class BeakWeapon implements Weapon {
 
     // Tuning — a chattering, feather-light peashooter.
     private static final double RANGE       = 22.0;  // hitscan reach
-    private static final double DAMAGE      = 1.8;   // ~1 heart — deliberately tiny; the volume is the point
+    private static final double DAMAGE      = 1.2;   // ~0.6 heart — deliberately tiny; the volume is the point
     private static final double RAY_SIZE    = 0.45;  // entity ray fatness (forgiving aim)
     private static final double SPREAD      = 0.035; // tiny random cone on each pellet
     private static final long   COOLDOWN_MS = 180L;  // machine-gun cadence limiter (silent — no action bar)
@@ -134,21 +135,23 @@ public final class BeakWeapon implements Weapon {
         if (now - mag.lastFire < COOLDOWN_MS) return;
         mag.lastFire = now;
 
-        // One trigger spends exactly one bullet, however many pellets it throws.
-        mag.rounds--;
-
         ItemStack item = player.getInventory().getItemInMainHand();
         int multishot = item.getEnchantmentLevel(Enchantment.MULTISHOT);
         int piercing  = item.getEnchantmentLevel(Enchantment.PIERCING);
 
+        // Every peck costs a bullet — Multishot buys a rapid three-round burst, not three free pecks. Reserve
+        // the burst up front (capped by what's in the mag), so the trigger fires exactly as many pecks as it
+        // can pay for and stops the moment it runs dry.
+        int wanted = multishot > 0 ? BURST_SHOTS : 1;
+        int pecks = Math.min(wanted, mag.rounds);
+        mag.rounds -= pecks;
+
         // Fire immediately down the aim line. Multishot doesn't spread the shot sideways — it turns the
-        // trigger into a rapid three-round burst: the first peck now, the rest queued a couple ticks apart,
-        // all straight ahead, each its own hitscan. One trigger still spends exactly one bullet.
+        // trigger into a rapid burst: the first peck now, the rest queued a couple ticks apart, all straight
+        // ahead, each its own hitscan and each already paid for above.
         fireOneShot(player, piercing);
-        if (multishot > 0) {
-            for (int s = 1; s < BURST_SHOTS; s++) {
-                scheduleBurstShot(player, piercing, BURST_GAP_TICKS * s);
-            }
+        for (int s = 1; s < pecks; s++) {
+            scheduleBurstShot(player, piercing, BURST_GAP_TICKS * s);
         }
 
         // Emptied the magazine? Roll straight into the reload.
@@ -378,7 +381,7 @@ public final class BeakWeapon implements Weapon {
             List.of(
                     new EgoLore.Ability("[Right Click] Fire Spiked Pellet",
                             "Spends one bullet to fire a spiked",
-                            "pellet up to 22 blocks. 1.8 damage,",
+                            "pellet up to 22 blocks. 1.2 damage,",
                             "no knockback. Fires up to about 5",
                             "times a second."),
                     new EgoLore.Ability("[Passive] 12-Round Magazine",
@@ -387,8 +390,8 @@ public final class BeakWeapon implements Weapon {
                             "until it finishes."),
                     new EgoLore.Ability("[Passive] Multishot Burst Fire",
                             "With Multishot, one trigger fires a",
-                            "3-round burst down the aim line for",
-                            "one bullet."),
+                            "3-round burst down the aim line,",
+                            "each peck spending its own bullet."),
                     new EgoLore.Ability("[Passive] Piercing Through-Shot",
                             "With Piercing, each pellet punches",
                             "through the first target and into one",

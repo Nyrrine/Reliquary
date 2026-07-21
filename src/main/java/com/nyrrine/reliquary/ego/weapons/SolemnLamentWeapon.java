@@ -108,9 +108,9 @@ public final class SolemnLamentWeapon implements Weapon {
 
     // Tuning — a twin-pistol shotgun dirge that never truly empties.
     private static final int    MAG             = 12;    // shots per pistol
-    private static final int    PELLETS_PER_GUN = 3;     // shotgun pellets each gun throws per trigger
+    private static final int    PELLETS_PER_GUN = 2;     // shotgun pellets each gun throws per trigger
     private static final double RANGE           = 16.0;  // "not too far" — a close-range reach
-    private static final double PELLET_DAMAGE   = 3.8;   // per pellet; one pistol's 3 pellets ≈ 11.4 point-blank, less at range
+    private static final double PELLET_DAMAGE   = 1.6;   // per pellet; one pistol's 2 pellets ≈ 3.2 point-blank, less at range
     private static final double CONE            = 0.10;  // shotgun spread (radians-ish scatter) — tightened so more pellets connect
     private static final double RAY_SIZE        = 0.5;   // entity ray fatness (forgiving aim)
     private static final double HAND_OFFSET     = 0.32;  // how far the muzzles sit off the aim line
