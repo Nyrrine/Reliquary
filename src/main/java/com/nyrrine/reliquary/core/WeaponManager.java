@@ -3,6 +3,9 @@ package com.nyrrine.reliquary.core;
 import com.nyrrine.reliquary.Reliquary;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.util.Vector;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -428,6 +431,53 @@ public final class WeaponManager implements Listener {
         if (weapon == null) return;
         engage(weapon, player.getUniqueId());
         weapon.onDamaged(player, event);
+    }
+
+    /**
+     * The writable, earlier mirror of {@link #onEntityDamage}: dispatch {@link Weapon#onIncomingDamage} at
+     * HIGH so a held relic can reduce or zero the blow before the MONITOR onDamaged pass reads its final
+     * value. A relic that zeroes (not cancels) still lets its own onDamaged counter fire on the same strike.
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onIncomingDamage(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player player)) return;
+        Weapon weapon = fromItem(player.getInventory().getItemInMainHand());
+        if (weapon == null) return;
+        engage(weapon, player.getUniqueId());
+        weapon.onIncomingDamage(player, event);
+    }
+
+    /**
+     * Deal {@code amount} to {@code victim} as a single normal-typed blow credited to {@code attacker}, with
+     * {@code ignoreFraction} (0..1) of the victim's armour ignored. The input is scaled by {@code 1/(1-R)} on
+     * the pierced part so that after the server re-applies armour to the whole blow, the pierced fraction
+     * lands unreduced while the rest is armour-reduced as vanilla — Resistance, Protection and shields still
+     * apply (unlike a bypass DamageSource). Fenced through {@link #dealing} (so the re-entering dispatch never
+     * hands the blow back to the relic) with i-frames cleared (so a rapid follow-up still lands); the pre-hit
+     * velocity is restored to match the roster's zero-knockback follow-up idiom.
+     */
+    public void pierceDamage(LivingEntity victim, double amount, double ignoreFraction, Player attacker) {
+        double f = Math.max(0.0, Math.min(1.0, ignoreFraction));
+        double reduction = armorReduction(victim, amount);
+        double input = amount * ((1.0 - f) + f / Math.max(1.0e-3, 1.0 - reduction));
+        Vector before = victim.getVelocity();
+        dealing(attacker.getUniqueId(), () -> {
+            victim.setNoDamageTicks(0);
+            victim.damage(input, attacker);
+        });
+        victim.setVelocity(before);
+    }
+
+    /** The vanilla armour + toughness reduction fraction (0..1) a blow of {@code damage} suffers on {@code victim}. */
+    private static double armorReduction(LivingEntity victim, double damage) {
+        AttributeInstance armorAttr = victim.getAttribute(Attribute.ARMOR);
+        if (armorAttr == null) return 0.0;
+        double armor = armorAttr.getValue();
+        if (armor <= 0.0) return 0.0;
+        AttributeInstance toughAttr = victim.getAttribute(Attribute.ARMOR_TOUGHNESS);
+        double tough = toughAttr == null ? 0.0 : toughAttr.getValue();
+        double points = Math.min(20.0, Math.max(armor / 5.0, armor - damage / (2.0 + tough / 4.0)));
+        return points / 25.0;
     }
 
     @EventHandler(ignoreCancelled = true)

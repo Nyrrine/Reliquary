@@ -22,9 +22,6 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.inventory.ItemStack;
@@ -69,7 +66,7 @@ import java.util.concurrent.ThreadLocalRandom;
  *       A blow struck at the top of the swing arc also hurries Judgement's rest along by
  *       {@link #HURRY_MS}. Swinging at nothing earns neither — the scales weigh sins, not exercise.</li>
  *   <li><b>Persecution</b> (right-click, {@link #onInteract}) — hang the scales behind you and take a
- *       counter-stance. While the scales hang the bearer is <b>totally immune</b> ({@link #onStanceDamage}).
+ *       counter-stance. While the scales hang the bearer is <b>totally immune</b> ({@link #onIncomingDamage}).
  *       Strike the stance and you are rooted while the bearer appears at your back, blinded by
  *       Indifference.</li>
  * </ul>
@@ -94,7 +91,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * needed at all. The stance answers a <em>strike</em>, not a wound: a blow a shield turns aside still
  * gets a verdict.
  *
- * <p>That is exactly why {@link #onStanceDamage} <em>zeroes</em> the blow instead of cancelling it. {@code
+ * <p>That is exactly why {@link #onIncomingDamage} <em>zeroes</em> the blow instead of cancelling it. {@code
  * onDamaged} is dispatched at monitor priority with {@code ignoreCancelled = true} — a cancelled blow would
  * never reach it, and the stance would go silent. A zeroed-but-live blow lands for nothing and still reaches
  * the counter, so the bearer is both immune and answered from the one strike.
@@ -109,7 +106,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * disable (plus a world sweep) so no orphan is ever left behind. Player roots are best-effort — see
  * {@link RootTask}.
  */
-public final class JustitiaWeapon implements Weapon, Listener {
+public final class JustitiaWeapon implements Weapon {
 
     private final Reliquary plugin;
 
@@ -255,9 +252,6 @@ public final class JustitiaWeapon implements Weapon, Listener {
     public JustitiaWeapon(Reliquary plugin) {
         this.plugin = plugin;
         this.key = new NamespacedKey(plugin, "justitia");
-        // Persecution's immunity needs to negate damage before it lands, which the manager's monitor-priority
-        // onDamaged dispatch cannot do. Justitia carries its own HIGH-priority damage guard for it.
-        plugin.getServer().getPluginManager().registerEvents(this, plugin);
     }
 
     @Override
@@ -502,13 +496,12 @@ public final class JustitiaWeapon implements Weapon, Listener {
      *
      * <p>Gated on the live stance ({@link Wielder#stanceOpen()}), so immunity ends the instant the stance
      * closes — by counter, by lapse, or by sheathing — with nothing to unwind and no potion to collide with.
-     * The manager's own {@code onDamaged} dispatch is monitor/read-only and cannot do this, which is why
-     * Justitia registers this guard itself (see the constructor).
+     * The manager's own monitor {@code onDamaged} is read-only and cannot do this, so Justitia zeroes the blow
+     * from the framework's writable {@link Weapon#onIncomingDamage} hook (HIGH, before that monitor pass).
      */
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-    public void onStanceDamage(EntityDamageEvent event) {
-        if (!(event.getEntity() instanceof Player victim)) return;
-        Wielder w = wielders.get(victim.getUniqueId());
+    @Override
+    public void onIncomingDamage(Player wielder, EntityDamageEvent event) {
+        Wielder w = wielders.get(wielder.getUniqueId());
         if (w == null || !w.stanceOpen()) return;
         event.setDamage(0.0); // base to zero -> final zero after every reduction modifier; not cancelled
     }

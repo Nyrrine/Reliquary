@@ -58,6 +58,17 @@ public interface Weapon {
                            org.bukkit.event.entity.EntityDamageEvent event) {}
 
     /**
+     * The wielder is about to take damage with this relic in the main hand — the <b>writable</b>, earlier
+     * mirror of {@link #onDamaged}. Dispatched at HIGH priority, before the monitor {@link #onDamaged} pass.
+     * Unlike onDamaged (read-only), you MAY reduce or zero the blow here via {@code event.setDamage(...)}.
+     * Prefer {@code setDamage(0.0)} over {@code setCancelled}: a zeroed-but-live event still reaches the
+     * monitor onDamaged dispatch, so a counting or countering relic still sees the strike; a cancelled one
+     * would not. Default: no-op.
+     */
+    default void onIncomingDamage(org.bukkit.entity.Player wielder,
+                                  org.bukkit.event.entity.EntityDamageEvent event) {}
+
+    /**
      * The player pressed the swap-hands key (F). Dispatched to every weapon regardless of what's
      * held, so a relic can react even when its item has left the hand (e.g. recalling a thrown weapon).
      */
