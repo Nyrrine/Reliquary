@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -82,6 +83,12 @@ public final class BeakWeapon implements EgoWeapon {
 
     private static final int  MAG_SIZE  = 12;        // bullets per magazine
     private static final long RELOAD_MS = 5000L;     // dry-magazine reload time
+
+    // Ravenous (a custom enchant — no vanilla equivalent): a hungrier bird carries a bigger magazine, +2 rounds
+    // per level, up to +6 (an 18-round magazine). More shots between reloads, not more damage per shot — it
+    // never touches the per-pellet blow, so it stays in band. Applied with /reliquary enchant ravenous.
+    private static final int  RAVENOUS_PER_LEVEL = 2;
+    private static final int  RAVENOUS_CAP       = 3;
 
     // Palette — white/gray bird with a red-cannon accent.
     /** Primary — pale feather white. Display name, "How to use:", ability headers. */
@@ -272,6 +279,13 @@ public final class BeakWeapon implements EgoWeapon {
         player.playSound(player.getLocation(), Sound.ITEM_CROSSBOW_LOADING_START, 0.6f, 1.4f);
     }
 
+    /** The magazine size for the bird held right now: the base twelve plus its Ravenous bonus (+2/level, capped). */
+    private int magSize(Player player) {
+        int extra = RAVENOUS_PER_LEVEL * Math.min(RAVENOUS_CAP,
+                EgoEnchants.level(player.getInventory().getItemInMainHand(), "ravenous"));
+        return MAG_SIZE + Math.max(0, extra);
+    }
+
     /** Render the held-weapon action bar: the reload gauge while reloading, else the live ammo count. */
     private void renderBar(Player player, Mag mag) {
         if (mag.reloading()) {
@@ -279,7 +293,7 @@ public final class BeakWeapon implements EgoWeapon {
             double frac = Math.min(1.0, (double) elapsed / RELOAD_MS);
             player.sendActionBar(EgoHud.gauge(RED, frac, EgoHud.status("Reloading", RED)));
         } else {
-            player.sendActionBar(EgoHud.ammo(RED, "Bullets", mag.rounds, MAG_SIZE));
+            player.sendActionBar(EgoHud.ammo(RED, "Bullets", mag.rounds, magSize(player)));
         }
     }
 
@@ -291,7 +305,7 @@ public final class BeakWeapon implements EgoWeapon {
         if (mag != null && mag.reloading()) {
             long elapsed = System.currentTimeMillis() - mag.reloadStart;
             if (elapsed >= RELOAD_MS) {
-                mag.rounds = MAG_SIZE;
+                mag.rounds = magSize(player);
                 mag.reloadStart = 0L;
                 if (held) {
                     player.playSound(player.getLocation(), Sound.ITEM_CROSSBOW_LOADING_END, 0.6f, 1.5f);

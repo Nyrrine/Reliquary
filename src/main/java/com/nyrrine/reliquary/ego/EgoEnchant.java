@@ -37,6 +37,9 @@ public record EgoEnchant(String id, String displayName, int maxLevel, String des
     // Hemorrhage: a deeper wound on Wrist Cutter — +1 to the bleed-stack cap per level (a longer, larger bleed).
     public static final EgoEnchant HEMORRHAGE = reg("hemorrhage", "Hemorrhage", 3,
             "Wrist Cutter: +1 to the bleed-stack cap per level (a deeper, longer wound).");
+    // Ravenous: a hungrier Beak carries a bigger magazine — +2 rounds per level, more shots between reloads.
+    public static final EgoEnchant RAVENOUS = reg("ravenous", "Ravenous", 3,
+            "Beak: +2 rounds in the magazine per level.");
 
     /** The enchant with this id, or {@code null} if no such enchant is catalogued. */
     public static EgoEnchant get(String id) {
