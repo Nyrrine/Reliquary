@@ -12,6 +12,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
@@ -81,9 +82,21 @@ public final class GreenStemWeapon implements Weapon {
      */
     private final Set<UUID> ticking = new HashSet<>();
 
-    /** POISON dose applied on every landed melee hit: ~4 seconds, amplifier 0. */
+    /** POISON dose applied on every landed melee hit: ~4 seconds, amplifier 1 (Poison II). */
     private static final int POISON_TICKS = 80;
-    private static final int POISON_AMP = 0;
+    private static final int POISON_AMP = 1;
+
+    // ---- venom: a stacking, armour-piercing true-damage DoT (poison alone is worthless vs netherite) ----
+    // PLACEHOLDER NUMBERS — balance-approved shape (§3), magnitudes flagged for the balance wave.
+    /** Most venom stacks a body can carry; each landed hit adds one. */
+    private static final int    VENOM_STACK_CAP  = 5;
+    /** Ticks between venom bites, how many bites a fresh dose lasts (refreshed on hit), and damage per stack. */
+    private static final int    VENOM_INTERVAL   = 20;   // 1s between bites
+    private static final int    VENOM_BITES      = 5;    // ~5s of venom, reset on every hit
+    private static final double VENOM_PER_STACK  = 0.5;  // true damage per stack per bite (ignores armour)
+
+    /** Live venom DoTs, one per envenomed body — reaped on disable. */
+    private final Map<UUID, Venom> venom = new HashMap<>();
 
     /** The bite mends a chunk of the wielder's health — two hearts, clamped to their max. */
     private static final double BITE_HEAL = 4.0;
@@ -197,6 +210,7 @@ public final class GreenStemWeapon implements Weapon {
         if (ticking.contains(victim.getUniqueId())) return; // our own thorn's damage re-entered; leave it be
 
         victim.addPotionEffect(new PotionEffect(PotionEffectType.POISON, POISON_TICKS, POISON_AMP, false, true, true));
+        applyVenom(attacker, victim);
         rustle(victim);
         scatterThorns(victim);
 
@@ -425,6 +439,65 @@ public final class GreenStemWeapon implements Weapon {
         world.spawnParticle(Particle.BLOCK, core, 6, 0.3, 0.4, 0.3, 0.0, THORN_BLOCK);
     }
 
+    // ---- venom -------------------------------------------------------------------
+
+    /** Sink or refresh venom in the struck body: a fresh dose adds a stack (capped) and resets the timer. */
+    private void applyVenom(Player attacker, LivingEntity victim) {
+        Venom v = venom.get(victim.getUniqueId());
+        if (v != null) {
+            v.refresh();
+        } else {
+            v = new Venom(victim.getUniqueId(), attacker.getUniqueId());
+            venom.put(victim.getUniqueId(), v);
+            v.runTaskTimer(plugin, VENOM_INTERVAL, VENOM_INTERVAL);
+        }
+    }
+
+    /**
+     * A stacking venom DoT: every {@link #VENOM_INTERVAL} ticks it bites the body for {@link #VENOM_PER_STACK}
+     * per stack as armour-ignoring true damage (through {@code pierceDamage} at full pierce, i-frames cleared
+     * so it always lands), for {@link #VENOM_BITES} bites, the timer reset by each fresh hit.
+     */
+    private final class Venom extends BukkitRunnable {
+        private final UUID victimId;
+        private final UUID attackerId;
+        private int stacks = 1;
+        private int bitesLeft = VENOM_BITES;
+
+        Venom(UUID victimId, UUID attackerId) {
+            this.victimId = victimId;
+            this.attackerId = attackerId;
+        }
+
+        /** A fresh dose: one more stack (capped) and the full duration back. */
+        void refresh() {
+            if (stacks < VENOM_STACK_CAP) stacks++;
+            bitesLeft = VENOM_BITES;
+        }
+
+        @Override
+        public void run() {
+            Player attacker = plugin.getServer().getPlayer(attackerId);
+            if (!(plugin.getServer().getEntity(victimId) instanceof LivingEntity victim)
+                    || victim.isDead() || attacker == null) {
+                end();
+                return;
+            }
+            plugin.weapons().pierceDamage(victim, VENOM_PER_STACK * stacks, 1.0, attacker);
+            victim.getWorld().spawnParticle(Particle.WITCH,
+                    victim.getLocation().add(0, victim.getHeight() * 0.6, 0), 4, 0.2, 0.3, 0.2, 0);
+            if (--bitesLeft <= 0) end();
+        }
+
+        /** Drop from the registry and stop ticking. */
+        void end() {
+            venom.remove(victimId, this);
+            cancel();
+        }
+    }
+
+    // ---- lifecycle ----------------------------------------------------------------
+
     @Override
     public void onQuit(UUID id) {
         biteCd.remove(id);
@@ -435,6 +508,8 @@ public final class GreenStemWeapon implements Weapon {
     public void onDisable() {
         biteCd.clear();
         thornCd.clear(); // drop the per-target execute cooldowns so nothing survives a reload
+        for (Venom v : venom.values()) v.cancel(); // cancel every live venom DoT before clearing
+        venom.clear();
     }
 
     // ---- palette & lore -----------------------------------------------------------
