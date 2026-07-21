@@ -5,6 +5,7 @@ import com.nyrrine.reliquary.core.Blink;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -160,6 +161,16 @@ public final class JustitiaWeapon implements EgoWeapon {
 
     /** Judgement rests this long after EITHER verdict — no procs at all while it sleeps. */
     private static final long JUDGEMENT_COOLDOWN_MS = 15_000L;
+
+    /**
+     * ENCHANT — Swift Justice (custom id {@code "swift_justice"}): the verdict recurs faster. Each level
+     * shaves {@value #SWIFT_JUSTICE_REDUCTION_MS} ms off the Judgement cooldown (capped at
+     * {@link #SWIFT_JUSTICE_CAP} levels), never below {@value #JUDGEMENT_COOLDOWN_MIN_MS} ms. Pure cadence —
+     * the verdict's own damage is unchanged, so the Aleph stays inside the band. PLACEHOLDER (balance wave).
+     */
+    private static final long SWIFT_JUSTICE_REDUCTION_MS = 2_000L;
+    private static final int  SWIFT_JUSTICE_CAP = 3;
+    private static final long JUDGEMENT_COOLDOWN_MIN_MS = 8_000L;
 
     /**
      * How much of Judgement's rest a fully-charged landed blow burns off. The rest is not a timer you wait
@@ -379,6 +390,14 @@ public final class JustitiaWeapon implements EgoWeapon {
      * and the remainder is a clean miss. At base that is exactly 20% / 40% / 40% — both stated rates
      * preserved, which two independent rolls could not have managed.
      */
+    /** The Judgement cooldown for this wielder, shortened by the Swift Justice enchant (capped and floored). */
+    private long judgementCooldown(Player attacker) {
+        int level = Math.min(SWIFT_JUSTICE_CAP,
+                EgoEnchants.level(attacker.getInventory().getItemInMainHand(), "swift_justice"));
+        long cd = JUDGEMENT_COOLDOWN_MS - Math.max(0, level) * SWIFT_JUSTICE_REDUCTION_MS;
+        return Math.max(JUDGEMENT_COOLDOWN_MIN_MS, cd);
+    }
+
     private void rollJudgement(Player attacker, LivingEntity victim, Wielder w) {
         long now = System.currentTimeMillis();
         if (now < w.judgementReadyAt) return;              // the balance is still resting
@@ -398,7 +417,7 @@ public final class JustitiaWeapon implements EgoWeapon {
     /** A verdict passes: the ramp resets, Judgement sleeps 15s, and the cuts begin. */
     private void passVerdict(Player attacker, LivingEntity victim, Wielder w, long now, double[] steps) {
         w.swingStacks = 0;                                  // the scales reset the moment a verdict lands
-        w.judgementReadyAt = now + JUDGEMENT_COOLDOWN_MS;
+        w.judgementReadyAt = now + judgementCooldown(attacker);
 
         // The verdict's cuts are not vanilla swings, so they wear the blade themselves — one point per
         // proc, not one per cut (ten points for one combo would eat a greatsword alive).

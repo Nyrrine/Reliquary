@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -130,6 +131,16 @@ public final class GazeWeapon implements EgoWeapon {
      */
     private static final long DECAY_INTERVAL_MS = 500L;
 
+    /**
+     * ENCHANT — Fixation (custom id {@code "fixation"}): retention, NOT a bigger ceiling. Each level adds
+     * {@value #FIXATION_GRACE_PER_LEVEL} ms to the decay grace (capped at {@link #FIXATION_CAP} levels), so
+     * the watcher holds its Delight longer between hits and reaches/keeps +40% more easily. Full Delight is
+     * still {@code MAX_DELIGHT} × +2% = +40%, untouched — Gaze never moves past the netherite band.
+     * PLACEHOLDER values for the balance wave.
+     */
+    private static final long FIXATION_GRACE_PER_LEVEL = 1_500L;
+    private static final int  FIXATION_CAP = 2;
+
     // ---- Constant Surveillance tuning ---------------------------------------------
 
     /**
@@ -203,6 +214,8 @@ public final class GazeWeapon implements EgoWeapon {
         private long cooldownReadyAt;
         /** Epoch-ms Lingering Gaze may be cast again. */
         private long lingerReadyAt;
+        /** Extra decay-grace ms lent by the Fixation enchant, refreshed each tick from the held item. */
+        private long fixationGraceMs;
     }
 
     public GazeWeapon(Reliquary plugin) {
@@ -262,10 +275,11 @@ public final class GazeWeapon implements EgoWeapon {
         long from = Math.max(d.decayAnchor, d.stareUntil);
         if (now <= from) return d.stacks;               // inside the stare window — frozen
 
+        long grace = DECAY_GRACE_MS + d.fixationGraceMs; // Fixation holds the interest longer
         long idle = now - from;
-        if (idle <= DECAY_GRACE_MS) return d.stacks;    // still within the 3s grace — the watcher waits
+        if (idle <= grace) return d.stacks;             // still within the grace — the watcher waits
 
-        long steps = (idle - DECAY_GRACE_MS) / DECAY_INTERVAL_MS;
+        long steps = (idle - grace) / DECAY_INTERVAL_MS;
         if (steps <= 0) return d.stacks;
 
         d.stacks = (int) Math.max(0L, d.stacks - steps);
@@ -538,6 +552,11 @@ public final class GazeWeapon implements EgoWeapon {
             }
             return false;
         }
+
+        // Refresh the Fixation retention from the held item each tick — capped, and read once here.
+        int fixation = Math.min(FIXATION_CAP,
+                EgoEnchants.level(player.getInventory().getItemInMainHand(), "fixation"));
+        state(id).fixationGraceMs = Math.max(0, fixation) * FIXATION_GRACE_PER_LEVEL;
 
         sendDelightBar(player, now);
         return true;

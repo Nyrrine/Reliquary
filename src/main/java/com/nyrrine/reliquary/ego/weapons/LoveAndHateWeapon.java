@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -97,6 +98,15 @@ public final class LoveAndHateWeapon implements EgoWeapon {
     private static final long SALVO_CD_MS   = 3500L;     // Hate right-click gate — 3.5s so the 4-hit salvo isn't spammable
     private static final long MINOR_CD_MS   = 120_000L;  // Minor Arcana Slave — 2 minutes
     private static final long REVERSE_CD_MS = 300_000L;  // Reverse Arcana Slave — 5 minutes
+
+    /**
+     * ENCHANT — Arcana Focus (custom id {@code "arcana_focus"}): each level shaves this off the current
+     * form's ult cooldown, capped at {@link #ARCANA_FOCUS_CAP} and never below {@link #ARCANA_FOCUS_MIN_MS}.
+     * At max it trims 45s — Minor 120s→75s, Reverse 300s→255s. Pure cadence; the ult's effect is unchanged,
+     * so it can't push the Aleph's burst out of band. PLACEHOLDER (balance wave). */
+    private static final long ARCANA_FOCUS_REDUCTION_MS = 15_000L;
+    private static final int  ARCANA_FOCUS_CAP          = 3;
+    private static final long ARCANA_FOCUS_MIN_MS       = 60_000L;
 
     private static final double MEND_HEAL    = 3.0;      // 1.5 hearts to each ally the mote passes
     private static final int    MEND_REGEN_TICKS = 100;  // Regeneration I on a mended ally
@@ -201,7 +211,7 @@ public final class LoveAndHateWeapon implements EgoWeapon {
         long now = System.currentTimeMillis();
         player.sendActionBar(EgoHud.row(
                 formReadout(hate),
-                ultReadout(id, hate, now),
+                ultReadout(player, hate, now),
                 salvoReadout(id, hate, now)));
     }
 
@@ -211,15 +221,28 @@ public final class LoveAndHateWeapon implements EgoWeapon {
     }
 
     /** The current form's ultimate: its cooldown while recharging, else ready. */
-    private Component ultReadout(UUID id, boolean hate, long now) {
+    private Component ultReadout(Player player, boolean hate, long now) {
+        UUID id = player.getUniqueId();
         if (hate) {
-            long rem = cooldownRemaining(lastReverse.get(id), REVERSE_CD_MS, now);
+            long rem = cooldownRemaining(lastReverse.get(id), ultCooldown(player, REVERSE_CD_MS), now);
             return rem > 0 ? EgoHud.cooldown("Reverse Arcana", rem, HATE_TEXT)
                            : EgoHud.ready("Reverse Arcana", HATE_TEXT);
         }
-        long rem = cooldownRemaining(lastMinor.get(id), MINOR_CD_MS, now);
+        long rem = cooldownRemaining(lastMinor.get(id), ultCooldown(player, MINOR_CD_MS), now);
         return rem > 0 ? EgoHud.cooldown("Minor Arcana", rem, LOVE_TEXT)
                        : EgoHud.ready("Minor Arcana", LOVE_TEXT);
+    }
+
+    /**
+     * ENCHANT — Arcana Focus (custom id {@code "arcana_focus"}): the current form's ult cooldown after
+     * Arcana Focus trims it (capped, floored). Both the gate and the HUD read through here so the buzz and
+     * the shown timer always agree. Cadence only — verdict/ult effect is untouched.
+     */
+    private long ultCooldown(Player player, long baseCd) {
+        int level = Math.min(ARCANA_FOCUS_CAP,
+                EgoEnchants.level(player.getInventory().getItemInMainHand(), "arcana_focus"));
+        long cd = baseCd - Math.max(0, level) * ARCANA_FOCUS_REDUCTION_MS;
+        return Math.max(ARCANA_FOCUS_MIN_MS, cd);
     }
 
     /** The Hate-form Salvo's cooldown while it runs; dropped entirely in Love or once the salvo is ready. */
@@ -348,7 +371,7 @@ public final class LoveAndHateWeapon implements EgoWeapon {
     // ---- Love · Minor Arcana Slave (ricochet beam) --------------------------------
 
     private void castMinorArcana(Player player) {
-        if (gated(player, lastMinor, MINOR_CD_MS, true)) return;
+        if (gated(player, lastMinor, ultCooldown(player, MINOR_CD_MS), true)) return;
         lastMinor.put(player.getUniqueId(), System.currentTimeMillis());
         EgoDurability.wearMainHand(player);
 
@@ -606,7 +629,7 @@ public final class LoveAndHateWeapon implements EgoWeapon {
     // ---- Hate · Reverse Arcana Slave (the aria) -----------------------------------
 
     private void castReverseArcana(Player player) {
-        if (gated(player, lastReverse, REVERSE_CD_MS, true)) return;
+        if (gated(player, lastReverse, ultCooldown(player, REVERSE_CD_MS), true)) return;
         lastReverse.put(player.getUniqueId(), System.currentTimeMillis()); // claim at chant-start
         EgoDurability.wearMainHand(player);
         showHud(player);

@@ -5,6 +5,7 @@ import com.nyrrine.reliquary.core.Blink;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -185,6 +186,14 @@ public final class MimicryWeapon implements EgoWeapon {
 
     /** The drink is throttled to once per this window — it mends a quarter of a wound, not of every wound. */
     private static final long LIFESTEAL_THROTTLE_MS = 5_000L;
+
+    /**
+     * ENCHANT — Bloodthirst (custom id {@code "bloodthirst"}): each level adds this much to the lifesteal
+     * fraction, capped at {@link #BLOODTHIRST_CAP}. At max it lifts the base draw to 0.40 and the finisher
+     * to 0.65 — deeper sustain, never damage, and still clamped to the wielder's max health. PLACEHOLDER.
+     */
+    private static final double BLOODTHIRST_PER_LEVEL = 0.05;
+    private static final int BLOODTHIRST_CAP = 3;
 
     // ---- tuning: Nothing There (the reservoir) -------------------------------------
 
@@ -645,11 +654,24 @@ public final class MimicryWeapon implements EgoWeapon {
         double health = attacker.getHealth();
         if (health >= max) return;                       // already whole — don't burn the throttle on nothing
 
-        double healed = Math.min(max, health + dealt * fraction);
+        double drawn = fraction + bloodthirstBonus(attacker); // Bloodthirst deepens the draw
+        double healed = Math.min(max, health + dealt * drawn);
         if (healed <= health) return;
         attacker.setHealth(healed);
         lastDrinkAt.put(aid, now);
         drinkFx(attacker);
+    }
+
+    /**
+     * ENCHANT — Bloodthirst (custom id {@code "bloodthirst"}): each level adds
+     * {@value #BLOODTHIRST_PER_LEVEL} to the lifesteal fraction, capped at {@link #BLOODTHIRST_CAP} levels.
+     * Sustain, not damage — the blade drinks a little deeper, still never past the wielder's max health, so
+     * the Aleph stays inside the band. PLACEHOLDER (balance wave).
+     */
+    private double bloodthirstBonus(Player attacker) {
+        int level = Math.min(BLOODTHIRST_CAP,
+                EgoEnchants.level(attacker.getInventory().getItemInMainHand(), "bloodthirst"));
+        return Math.max(0, level) * BLOODTHIRST_PER_LEVEL;
     }
 
     // ---- input ---------------------------------------------------------------------
