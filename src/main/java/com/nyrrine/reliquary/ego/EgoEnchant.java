@@ -72,6 +72,25 @@ public record EgoEnchant(String id, String displayName, int maxLevel, String wea
             "Sword of Tears: -12% to the Converging Impale cooldown per level.");
     public static final EgoEnchant REFRACTED_STEP = reg("refracted_step", "Refracted Step", 3, "fragments_from_somewhere",
             "Fragments: +1s to the refraction return window per level.");
+    // ---- second pass ----
+    public static final EgoEnchant CLOYING_SCENT = reg("cloying_scent", "Cloying Scent", 3, "faint_aroma",
+            "Faint Aroma: +2s to the Weakness duration per level.");
+    public static final EgoEnchant TANGLE = reg("tangle", "Tangle", 3, "screaming_wedge",
+            "Screaming Wedge: +25% to the root duration per level.");
+    public static final EgoEnchant RETURN_VECTOR = reg("return_vector", "Return Vector", 3, "fragments_from_somewhere",
+            "Fragments: -12% to the refraction cooldown per level.");
+    public static final EgoEnchant SWIFT_RETURN = reg("swift_return", "Swift Return", 3, "sword_of_tears",
+            "Sword of Tears: -12% to a sent blade's rest per level.");
+    public static final EgoEnchant STIGMATA = reg("stigmata", "Stigmata", 3, "penitence",
+            "Penitence: bank 15% of damage taken per level (cap 6), released as extra heal on the next mend.");
+    public static final EgoEnchant SECOND_WIND = reg("second_wind", "Second Wind", 3, "life_for_a_daredevil",
+            "Life for a Daredevil: a decapitation grants Regeneration + Absorption per level.");
+    public static final EgoEnchant ASCENSION = reg("ascension", "Ascension", 3, "heaven",
+            "Heaven: the stasis flings a still-living pinned target upward on release, per level.");
+    public static final EgoEnchant CONTEMPT_OF_COURT = reg("contempt_of_court", "Contempt of Court", 3, "justitia",
+            "Justitia: +0.3s to the parry window per level (defensive cadence, not immunity).");
+    public static final EgoEnchant HEARTS_REACH = reg("hearts_reach", "Heart's Reach", 2, "love_and_hate",
+            "Love & Hate: +4 blocks to the Reverse Arcana beam per level.");
 
     /** The enchant with this id, or {@code null} if no such enchant is catalogued. */
     public static EgoEnchant get(String id) {
