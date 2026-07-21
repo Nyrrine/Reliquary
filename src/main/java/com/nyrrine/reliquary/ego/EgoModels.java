@@ -5,6 +5,7 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.inventory.EquipmentSlotGroup;
+import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.List;
@@ -118,11 +119,14 @@ public final class EgoModels {
     private static final NamespacedKey AD_KEY = new NamespacedKey("reliquary", "ego_attack_damage");
     private static final NamespacedKey AS_KEY = new NamespacedKey("reliquary", "ego_attack_speed");
 
-    /** Stamp the custom-model-data string (pack-swappable, bare-safe). */
+    /** Stamp the custom-model-data string (pack-swappable, bare-safe), and make the item unbreakable. */
     public static void stamp(ItemMeta meta, Model model) {
         var cmd = meta.getCustomModelDataComponent();
         cmd.setStrings(List.of(model.cmd()));
         meta.setCustomModelDataComponent(cmd);
+        // No E.G.O item wears down — every one is unbreakable, and the "Unbreakable" tell is hidden.
+        meta.setUnbreakable(true);
+        meta.addItemFlags(ItemFlag.HIDE_UNBREAKABLE);
     }
 
     /**

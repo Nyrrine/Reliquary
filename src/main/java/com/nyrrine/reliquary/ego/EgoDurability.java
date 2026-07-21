@@ -12,11 +12,10 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Mild durability wear for E.G.O weapons.
  *
- * <p>E.G.O weapons are no longer unbreakable — they wear like real gear so they eventually want Mending
- * or Unbreaking III, but never to an annoying extent. A normal melee weapon already loses one point of
- * durability per vanilla swing, so nothing extra is needed there. This helper exists for uses that do
- * <b>not</b> go through a vanilla swing — a ranged shot, a cancelled/custom melee hit, an ability cast —
- * so those weapons still wear down over time.
+ * <p><b>Every E.G.O item is currently unbreakable</b> (set in {@link EgoModels#stamp}), so this wear is
+ * dormant — {@link #wear} short-circuits on an unbreakable item. The helper is kept intact for the day that
+ * default is lifted: it exists for uses that do <b>not</b> go through a vanilla swing — a ranged shot, a
+ * cancelled/custom melee hit, an ability cast — so those weapons would wear down over time if breakable.
  *
  * <p>Vanilla Unbreaking is honoured: each point of wear has a {@code 1/(level+1)} chance to actually
  * land. Creative-mode wielders never wear their gear, and ability-wear never lands the final,
@@ -34,6 +33,7 @@ public final class EgoDurability {
         if (max <= 0) return;                                   // e.g. rod/wand items carry no durability
         ItemMeta meta = item.getItemMeta();
         if (!(meta instanceof Damageable dmg)) return;
+        if (meta.isUnbreakable()) return;                       // unbreakable gear never wears — every E.G.O item is, now
 
         int unbreaking = item.getEnchantmentLevel(Enchantment.UNBREAKING);
         int applied = 0;

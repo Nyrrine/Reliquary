@@ -121,8 +121,8 @@ public final class LampWeapon implements EgoWeapon {
     private static final double SLAM_RANGE = 5.0;
     /** The slam rests this long between uses. */
     private static final long SLAM_COOLDOWN_MS = 3_000L;
-    /** Little damage — the point is the heave, not the wound (half a heart). */
-    private static final double SLAM_DAMAGE = 1.0;
+    /** Modest damage — the point is still the heave, but it bites a little now (bumped in playtest). */
+    private static final double SLAM_DAMAGE = 3.0;
     /** Lots of outward knockback. */
     private static final double SLAM_KB_HORIZONTAL = 1.7;
     private static final double SLAM_KB_UP = 0.55;
@@ -131,14 +131,14 @@ public final class LampWeapon implements EgoWeapon {
     /** Left-click brings the lantern down two-handed: an AoE ground pound around the wielder. */
     private static final double HAMMER_RADIUS      = 3.5;   // everything within this of the impact is caught
     private static final long   HAMMER_COOLDOWN_MS = 4_000L;
-    private static final double HAMMER_DAMAGE      = 4.0;   // ~2 hearts — a real hit, unlike the heave-only slam
+    private static final double HAMMER_DAMAGE      = 8.0;   // ~4 hearts — a real, heavy blow (bumped in playtest)
     private static final double HAMMER_KB_UP       = 0.55;  // pops the caught bodies up and back
 
     // ---- chasing flame tuning (right-click) — PLACEHOLDERS, balance wave --------------
     /** Right-click looses yellow flames that hunt the Gaze-marked body; with none marked they float and die. */
     private static final long   FLAME_COOLDOWN_MS  = 5_000L;
     private static final int    FLAME_COUNT        = 3;     // little flames loosed per cast
-    private static final double FLAME_DAMAGE       = 2.0;   // per flame that reaches the mark (1 heart)
+    private static final double FLAME_DAMAGE       = 4.0;   // per flame that reaches the mark (~2 hearts; bumped in playtest)
     private static final double FLAME_SPEED        = 0.55;  // blocks/tick as it homes
     private static final int    FLAME_MAX_TICKS    = 70;    // it always gives up and fades by here
     private static final double FLAME_HIT_RADIUS   = 1.0;   // contact reach on the mark
@@ -757,12 +757,12 @@ public final class LampWeapon implements EgoWeapon {
                     new EgoLore.Ability("[Left Click] Hammer Slam",
                             "Brings the lantern down for a ground",
                             "pound, catching every foe within 3.5",
-                            "blocks: two hearts and a heave up.",
+                            "blocks: a heavy blow and a heave up.",
                             "4 second cooldown."),
                     new EgoLore.Ability("[Shift + Left-click] Slam",
                             "Drives the lantern onto a single body",
-                            "within 5 blocks: heavy knockback,",
-                            "half a heart. 3 second cooldown, and",
+                            "within 5 blocks: heavy knockback and",
+                            "a solid hit. 3 second cooldown, and",
                             "a miss costs none of it."),
                     new EgoLore.Ability("[Right Click] Chasing Flames",
                             "Looses yellow flames that hunt the",
