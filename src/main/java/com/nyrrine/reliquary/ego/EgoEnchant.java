@@ -25,10 +25,13 @@ public record EgoEnchant(String id, String displayName, int maxLevel, String des
     }
 
     // ---- The catalogue ----
-    // Multishot, reinterpreted by Laetitia as a larger bolt magazine before the forced reload (+1 per level).
-    public static final EgoEnchant MULTISHOT = reg("multishot", "Multishot", 3,
-            "Laetitia: +1 bolt in the magazine per level before a reload.");
-    // Constellation, Our Galaxy's own reinterpretation of Multishot: +1 comet in the pool per level before recharge.
+    // Only CUSTOM enchants live here — invented ones with no vanilla equivalent, applied with /reliquary enchant.
+    // A weapon that reinterprets a real vanilla enchant (a crossbow's Multishot, a sword's Sharpness) reads it
+    // straight from the item's enchant map instead, so it can be applied at an anvil in normal play — see
+    // LaetitiaWeapon and BeakWeapon.
+    //
+    // Constellation is Our Galaxy's take on Multishot, but a Breeze rod can't hold vanilla Multishot, so it is a
+    // custom enchant: +1 comet in the pool per level before the recharge.
     public static final EgoEnchant CONSTELLATION = reg("constellation", "Constellation", 2,
             "Our Galaxy: +1 comet in the pool per level before a recharge.");
 

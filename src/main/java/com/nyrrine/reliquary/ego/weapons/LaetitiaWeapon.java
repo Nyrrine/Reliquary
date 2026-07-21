@@ -4,7 +4,6 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
-import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -16,6 +15,7 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -181,11 +181,14 @@ public final class LaetitiaWeapon implements EgoWeapon {
 
     /**
      * The pool size for the doll held right now: the base magazine plus one bolt per Multishot level (capped).
-     * Multishot is reinterpreted here as "a bigger magazine before the reload", exactly as the enchant doc asks.
+     * Multishot is the real vanilla enchant — the doll is a crossbow, so it takes Multishot at an anvil like any
+     * other, and reinterprets it as "a bigger magazine before the reload" (vanilla Multishot caps at 1, so this
+     * is +1 in practice; the cap leaves headroom if a level ever exceeds that). This mirrors how {@code Beak}
+     * reads its own vanilla Multishot rather than inventing a private enchant.
      */
     private int maxCharges(Player player) {
         int extra = Math.min(MULTISHOT_CAP,
-                EgoEnchants.level(player.getInventory().getItemInMainHand(), "multishot"));
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.MULTISHOT));
         return MAX_CHARGES + Math.max(0, extra);
     }
 
