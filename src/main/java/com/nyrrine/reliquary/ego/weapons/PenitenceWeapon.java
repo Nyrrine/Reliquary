@@ -125,11 +125,10 @@ public final class PenitenceWeapon implements Weapon {
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
         // An ordinary swing only ever grazes — cap it. The exception is a committed mace fall-slam: it
         // still lands only the cap, but half the target's armour is ignored, so the slam is worth throwing
-        // without turning Penitence into a mace. The slam is routed through the framework's pierce helper
-        // (i-frames cleared, fenced, zero-knockback), and its vanilla blow is cancelled so the two don't stack.
+        // without turning Penitence into a mace. The slam scales the cap through the framework's pierceInput
+        // on the event, keeping the mace's fall-slam knockback and sweep (no cancel, no re-deal).
         if (attacker.getFallDistance() > FALL_SLAM_MIN_FALL) {
-            event.setCancelled(true);
-            plugin.weapons().pierceDamage(victim, MACE_DAMAGE_CAP, FALL_SLAM_ARMOR_PIERCE, attacker);
+            event.setDamage(plugin.weapons().pierceInput(victim, MACE_DAMAGE_CAP, FALL_SLAM_ARMOR_PIERCE));
         } else {
             event.setDamage(Math.min(event.getDamage(), MACE_DAMAGE_CAP));
         }

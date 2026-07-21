@@ -64,11 +64,11 @@ import java.util.concurrent.ThreadLocalRandom;
  * best-effort root: per-tick velocity zero + Slowness 6 + the same heavy VFX. A determined player can
  * still nudge themselves, but only barely.
  *
- * <p>Damage bonuses that keep armour in play are applied via {@code event.setDamage(...)}; the armour-pierce
- * of <b>Held in Heaven</b> instead replaces the vanilla blow with the framework's fenced {@code pierceDamage}
- * (never a raw {@code victim.damage()}, which would re-enter this dispatch). Per-victim stasis and eye-mark
- * state is tracked so overlapping procs don't stack tasks or leak a mob's AI-off flag; all of it is cleared
- * on quit and on disable.
+ * <p>Damage bonuses are applied via {@code event.setDamage(...)} on the vanilla swing; the armour-pierce of
+ * <b>Held in Heaven</b> scales that same value through the framework's {@code pierceInput} so the blow ignores
+ * part of the target's armour while keeping its knockback, sweep, on-hit enchant procs and durability. Per-
+ * victim stasis and eye-mark state is tracked so overlapping procs don't stack tasks or leak a mob's AI-off
+ * flag; all of it is cleared on quit and on disable.
  *
  * <p>Right-click calls the second power: it summons the <b>Burrowing Heaven</b> itself as a watching
  * eye-tree ({@link EyeTree}) rooted a few blocks ahead. The tree throws homing eyes ({@link HeavenBolt}) at
@@ -114,7 +114,7 @@ public final class HeavenWeapon implements Weapon {
 
     // ---- skill tuning: Held in Heaven + The Unblinking Eye ------------------------
     // Balance-approved shape (§5-A / §5-C, 2026-07-21); magnitudes flagged for the balance wave.
-    /** Held in Heaven: fraction of armour a hit on a pinned or looking body ignores (via pierceDamage). */
+    /** Held in Heaven: fraction of armour a hit on a pinned or looking body ignores (via pierceInput). */
     private static final double HELD_PIERCE      = 0.40;
     /** The Unblinking Eye: extra Heaven damage a hit on an already eye-marked body deals (+15%). */
     private static final double UNBLINKING_MULT  = 1.15;
@@ -204,8 +204,8 @@ public final class HeavenWeapon implements Weapon {
      * A landed blow, carrying Heaven's melee passives:
      * <ul>
      *   <li><b>Eye Contact</b> — a hit on a victim facing the attacker bites +10% harder.</li>
-     *   <li><b>Held in Heaven</b> — a hit on a pinned or looking body ignores ~40% of its armour, dealt as a
-     *       fenced, i-frame-clearing {@code pierceDamage} blow in place of the vanilla one.</li>
+     *   <li><b>Held in Heaven</b> — a hit on a pinned or looking body ignores ~40% of its armour, the vanilla
+     *       swing scaled through {@code pierceInput} so it keeps its knockback and enchant procs.</li>
      *   <li><b>The Unblinking Eye</b> — every hit eye-marks the body for ~6s; a marked body cannot turn
      *       invisible and takes +15% from Heaven.</li>
      * </ul>
@@ -227,9 +227,9 @@ public final class HeavenWeapon implements Weapon {
         if (looking) dmg *= DAMAGE_MULT;     // +10% for meeting the eye
 
         if (looking || pinned) {
-            // Held in Heaven: replace the vanilla blow with an armour-piercing one (fenced, i-frames cleared).
-            event.setCancelled(true);
-            plugin.weapons().pierceDamage(victim, dmg, HELD_PIERCE, attacker);
+            // Held in Heaven: scale the swing so it ignores ~40% of the target's armour, keeping the vanilla
+            // blow's knockback, sweep, on-hit enchant procs and durability (no cancel, no re-deal).
+            event.setDamage(plugin.weapons().pierceInput(victim, dmg, HELD_PIERCE));
         } else if (marked) {
             event.setDamage(dmg); // not pinned or looking: just the marked bonus, armour applies as normal
         }

@@ -330,11 +330,12 @@ public final class LifeForADaredevilWeapon implements Weapon {
     // ---- gimmick: a decapitation execute on a faltering foe -------------------------
 
     /**
-     * Melee hit landed. The base swing is re-dealt through {@code pierceDamage} so it ignores part of the
-     * target's armour ({@link #DAREDEVIL_ARMOR_IGNORE}). If the struck target was already below its HP
-     * threshold before the swing and within {@link #EXECUTE_RANGE}, the wielder then blinks behind it and
-     * takes the head with an armour-bypassing finishing blow. Both re-enter this method (each fires its own
-     * damage event); the {@link #executing} fence and pierceDamage's own fence make those calls no-ops.
+     * Melee hit landed. The base swing's damage is scaled through {@code pierceInput} on the event so it
+     * ignores part of the target's armour ({@link #DAREDEVIL_ARMOR_IGNORE}) while keeping its knockback, sweep
+     * and enchant procs. If the struck target was already below its HP threshold before the swing and within
+     * {@link #EXECUTE_RANGE}, the wielder then blinks behind it and takes the head with an armour-bypassing
+     * finishing blow. That finisher re-enters this method (its own damage event); the {@link #executing} fence
+     * makes the call a no-op.
      */
     @Override
     public void onHit(Player attacker, LivingEntity victim, EntityDamageByEntityEvent event) {
@@ -354,12 +355,9 @@ public final class LifeForADaredevilWeapon implements Weapon {
         }
 
         // The base swing bites through ~45% of the target's armour — the reach the wielder's own two-heart
-        // burden is paid for. pierceDamage re-deals the blow fenced (never recursing) with the armour ignored.
-        // NOTE it re-deals rather than editing the event, so the swing's vanilla knockback, sweep, on-hit
-        // enchant procs and durability wear do not carry — flagged for review.
-        double swingDmg = event.getDamage();
-        event.setCancelled(true);
-        plugin.weapons().pierceDamage(victim, swingDmg, DAREDEVIL_ARMOR_IGNORE, attacker);
+        // burden is paid for. Scaling the event through pierceInput (not re-dealing) keeps the swing's vanilla
+        // knockback, sweep, on-hit enchant procs and durability wear.
+        event.setDamage(plugin.weapons().pierceInput(victim, event.getDamage(), DAREDEVIL_ARMOR_IGNORE));
 
         if (faltering) decapitate(attacker, victim);          // already low before the swing — take the head
     }
