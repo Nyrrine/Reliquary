@@ -5,6 +5,7 @@ import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import com.nyrrine.reliquary.ego.SlashVfx;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
@@ -15,7 +16,11 @@ import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.entity.BlockDisplay;
+import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageEvent;
@@ -27,7 +32,10 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.RayTraceResult;
+import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -147,6 +155,34 @@ public final class CensoredWeapon implements EgoWeapon {
     private static final int    COGNITION_PERIOD   = 10;      // a pulse every 0.5s
     private static final int    COGNITION_TICKS    = 60;      // for ~3s
 
+    // ---- VFX tuning (the show) ----------------------------------------------------
+    /** The maw's lunge: ticks for the display jaw to shoot out to full reach before it snaps. */
+    private static final int    MAW_LUNGE_TICKS = 5;
+    private static final double MAW_JAW_SCALE   = 0.75;
+    /** Feast bones: flung as ItemDisplays this often, this many at a time, tumbling for this long. */
+    private static final int    BONE_EVERY      = 5;
+    private static final int    BONE_BURST      = 2;
+    private static final int    BONE_LIFE       = 30;
+    private static final double BONE_SPEED      = 0.5;
+    private static final double BONE_LOFT       = 0.5;
+    private static final double BONE_GRAVITY    = 0.045;
+    private static final float  BONE_SPIN       = 0.5f;
+    private static final float  BONE_SCALE      = 0.5f;
+    /** The red CENSORED square (BlockDisplay): scale-up ticks, hold ticks, full width, then shatter. */
+    private static final int    SQUARE_ENGULF   = 8;
+    private static final int    SQUARE_HOLD     = 12;
+    private static final double SQUARE_SIZE     = 3.4;
+    private static final int    SHARD_COUNT     = 16;
+    private static final int    SHARD_LIFE      = 26;
+    private static final double SHARD_SPEED     = 0.6;
+    private static final double SHARD_GRAVITY   = 0.05;
+    private static final float  SHARD_SPIN      = 0.6f;
+    private static final float  SHARD_SCALE     = 0.35f;
+    /** The grapple tear: ticks the wall of particles sweeps down the line. */
+    private static final int    TEAR_TICKS      = 6;
+    /** Scoreboard tag on every display this weapon spawns — the belt-and-braces orphan-reap key. */
+    private static final String CENSORED_TAG    = "reliquary_censored_vfx";
+
     public CensoredWeapon(Reliquary plugin) {
         this.plugin = plugin;
         this.key = new NamespacedKey(plugin, "censored");
@@ -207,11 +243,12 @@ public final class CensoredWeapon implements EgoWeapon {
 
         Location eye = player.getEyeLocation();
         Vector dir = eye.getDirection().normalize();
-        drawMawExtend(eye, dir);
+        // The maw itself: a display jaw that shoots out along the aim and snaps — the lunge, not a puff.
+        track(new MawLunge(eye, dir)).runTaskTimer(plugin, 0L, 1L);
 
         LivingEntity target = mawTarget(player, eye, dir);
         if (target != null) {
-            biteTwice(player, target);
+            biteTwice(player, target, dir);
         }
 
         // 10% per swing: the maw acts on its own, all at once — the grapple, free and instant.
@@ -233,17 +270,18 @@ public final class CensoredWeapon implements EgoWeapon {
      * #PIERCE_FRACTION} of armour, and restores velocity so the maw holds rather than knocks back. Each bite
      * also leaves the body starving.
      */
-    private void biteTwice(Player player, LivingEntity target) {
+    private void biteTwice(Player player, LivingEntity target, Vector dir) {
         for (int i = 0; i < 2; i++) {
             plugin.weapons().pierceDamage(target, MAW_BITE_DAMAGE, PIERCE_FRACTION, player);
             starve(target);
         }
         Location at = target.getLocation().add(0, target.getHeight() * 0.5, 0);
         World world = target.getWorld();
-        world.spawnParticle(Particle.DUST, at, 10, 0.3, 0.35, 0.3, 0, BLOOD_DUST);
-        world.spawnParticle(Particle.ITEM, at, 4, 0.25, 0.3, 0.25, 0.02, BONE_ITEM);
+        world.spawnParticle(Particle.DUST, at, 14, 0.3, 0.35, 0.3, 0, BLOOD_DUST);
+        world.spawnParticle(Particle.ITEM, at, 6, 0.25, 0.3, 0.25, 0.03, BONE_ITEM);
         world.playSound(at, Sound.ENTITY_RAVAGER_ATTACK, 0.7f, 0.6f);
         world.playSound(at, Sound.BLOCK_HONEY_BLOCK_BREAK, 0.6f, 0.5f);
+        slashCrescent(at, dir); // the slash that lands after the maw snaps
     }
 
     /** The saturation drain: push exhaustion onto a struck player and lay a short Hunger on any body. */
@@ -328,7 +366,7 @@ public final class CensoredWeapon implements EgoWeapon {
         Vector dir = eye.getDirection().normalize();
         World world = owner.getWorld();
 
-        drawGrappleTear(eye, dir);
+        tearBeam(eye, dir); // a wall of dark-and-red that sweeps down the whole line
         world.playSound(eye, Sound.ENTITY_WARDEN_SONIC_BOOM, 0.6f, 0.6f);
         world.playSound(eye, Sound.ENTITY_RAVAGER_ROAR, 0.7f, 0.5f);
 
@@ -345,9 +383,7 @@ public final class CensoredWeapon implements EgoWeapon {
                 plugin.weapons().pierceDamage(le, GRAPPLE_DAMAGE, PIERCE_FRACTION, owner);
             }
             starve(le);
-            Location at = le.getLocation().add(0, le.getHeight() * 0.5, 0);
-            world.spawnParticle(Particle.DUST, at, 14, 0.3, 0.4, 0.3, 0, BLOOD_DUST);
-            world.spawnParticle(Particle.ITEM, at, 6, 0.3, 0.35, 0.3, 0.03, BONE_ITEM);
+            shockwave(le.getLocation().add(0, le.getHeight() * 0.5, 0)); // a burst where the tear catches a body
         }
     }
 
@@ -428,17 +464,17 @@ public final class CensoredWeapon implements EgoWeapon {
             }
 
             gruesomeVfx(body);
+            if (ticks % BONE_EVERY == 0) flingBones(body, BONE_BURST); // real bones tumbling out of the corpse
             macabreSfx(body, ticks);
             if (ticks % HEAL_EVERY == 0) heal(owner, HEAL_CHUNK);
             ticks++;
         }
 
-        /** The red square engulfs the corpse and bursts: the payoff heal, and the lingering filter. */
+        /** The red censored square engulfs the corpse, holds, then bursts: the payoff heal, and the filter. */
         private void burst(Player owner) {
             World world = body.getWorld();
-            redSquare(body, 2.0);
-            world.spawnParticle(Particle.DUST, body.clone().add(0, 1.0, 0), 60, 1.2, 1.2, 1.2, 0, CENSOR_DUST);
-            world.spawnParticle(Particle.ITEM, body.clone().add(0, 1.0, 0), 24, 0.9, 0.9, 0.9, 0.06, BONE_ITEM);
+            // The animated square owns the engulf/hold/shatter now; here we punctuate it and pay it off.
+            track(new CensoredSquare(body.clone())).runTaskTimer(plugin, 0L, 1L);
             world.playSound(body, Sound.ENTITY_WITHER_SPAWN, 0.7f, 0.4f);
             world.playSound(body, Sound.ENTITY_ENDERMAN_SCREAM, 0.8f, 0.4f);
             heal(owner, BURST_FINAL_HEAL);
@@ -511,18 +547,19 @@ public final class CensoredWeapon implements EgoWeapon {
      */
     private void lookScan(Player wielder) {
         long now = System.currentTimeMillis();
+        Set<UUID> stillLooking = new HashSet<>();
         for (Entity e : wielder.getNearbyEntities(LOOK_RANGE, LOOK_RANGE, LOOK_RANGE)) {
             if (!(e instanceof LivingEntity looker) || looker.isDead() || looker.equals(wielder)) continue;
+            if (!isLookingAt(looker, wielder)) continue;
             UUID lid = looker.getUniqueId();
-            if (isLookingAt(looker, wielder)) {
-                long since = lookingSince.computeIfAbsent(lid, k -> now);
-                if (now - since >= LOOK_SICKEN_MS) {
-                    looker.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, NAUSEA_TICKS, 0, false, true, true));
-                }
-            } else {
-                lookingSince.remove(lid);
+            stillLooking.add(lid);
+            long since = lookingSince.computeIfAbsent(lid, k -> now);
+            if (now - since >= LOOK_SICKEN_MS) {
+                looker.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, NAUSEA_TICKS, 0, false, true, true));
             }
         }
+        // Prune anyone who looked away, died, or left range this scan — the leak the review caught.
+        lookingSince.keySet().retainAll(stillLooking);
     }
 
     /** True if {@code looker} is facing {@code wielder} head-on past {@link #LOOK_THRESHOLD}. */
@@ -549,14 +586,21 @@ public final class CensoredWeapon implements EgoWeapon {
 
     // ---- presentation -------------------------------------------------------------
 
-    /** The maw lunging out along the aim: a line of blood-dust that gets denser toward the far end. */
-    private void drawMawExtend(Location eye, Vector dir) {
-        World world = eye.getWorld();
-        for (double d = 0.6; d <= MAW_REACH; d += 0.5) {
-            Location p = eye.clone().add(dir.clone().multiply(d));
-            world.spawnParticle(Particle.DUST, p, 1, 0.05, 0.05, 0.05, 0, BLOOD_DUST);
-            if (d > MAW_REACH * 0.6) world.spawnParticle(Particle.DUST, p, 1, 0.12, 0.12, 0.12, 0, CENSOR_DUST);
-        }
+    /**
+     * The slash that lands as the maw snaps shut: Yae's shared crescent ({@link SlashVfx}), tuned for a bite —
+     * a wide fan swept diagonally, a blood trail into a bright edge with sparks flung off it. Cosmetic; it
+     * reaps its own geometry. (If the maw ever wants a thrust-stab shape instead, that is a SlashVfx variant.)
+     */
+    private void slashCrescent(Location centre, Vector dir) {
+        SlashVfx.slash(plugin, centre, dir)
+                .arcSpan(140)
+                .reach(2.6)
+                .colours(BLOOD_RGB, EDGE_RGB)
+                .thickness(1.3f)
+                .duration(4)
+                .tilt(20)
+                .sparks(true)
+                .play();
     }
 
     /** The grapple gathering: red motes drawn inward at the wielder's chest each charge tick. */
@@ -572,25 +616,41 @@ public final class CensoredWeapon implements EgoWeapon {
         world.playSound(owner.getLocation(), Sound.BLOCK_SCULK_CHARGE, 0.4f, 0.5f);
     }
 
-    /** The grapple's tear: a broad red-and-blood lance along the line. */
-    private void drawGrappleTear(Location eye, Vector dir) {
-        World world = eye.getWorld();
-        for (double d = 0.5; d <= GRAPPLE_RANGE; d += 0.5) {
-            Location p = eye.clone().add(dir.clone().multiply(d));
-            world.spawnParticle(Particle.DUST, p, 2, 0.25, 0.25, 0.25, 0, CENSOR_DUST);
-            world.spawnParticle(Particle.DUST, p, 1, 0.15, 0.15, 0.15, 0, BLOOD_DUST);
+    /** Kick off the grapple's tear: a wall of dark-and-red that sweeps down the whole line over a few ticks. */
+    private void tearBeam(Location eye, Vector dir) {
+        track(new GrappleTear(eye.clone(), dir.clone())).runTaskTimer(plugin, 0L, 1L);
+    }
+
+    /** A burst where the tear catches a body: an explosion flash, a sweep glyph, and a low boom. */
+    private void shockwave(Location at) {
+        World world = at.getWorld();
+        world.spawnParticle(Particle.DUST, at, 24, 0.25, 0.3, 0.25, 0, CENSOR_DUST);
+        world.spawnParticle(Particle.EXPLOSION, at, 1, 0, 0, 0, 0);
+        world.spawnParticle(Particle.SWEEP_ATTACK, at, 3, 0.3, 0.3, 0.3, 0);
+        world.playSound(at, Sound.ENTITY_WARDEN_SONIC_BOOM, 0.4f, 0.8f);
+    }
+
+    /** Fling {@code n} real bones out of the corpse as tumbling, falling ItemDisplays. */
+    private void flingBones(Location body, int n) {
+        Location from = body.clone().add(0, 0.9, 0);
+        for (int i = 0; i < n; i++) {
+            double a = ThreadLocalRandom.current().nextDouble() * Math.PI * 2;
+            double s = BONE_SPEED * (0.6 + ThreadLocalRandom.current().nextDouble() * 0.8);
+            Vector v = new Vector(Math.cos(a) * s, BONE_LOFT + ThreadLocalRandom.current().nextDouble() * 0.25, Math.sin(a) * s);
+            track(new FlungBone(from.clone(), v)).runTaskTimer(plugin, 1L, 1L);
         }
     }
 
-    /** Per-tick gruesome show: blood pouring off the corpse and bones flung out of it. */
+    /** Per-tick gruesome show: a thick pour of blood off the corpse, dripping and pooling. */
     private void gruesomeVfx(Location body) {
         World world = body.getWorld();
         Location core = body.clone().add(0, 1.0, 0);
-        world.spawnParticle(Particle.DUST, core, 12, 0.4, 0.5, 0.4, 0, BLOOD_DUST);
-        world.spawnParticle(Particle.FALLING_DUST, core, 6, 0.5, 0.2, 0.5, 0, BLOOD_BLOCK);
-        world.spawnParticle(Particle.ITEM, core, 5, 0.35, 0.4, 0.35, 0.08, BONE_ITEM);
-        if (ThreadLocalRandom.current().nextInt(3) == 0) {
-            world.spawnParticle(Particle.DUST, core, 8, 0.6, 0.4, 0.6, 0, CENSOR_DUST);
+        world.spawnParticle(Particle.DUST, core, 26, 0.45, 0.55, 0.45, 0, BLOOD_DUST);
+        world.spawnParticle(Particle.FALLING_DUST, core, 14, 0.55, 0.35, 0.55, 0, BLOOD_BLOCK);
+        world.spawnParticle(Particle.DUST, body.clone().add(0, 0.1, 0), 10, 0.6, 0.02, 0.6, 0, BLOOD_DUST); // the pool
+        world.spawnParticle(Particle.BLOCK, core, 6, 0.4, 0.4, 0.4, 0, BLOOD_BLOCK);
+        if (ThreadLocalRandom.current().nextInt(2) == 0) {
+            world.spawnParticle(Particle.DUST, core, 10, 0.65, 0.5, 0.65, 0, CENSOR_DUST);
         }
     }
 
@@ -604,14 +664,272 @@ public final class CensoredWeapon implements EgoWeapon {
         if (t % 17 == 0) world.playSound(at, Sound.ENTITY_GHAST_HURT, 0.4f, 0.4f);
     }
 
-    /** The red censored square: a flat filled quad of red motes hanging over a point. */
+    /** The red censored square: a flat filled quad of red motes hanging over a point (the lingering filter). */
     private void redSquare(Location centre, double size) {
         World world = centre.getWorld();
-        Location c = centre.clone().add(0, 1.0, 0);
-        double step = size / 4.0;
+        Location c = centre.clone().add(0, 0.15, 0);
+        double step = size / 5.0;
         for (double x = -size; x <= size; x += step) {
             for (double z = -size; z <= size; z += step) {
                 world.spawnParticle(Particle.DUST, c.clone().add(x, 0, z), 1, 0, 0, 0, 0, CENSOR_DUST);
+            }
+        }
+    }
+
+    // ---- display-entity choreography ----------------------------------------------
+
+    /**
+     * The maw's lunge as real geometry: a dark BlockDisplay "jaw" that shoots out along the aim, yawning
+     * wider as it flies and trailing a chain of void-dark motes behind it, then snaps shut in a burst at full
+     * reach. Captured origin/aim — a lunge is over in a handful of ticks, so it need not follow the wielder.
+     */
+    private final class MawLunge extends BukkitRunnable {
+        private final Location eye;
+        private final Vector dir;
+        private final BlockDisplay jaw;
+        private int ticks = 0;
+        private float angle = 0f;
+
+        MawLunge(Location eye, Vector dir) {
+            this.eye = eye.clone();
+            this.dir = dir.clone();
+            float s = (float) MAW_JAW_SCALE;
+            this.jaw = eye.getWorld().spawn(eye, BlockDisplay.class, d -> {
+                d.setBlock(JAW_BLOCK);
+                d.setTransformation(new Transformation(
+                        new Vector3f(-s / 2, -s / 2, -s / 2), new Quaternionf(),
+                        new Vector3f(s, s * 1.6f, s), new Quaternionf()));
+                d.setBrightness(new Display.Brightness(3, 7));
+                d.setInterpolationDuration(1);
+                d.setInterpolationDelay(0);
+                d.setPersistent(false);
+                d.addScoreboardTag(CENSORED_TAG);
+            });
+        }
+
+        @Override
+        public void run() {
+            if (!jaw.isValid() || ticks > MAW_LUNGE_TICKS) { snap(); return; }
+            double frac = (double) ticks / MAW_LUNGE_TICKS;
+            double reach = 0.6 + frac * (MAW_REACH - 0.6);
+            Location p = eye.clone().add(dir.clone().multiply(reach));
+            jaw.teleport(p);
+
+            World world = eye.getWorld();
+            for (double t = 0.4; t <= reach; t += 0.5) { // the dark tendril trailing from the wielder
+                world.spawnParticle(Particle.DUST, eye.clone().add(dir.clone().multiply(t)),
+                        1, 0.06, 0.06, 0.06, 0, VOID_DUST);
+            }
+
+            angle += 0.25f;
+            float open = 1.6f + (float) frac * 1.3f;       // the jaw yawns wider as it flies
+            float s = (float) MAW_JAW_SCALE;
+            jaw.setTransformation(new Transformation(
+                    new Vector3f(-s / 2, -s / 2, -s / 2), new Quaternionf().rotateXYZ(0, angle, 0),
+                    new Vector3f(s, s * open, s), new Quaternionf()));
+            ticks++;
+        }
+
+        private void snap() {
+            if (jaw.isValid()) {
+                Location at = jaw.getLocation();
+                World world = at.getWorld();
+                world.spawnParticle(Particle.DUST, at, 18, 0.3, 0.3, 0.3, 0, VOID_DUST);
+                world.spawnParticle(Particle.DUST, at, 12, 0.25, 0.25, 0.25, 0, CENSOR_DUST);
+                world.playSound(at, Sound.ENTITY_RAVAGER_ATTACK, 0.8f, 0.5f);
+                jaw.remove();
+            }
+            activeTasks.remove(this);
+            cancel();
+        }
+    }
+
+    /** A single flung bone: an ItemDisplay tumbling on a gravity arc, trailing blood, reaped on land/timeout. */
+    private final class FlungBone extends BukkitRunnable {
+        private final ItemDisplay bone;
+        private final Vector vel;
+        private int life = BONE_LIFE;
+        private float angle = 0f;
+
+        FlungBone(Location from, Vector vel) {
+            this.vel = vel;
+            float s = BONE_SCALE;
+            this.bone = from.getWorld().spawn(from, ItemDisplay.class, d -> {
+                d.setItemStack(BONE_ITEM);
+                d.setTransformation(new Transformation(
+                        new Vector3f(), new Quaternionf(), new Vector3f(s, s, s), new Quaternionf()));
+                d.setBrightness(new Display.Brightness(8, 12));
+                d.setInterpolationDuration(1);
+                d.setInterpolationDelay(0);
+                d.setPersistent(false);
+                d.addScoreboardTag(CENSORED_TAG);
+            });
+        }
+
+        @Override
+        public void run() {
+            if (!bone.isValid() || --life < 0) { done(); return; }
+            vel.setY(vel.getY() - BONE_GRAVITY);
+            Location next = bone.getLocation().add(vel);
+            if (next.getBlock().getType().isSolid()) { done(); return; }
+            bone.teleport(next);
+            angle += BONE_SPIN;
+            float s = BONE_SCALE;
+            bone.setTransformation(new Transformation(
+                    new Vector3f(), new Quaternionf().rotateXYZ(angle, angle * 0.6f, angle * 0.3f),
+                    new Vector3f(s, s, s), new Quaternionf()));
+            next.getWorld().spawnParticle(Particle.DUST, next, 1, 0.03, 0.03, 0.03, 0, BLOOD_DUST);
+        }
+
+        private void done() {
+            if (bone.isValid()) bone.remove();
+            activeTasks.remove(this);
+            cancel();
+        }
+    }
+
+    /**
+     * The big red CENSORED square as a BlockDisplay: it engulfs the corpse (scaling up from nothing via the
+     * display's own interpolation), holds while the feed reads, then BURSTS into flung shards and a cloud of
+     * red block-crack. Real geometry, not a particle quad.
+     */
+    private final class CensoredSquare extends BukkitRunnable {
+        private final Location centre;
+        private final BlockDisplay square;
+        private int ticks = 0;
+
+        CensoredSquare(Location centre) {
+            this.centre = centre.clone().add(0, 1.0, 0);
+            float f = (float) SQUARE_SIZE;
+            this.square = this.centre.getWorld().spawn(this.centre, BlockDisplay.class, d -> {
+                d.setBlock(SQUARE_BLOCK);
+                d.setTransformation(new Transformation(          // start as a point...
+                        new Vector3f(-f / 2, -0.1f, -f / 2), new Quaternionf(),
+                        new Vector3f(0.01f, 0.01f, 0.01f), new Quaternionf()));
+                d.setBrightness(new Display.Brightness(13, 15));
+                d.setInterpolationDuration(SQUARE_ENGULF);
+                d.setInterpolationDelay(0);
+                d.setPersistent(false);
+                d.addScoreboardTag(CENSORED_TAG);
+            });
+            // ...then let the display interpolate up to the full flat slab: the engulf.
+            square.setTransformation(new Transformation(
+                    new Vector3f(-f / 2, -0.1f, -f / 2), new Quaternionf(),
+                    new Vector3f(f, 0.28f, f), new Quaternionf()));
+        }
+
+        @Override
+        public void run() {
+            if (!square.isValid()) { activeTasks.remove(this); cancel(); return; }
+            ticks++;
+            if (ticks >= SQUARE_ENGULF + SQUARE_HOLD) { burstSquare(); return; }
+            if (ticks > SQUARE_ENGULF && ticks % 3 == 0) { // a held pulse at the edges
+                centre.getWorld().spawnParticle(Particle.DUST, centre,
+                        10, SQUARE_SIZE * 0.5, 0.12, SQUARE_SIZE * 0.5, 0, CENSOR_DUST);
+            }
+        }
+
+        private void burstSquare() {
+            World world = centre.getWorld();
+            world.spawnParticle(Particle.DUST, centre, 90, SQUARE_SIZE * 0.5, 0.6, SQUARE_SIZE * 0.5, 0, CENSOR_DUST);
+            world.spawnParticle(Particle.BLOCK, centre, 70, SQUARE_SIZE * 0.5, 0.4, SQUARE_SIZE * 0.5, 0, SQUARE_BLOCK);
+            world.playSound(centre, Sound.ENTITY_WITHER_BREAK_BLOCK, 0.8f, 0.5f);
+            for (int i = 0; i < SHARD_COUNT; i++) {
+                double a = (Math.PI * 2 * i) / SHARD_COUNT;
+                Vector v = new Vector(Math.cos(a) * SHARD_SPEED,
+                        0.3 + ThreadLocalRandom.current().nextDouble() * 0.3, Math.sin(a) * SHARD_SPEED);
+                track(new FlungShard(centre.clone(), v)).runTaskTimer(plugin, 1L, 1L);
+            }
+            if (square.isValid()) square.remove();
+            activeTasks.remove(this);
+            cancel();
+        }
+    }
+
+    /** A shard of the shattered square: a small red BlockDisplay flung on a gravity arc, reaped on land/timeout. */
+    private final class FlungShard extends BukkitRunnable {
+        private final BlockDisplay shard;
+        private final Vector vel;
+        private int life = SHARD_LIFE;
+        private float angle = 0f;
+
+        FlungShard(Location from, Vector vel) {
+            this.vel = vel;
+            float s = SHARD_SCALE;
+            this.shard = from.getWorld().spawn(from, BlockDisplay.class, d -> {
+                d.setBlock(SQUARE_BLOCK);
+                d.setTransformation(new Transformation(
+                        new Vector3f(-s / 2, -s / 2, -s / 2), new Quaternionf(),
+                        new Vector3f(s, s, s), new Quaternionf()));
+                d.setBrightness(new Display.Brightness(13, 15));
+                d.setInterpolationDuration(1);
+                d.setInterpolationDelay(0);
+                d.setPersistent(false);
+                d.addScoreboardTag(CENSORED_TAG);
+            });
+        }
+
+        @Override
+        public void run() {
+            if (!shard.isValid() || --life < 0) { done(); return; }
+            vel.setY(vel.getY() - SHARD_GRAVITY);
+            Location next = shard.getLocation().add(vel);
+            if (next.getBlock().getType().isSolid()) { done(); return; }
+            shard.teleport(next);
+            angle += SHARD_SPIN;
+            float s = SHARD_SCALE;
+            shard.setTransformation(new Transformation(
+                    new Vector3f(-s / 2, -s / 2, -s / 2), new Quaternionf().rotateXYZ(angle, angle * 0.5f, angle * 0.7f),
+                    new Vector3f(s, s, s), new Quaternionf()));
+        }
+
+        private void done() {
+            if (shard.isValid()) shard.remove();
+            activeTasks.remove(this);
+            cancel();
+        }
+    }
+
+    /** The grapple tear: a wall of dark-and-red motes that sweeps down the line one segment a tick. */
+    private final class GrappleTear extends BukkitRunnable {
+        private final Location eye;
+        private final Vector dir;
+        private final Vector right;
+        private int ticks = 0;
+
+        GrappleTear(Location eye, Vector dir) {
+            this.eye = eye;
+            this.dir = dir;
+            Vector r = dir.clone().crossProduct(new Vector(0, 1, 0));
+            this.right = r.lengthSquared() < 1.0e-6 ? new Vector(1, 0, 0) : r.normalize();
+        }
+
+        @Override
+        public void run() {
+            if (ticks >= TEAR_TICKS) { activeTasks.remove(this); cancel(); return; }
+            World world = eye.getWorld();
+            double from = (double) ticks / TEAR_TICKS * GRAPPLE_RANGE;
+            double to = (double) (ticks + 1) / TEAR_TICKS * GRAPPLE_RANGE;
+            for (double d = from; d < to; d += 0.4) {
+                Location c = eye.clone().add(dir.clone().multiply(d));
+                for (double w = -GRAPPLE_RADIUS; w <= GRAPPLE_RADIUS; w += 0.5) {
+                    Location p = c.clone().add(right.clone().multiply(w));
+                    world.spawnParticle(Particle.DUST, p, 1, 0.05, 0.35, 0.05, 0,
+                            ThreadLocalRandom.current().nextBoolean() ? CENSOR_DUST : VOID_DUST);
+                }
+            }
+            ticks++;
+        }
+    }
+
+    /** Belt-and-braces: reap any display carrying the CENSORED tag across all loaded worlds. */
+    private void sweepOrphans() {
+        for (World w : plugin.getServer().getWorlds()) {
+            for (Entity e : w.getEntitiesByClass(BlockDisplay.class)) {
+                if (e.getScoreboardTags().contains(CENSORED_TAG)) e.remove();
+            }
+            for (Entity e : w.getEntitiesByClass(ItemDisplay.class)) {
+                if (e.getScoreboardTags().contains(CENSORED_TAG)) e.remove();
             }
         }
     }
@@ -631,8 +949,10 @@ public final class CensoredWeapon implements EgoWeapon {
 
     @Override
     public void onDisable() {
+        // Cancelling a flight task does not remove its display, so sweep every tagged display afterwards.
         for (BukkitRunnable t : new ArrayList<>(activeTasks)) t.cancel();
         activeTasks.clear();
+        sweepOrphans();
         lastMaw.clear();
         grappleReadyAt.clear();
         charging.clear();
@@ -649,12 +969,17 @@ public final class CensoredWeapon implements EgoWeapon {
     /** Secondary — the grey of a redaction bar. The Abnormality title line. */
     private static final TextColor REDACT     = TextColor.color(0x808080);
 
-    private static final Color BLOOD_RGB  = Color.fromRGB(0x8A, 0x03, 0x03); // pouring blood
-    private static final Color CENSOR_RGB = Color.fromRGB(0xCC, 0x00, 0x22); // the red square / redaction
-    private static final Particle.DustOptions BLOOD_DUST  = new Particle.DustOptions(BLOOD_RGB, 1.1f);
-    private static final Particle.DustOptions CENSOR_DUST = new Particle.DustOptions(CENSOR_RGB, 1.3f);
-    /** A red block for the FALLING_DUST blood, and a bone for the thrown-bone ITEM particles. */
-    private static final org.bukkit.block.data.BlockData BLOOD_BLOCK = Material.REDSTONE_BLOCK.createBlockData();
+    private static final Color BLOOD_RGB   = Color.fromRGB(0x8A, 0x03, 0x03); // pouring blood
+    private static final Color CENSOR_RGB  = Color.fromRGB(0xCC, 0x00, 0x22); // the red square / redaction
+    private static final Color VOID_RGB    = Color.fromRGB(0x0E, 0x08, 0x12); // the maw's dark tendril / grapple wall
+    private static final Color EDGE_RGB    = Color.fromRGB(0xFF, 0x3A, 0x5A); // the slash's bright leading edge
+    private static final Particle.DustOptions BLOOD_DUST    = new Particle.DustOptions(BLOOD_RGB, 1.1f);
+    private static final Particle.DustOptions CENSOR_DUST   = new Particle.DustOptions(CENSOR_RGB, 1.3f);
+    private static final Particle.DustOptions VOID_DUST     = new Particle.DustOptions(VOID_RGB, 1.2f);
+    /** Blocks for the displays and crack particles: red for the square/shards, near-black for the maw jaw. */
+    private static final BlockData BLOOD_BLOCK  = Material.REDSTONE_BLOCK.createBlockData();
+    private static final BlockData SQUARE_BLOCK = Material.RED_CONCRETE.createBlockData();
+    private static final BlockData JAW_BLOCK    = Material.BLACK_CONCRETE.createBlockData();
     private static final ItemStack BONE_ITEM = new ItemStack(Material.BONE);
 
     // ---- lore ---------------------------------------------------------------------
