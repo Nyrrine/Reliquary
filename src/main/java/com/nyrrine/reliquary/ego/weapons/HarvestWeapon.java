@@ -21,6 +21,7 @@ import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.Ageable;
 import org.bukkit.block.data.BlockData;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -79,6 +80,14 @@ public final class HarvestWeapon implements EgoWeapon {
     private static final double SLASH_HEAL = 4.0;      // two hearts back on the slash, clamped to max
     private static final int SLASH_ARC_TICKS = 8;      // the arc reveals slowly over these ticks
     private static final int SLASH_STRIKE_TICK = 4;    // …and bites when the blade is mid-sweep
+
+    // Wide Scythe (a vanilla enchant — a NETHERITE_HOE holds Sweeping Edge at an anvil, so this needs no
+    // catalogue entry): a broader sweep reaches +0.4 blocks per Sweeping Edge level, up to +1.2 at Sweeping
+    // Edge III (a 4.8-block arc). It widens only the reap's reach — never its damage, which stays the flat
+    // bonus — so a keener edge sweeps farther without cutting harder. The reach is threaded through both the
+    // drawn arc and the hit scan so the two never disagree about how far the slash reaches.
+    private static final double WIDE_SCYTHE_PER_LEVEL = 0.4;
+    private static final int    WIDE_SCYTHE_CAP       = 3;
 
     /** Per-player strike counter toward the next slash. */
     private final Map<UUID, Integer> strikeCount = new HashMap<>();
@@ -167,21 +176,29 @@ public final class HarvestWeapon implements EgoWeapon {
         if (flatTmp.lengthSquared() < 1.0e-6) flatTmp = new Vector(1, 0, 0);
         final Vector flat = flatTmp.normalize();
         final Vector right = flat.clone().crossProduct(new Vector(0, 1, 0)).normalize();
+        final double range = slashRange(player); // widened once at the cast — arc and hit share the figure
 
         new BukkitRunnable() {
             int t = 0;
             @Override
             public void run() {
                 if (t > SLASH_ARC_TICKS || !player.isOnline()) { cancel(); return; }
-                drawBlade(world, pivot, flat, right, t);
-                if (t == SLASH_STRIKE_TICK) applySlashDamage(player);
+                drawBlade(world, pivot, flat, right, t, range);
+                if (t == SLASH_STRIKE_TICK) applySlashDamage(player, range);
                 t++;
             }
         }.runTaskTimer(plugin, 0L, 1L);
     }
 
+    /** The reaping arc's reach for the rake held right now: the base range plus its Wide Scythe bonus (Sweeping Edge, capped). */
+    private double slashRange(Player player) {
+        int se = Math.min(WIDE_SCYTHE_CAP,
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.SWEEPING_EDGE));
+        return SLASH_RANGE + WIDE_SCYTHE_PER_LEVEL * Math.max(0, se);
+    }
+
     /** One swept slice of the arc at tick {@code t}: a radial blade edge of red motes with a white tip. */
-    private void drawBlade(World world, Location pivot, Vector flat, Vector right, int t) {
+    private void drawBlade(World world, Location pivot, Vector flat, Vector right, int t, double range) {
         double half = Math.toRadians(SLASH_CONE_DEG) * 0.5 * 0.9; // draw just inside the hit fan
         double f = (double) t / SLASH_ARC_TICKS;
         double a = -half + 2 * half * f;
@@ -189,20 +206,20 @@ public final class HarvestWeapon implements EgoWeapon {
 
         final int SAMPLES = 6;
         for (int i = 1; i <= SAMPLES; i++) {
-            double r = SLASH_RANGE * (0.45 + 0.55 * i / SAMPLES);
+            double r = range * (0.45 + 0.55 * i / SAMPLES);
             Location p = pivot.clone().add(radial.clone().multiply(r));
             world.spawnParticle(Particle.DUST, p, 1, 0.04, 0.04, 0.04, 0, RED_DUST);
             if (i >= SAMPLES - 1) world.spawnParticle(Particle.DUST, p, 1, 0.05, 0.05, 0.05, 0, WHITE_DUST); // bright edge
             if (i == 2) world.spawnParticle(Particle.DUST, p, 1, 0.04, 0.04, 0.04, 0, DENIM_DUST);           // denim glint
         }
         if (t % 3 == 0) {
-            Location tip = pivot.clone().add(radial.clone().multiply(SLASH_RANGE));
+            Location tip = pivot.clone().add(radial.clone().multiply(range));
             world.spawnParticle(Particle.DUST, tip, 1, 0.05, 0.05, 0.05, 0, STRAW_DUST); // a faint straw mote
         }
     }
 
     /** The blade bites: a frontal fan of modest bonus damage, capped, then mend the reaper. Fenced. */
-    private void applySlashDamage(Player player) {
+    private void applySlashDamage(Player player, double range) {
         UUID id = player.getUniqueId();
         if (ticking.contains(id)) return;
         ticking.add(id);
@@ -211,7 +228,7 @@ public final class HarvestWeapon implements EgoWeapon {
             Vector dir = eye.getDirection().normalize();
             double cosLimit = Math.cos(Math.toRadians(SLASH_CONE_DEG) * 0.5);
             int felled = 0;
-            for (var entity : player.getNearbyEntities(SLASH_RANGE, SLASH_RANGE, SLASH_RANGE)) {
+            for (var entity : player.getNearbyEntities(range, range, range)) {
                 if (entity == player || !(entity instanceof LivingEntity target)) continue;
                 Vector to = target.getLocation().add(0, 1, 0).toVector().subtract(eye.toVector());
                 if (to.lengthSquared() < 1.0e-6) continue;

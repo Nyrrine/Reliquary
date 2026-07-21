@@ -15,6 +15,7 @@ import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -87,6 +88,14 @@ public final class LanternWeapon implements EgoWeapon {
 
     /** I Shall Nibble Thee!: every Nth landed strike is the bite that heals. */
     private static final int NIBBLE_EVERY = 5;
+
+    // Gluttony (a vanilla enchant — a NETHERITE_HOE holds Looting at an anvil, so this needs no catalogue
+    // entry): a greedier lantern bites sooner, every Looting level shaving one strike off the count to the
+    // next bite, down to every 3rd at Looting II or better (a 2-strike cut, floored so the teeth never close
+    // on every hit). It quickens only the bite's cadence — never the bite's true damage or the heal — so a
+    // luckier lantern eats more often, not harder.
+    private static final int GLUTTONY_PER_LEVEL = 1;
+    private static final int GLUTTONY_CAP       = 2;
 
     /** The bite itself: true damage bypassing armour, so plate doesn't starve the devour. */
     private static final double NIBBLE_BITE_DAMAGE = 4.0;
@@ -169,7 +178,7 @@ public final class LanternWeapon implements EgoWeapon {
         UUID id = attacker.getUniqueId();
         int strikes = bumpTally(nibbleTally, id);
 
-        if (strikes < NIBBLE_EVERY) {
+        if (strikes < nibbleEvery(attacker)) {
             toothFx(victim);
             return;
         }
@@ -202,7 +211,7 @@ public final class LanternWeapon implements EgoWeapon {
             player.sendActionBar(EgoHud.status(cue.text(), LURE_TEXT));
         } else {
             if (cue != null) cues.remove(id); // expired — prune inline rather than let it sit
-            player.sendActionBar(EgoHud.pips("Nibble", LURE_TEXT, nibbleTally.getOrDefault(id, 0), NIBBLE_EVERY));
+            player.sendActionBar(EgoHud.pips("Nibble", LURE_TEXT, nibbleTally.getOrDefault(id, 0), nibbleEvery(player)));
         }
 
         if (tick % LURE_PERIOD == 0) lureGlow(player);
@@ -275,6 +284,17 @@ public final class LanternWeapon implements EgoWeapon {
     /** Bump a per-wielder tally by one and return the new value. */
     private static int bumpTally(Map<UUID, Integer> tally, UUID id) {
         return tally.merge(id, 1, Integer::sum);
+    }
+
+    /**
+     * Strikes to the next bite for the lantern held right now: the base cadence cut by its Gluttony bonus
+     * (Looting, capped, floored at 1). Read in both {@link #onHit} and the {@link #onTick} pip readout, so
+     * the pips always count toward the same bite the teeth will actually close on.
+     */
+    private int nibbleEvery(Player player) {
+        int cut = GLUTTONY_PER_LEVEL * Math.min(GLUTTONY_CAP,
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.LOOTING));
+        return Math.max(1, NIBBLE_EVERY - Math.max(0, cut));
     }
 
     /**

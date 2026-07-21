@@ -22,6 +22,7 @@ import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.damage.DamageSource;
 import org.bukkit.damage.DamageType;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -90,6 +91,14 @@ public final class GreenStemWeapon implements EgoWeapon {
     /** POISON dose applied on every landed melee hit: ~4 seconds, amplifier 1 (Poison II). */
     private static final int POISON_TICKS = 80;
     private static final int POISON_AMP = 1;
+
+    // Rot (a vanilla enchant — an IRON_SWORD holds Fire Aspect at an anvil, so this needs no catalogue
+    // entry): a separate short rot-fire laid on the struck body, one second per Fire Aspect level, up to 3s
+    // at Fire Aspect III. Duration only, never damage, and only when the blade carries Fire Aspect — off the
+    // enchant nothing burns. It sits beside the venom passive and leaves it wholly untouched; Rot is a small
+    // burn next to the poison, not a deepening of it.
+    private static final int ROT_PER_LEVEL_TICKS = 20; // +1s of fire per level
+    private static final int ROT_CAP             = 3;
 
     // ---- venom: a stacking, armour-piercing true-damage DoT (poison alone is worthless vs netherite) ----
     // PLACEHOLDER NUMBERS — balance-approved shape (§3), magnitudes flagged for the balance wave.
@@ -218,6 +227,7 @@ public final class GreenStemWeapon implements EgoWeapon {
 
         victim.addPotionEffect(new PotionEffect(PotionEffectType.POISON, POISON_TICKS, POISON_AMP, false, true, true));
         applyVenom(attacker, victim);
+        applyRot(attacker, victim);
         rustle(victim);
         scatterThorns(victim);
 
@@ -474,6 +484,19 @@ public final class GreenStemWeapon implements EgoWeapon {
             venom.put(victim.getUniqueId(), v);
             v.runTaskTimer(plugin, VENOM_INTERVAL, VENOM_INTERVAL);
         }
+    }
+
+    /**
+     * Rot: lay a short fire on the struck body for the blade held right now — one second per Fire Aspect
+     * level, capped at 3s. Only extends how long they burn (never damage) and only when the blade carries
+     * Fire Aspect; off the enchant it does nothing. The venom passive above is left wholly untouched.
+     */
+    private void applyRot(Player attacker, LivingEntity victim) {
+        int fa = Math.min(ROT_CAP,
+                attacker.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.FIRE_ASPECT));
+        if (fa <= 0) return;
+        int ticks = ROT_PER_LEVEL_TICKS * fa;
+        if (victim.getFireTicks() < ticks) victim.setFireTicks(ticks);
     }
 
     /**

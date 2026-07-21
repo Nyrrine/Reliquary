@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -18,6 +19,7 @@ import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.block.data.BlockData;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.LivingEntity;
@@ -104,6 +106,20 @@ public final class FourthMatchFlameWeapon implements EgoWeapon {
     private static final int    RAYS           = 16;     // fire projectiles fanned across the cone
     private static final double  RECOIL         = 0.55;   // self-knockback kick (screen-shake substitute)
 
+    // Fifth Match (a vanilla enchant — a FLINT_AND_STEEL holds Fire Aspect at an anvil, so this needs no
+    // catalogue entry): the fourth match's fire clings a second longer per Fire Aspect level, up to +3s at
+    // Fire Aspect III. It extends only how long a scalded body burns — never the cone's damage, which Fire
+    // Aspect has no business touching — so a hotter enchant lengthens the burn without deepening the blow.
+    private static final int    FIFTH_MATCH_PER_LEVEL_TICKS = 20; // +1s of ablaze per level
+    private static final int    FIFTH_MATCH_CAP             = 3;
+
+    // Backdraft (a custom enchant — no vanilla equivalent on a flint-and-steel cannon, applied with
+    // /reliquary enchant): a wielder already ablaze reloads faster, the draft of their own fire feeding the
+    // barrel. While the wielder is on fire the 8s reload is cut 5% per level, up to 15% at Backdraft III (a
+    // ~6.8s reload); off fire it does nothing at all. Cadence only — it never touches the cone's damage.
+    private static final double BACKDRAFT_PER_LEVEL = 0.05;
+    private static final int    BACKDRAFT_CAP       = 3;
+
     // Thrown "flint-and-steel fire block" visual — a BlockDisplay we integrate ourselves. Purely cosmetic:
     // a Display entity renders a block but never touches the world, so it can never place fire/magma.
     private static final double PROJ_SPEED   = 0.95;   // blocks/tick launch speed along the look line
@@ -144,7 +160,7 @@ public final class FourthMatchFlameWeapon implements EgoWeapon {
 
         Long last = lastShot.get(id);
         if (last != null) {
-            long remaining = COOLDOWN_MS - (now - last);
+            long remaining = cooldownMs(player) - (now - last);
             if (remaining > 0) {
                 renderBar(player); // the always-on line already shows the reload counting down
                 player.playSound(player.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.4f, 0.7f);
@@ -195,15 +211,31 @@ public final class FourthMatchFlameWeapon implements EgoWeapon {
     }
 
     private void renderBar(Player player) {
-        player.sendActionBar(cannonReadout(player.getUniqueId(), System.currentTimeMillis()));
+        player.sendActionBar(cannonReadout(player, System.currentTimeMillis()));
     }
 
-    /** The cannon's reload state: counting down while it winds, else ready to roar again. */
-    private Component cannonReadout(UUID id, long now) {
-        Long last = lastShot.get(id);
-        long rem = last == null ? 0L : COOLDOWN_MS - (now - last);
+    /**
+     * The cannon's reload state: counting down while it winds, else ready to roar again. Reads the wielder's
+     * current reload ({@link #cooldownMs}) so a Backdraft cut earned while ablaze shows on the bar as it
+     * happens — the readout never claims a longer wait than the trigger will actually enforce.
+     */
+    private Component cannonReadout(Player player, long now) {
+        Long last = lastShot.get(player.getUniqueId());
+        long rem = last == null ? 0L : cooldownMs(player) - (now - last);
         return rem > 0 ? EgoHud.cooldown("Fourth Match Flame", rem, CINDER)
                        : EgoHud.ready("Fourth Match Flame", EMBER);
+    }
+
+    /**
+     * The reload for the cannon held right now. The base {@value #COOLDOWN_MS}ms, cut by Backdraft only while
+     * the wielder is on fire (5% per level, capped) — off fire it is the plain base wait. Cadence only; the
+     * cone's damage is never read here.
+     */
+    private long cooldownMs(Player player) {
+        if (player.getFireTicks() <= 0) return COOLDOWN_MS;
+        int lvl = Math.min(BACKDRAFT_CAP,
+                EgoEnchants.level(player.getInventory().getItemInMainHand(), "backdraft"));
+        return (long) (COOLDOWN_MS * (1.0 - BACKDRAFT_PER_LEVEL * lvl));
     }
 
     /** One cannon blast: boom SFX, recoil kick, the big chaotic cone VFX, then scald the cone. */
@@ -357,11 +389,23 @@ public final class FourthMatchFlameWeapon implements EgoWeapon {
         world.spawnParticle(Particle.LARGE_SMOKE, muzzle, 6, 0.2, 0.2, 0.2, 0.03);
     }
 
+    /**
+     * How long a scalded body burns for the cannon held right now: the base fire time (longer on the molten
+     * blast) plus its Fifth Match bonus — +1s per Fire Aspect level, capped. Duration only; the cone's
+     * damage in {@link #scald} is left untouched.
+     */
+    private int burnTicks(Player player, boolean molten) {
+        int base = molten ? MOLTEN_TICKS : FIRE_TICKS;
+        int extra = FIFTH_MATCH_PER_LEVEL_TICKS * Math.min(FIFTH_MATCH_CAP,
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.FIRE_ASPECT));
+        return base + Math.max(0, extra);
+    }
+
     /** Scorch every living body (never the wielder) inside the forward cone — distance-scaled, applied once. */
     private void scald(Player player, Location eye, Vector dir, boolean molten) {
         double cosLimit = Math.cos(Math.toRadians(HALF_ANGLE_DEG));
         UUID selfId = player.getUniqueId();
-        int fireTicks = molten ? MOLTEN_TICKS : FIRE_TICKS;
+        int fireTicks = burnTicks(player, molten);
         int hit = 0;
 
         for (var entity : player.getNearbyEntities(RANGE, RANGE, RANGE)) {

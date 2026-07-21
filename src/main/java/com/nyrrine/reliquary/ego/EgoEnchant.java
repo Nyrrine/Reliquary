@@ -48,6 +48,10 @@ public record EgoEnchant(String id, String displayName, int maxLevel, String des
     // level, up to +1.5s. A longer chill, never a deeper one; the amplifier is untouched.
     public static final EgoEnchant DEEP_FREEZE = reg("deep_freeze", "Deep Freeze", 3,
             "Frost Splinter: +0.5s to the Second Kiss slowness per level (a longer chill).");
+    // Backdraft: a wielder already ablaze reloads Fourth Match Flame faster — the draft of their own fire
+    // feeds the barrel. -5% to the reload per level while on fire, up to -15%. Cadence only, never damage.
+    public static final EgoEnchant BACKDRAFT = reg("backdraft", "Backdraft", 3,
+            "Fourth Match Flame: -5% reload per level while you are on fire (up to -15%).");
 
     /** The enchant with this id, or {@code null} if no such enchant is catalogued. */
     public static EgoEnchant get(String id) {
