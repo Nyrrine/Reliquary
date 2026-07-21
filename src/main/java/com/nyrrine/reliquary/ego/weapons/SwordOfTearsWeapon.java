@@ -269,10 +269,9 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
             World w = player.getWorld();
             w.playSound(player.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.8f, 1.4f);
             w.playSound(player.getLocation(), Sound.ITEM_TRIDENT_RETURN, 0.5f, 1.6f);
-            renderBar(player, f);
-        } else {
-            player.sendActionBar(EgoHud.status("The rapiers already circle you.", FAINT_HUD));
         }
+        // Either way, just repaint the steady readout — no lone "already circle you" flash that blinks the HUD.
+        renderBar(player, f);
     }
 
     /**
@@ -569,10 +568,13 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
             }
         }
 
-        /** A blade at rest in the fan: wheeling into its slot, weeping the occasional tear. */
+        /** A blade at rest in the fan: wheeling into its slot, tip levelled where the wielder looks, weeping the occasional tear. */
         private void hoverStep(Player owner, ItemDisplay b, int i, long tick) {
             if (b.getTeleportDuration() != 3) b.setTeleportDuration(3); // restore the smooth hover cadence
-            b.setTransformation(hoverTransform());
+            // Point the blade out along the wielder's facing (a levelled wuxia poise), not hanging tip-down.
+            double rad = Math.toRadians(owner.getLocation().getYaw());
+            Vector face = new Vector(-Math.sin(rad), 0, Math.cos(rad));
+            b.setTransformation(hoverPointing(face));
             b.teleport(slotFor(owner, i, tick));
             if ((tick % 18) == 0) { // an occasional tear weeping from the hovering blade + a faint sparkle
                 Location w = b.getLocation().add(0, -0.2, 0);
@@ -1039,10 +1041,17 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
             w.spawnParticle(Particle.END_ROD, at, 1, 0.02, 0.02, 0.02, 0.006);
         }
 
-        /** Rapier hanging tip-down, at rest. */
+        /** Rapier hanging tip-down — the spawn pose, before the hover levels it out where the wielder faces. */
         private static Transformation hoverTransform() {
             return new Transformation(new Vector3f(),
                     new Quaternionf().rotationTo(0, 1, 0, 0, -1, 0),
+                    new Vector3f(0.9f, 0.9f, 0.9f), new Quaternionf());
+        }
+
+        /** Rapier at rest but levelled, tip leading along {@code dir} — the wuxia poise, poised where you face. */
+        private static Transformation hoverPointing(Vector dir) {
+            return new Transformation(new Vector3f(),
+                    new Quaternionf().rotationTo(0, 1, 0, (float) dir.getX(), (float) dir.getY(), (float) dir.getZ()),
                     new Vector3f(0.9f, 0.9f, 0.9f), new Quaternionf());
         }
 

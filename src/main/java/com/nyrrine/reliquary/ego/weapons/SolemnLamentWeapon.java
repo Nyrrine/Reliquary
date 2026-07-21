@@ -114,7 +114,11 @@ public final class SolemnLamentWeapon implements EgoWeapon {
     private static final int    MAG             = 12;    // shots per pistol
     private static final int    PELLETS_PER_GUN = 2;     // shotgun pellets each gun throws per trigger
     private static final double RANGE           = 16.0;  // "not too far" — a close-range reach
-    private static final double PELLET_DAMAGE   = 1.6;   // per pellet; one pistol's 2 pellets ≈ 3.2 point-blank, less at range
+    private static final double PELLET_DAMAGE   = 1.1;   // per pellet at a near-empty mag; scaled down while full (see pelletDamage)
+    // A full mag dump was landing ~70 on a golem. The gun is now weakest with a full magazine and only bites
+    // near its full pellet value as it empties, so a fresh two-mag dump is much softer than the tail of one.
+    // Damage per pellet = PELLET_DAMAGE * (MIN_MAG_FACTOR .. 1.0), interpolated by how EMPTY the magazine is.
+    private static final double MIN_MAG_FACTOR  = 0.40;  // a brimming pair of pistols hits at 40% of the pellet value
     private static final double CONE            = 0.10;  // shotgun spread (radians-ish scatter) — tightened so more pellets connect
     private static final double RAY_SIZE        = 0.5;   // entity ray fatness (forgiving aim)
     private static final double HAND_OFFSET     = 0.32;  // how far the muzzles sit off the aim line
@@ -304,6 +308,18 @@ public final class SolemnLamentWeapon implements EgoWeapon {
     }
 
     /** A single shot: one pistol fires its shotgun cone, streams a flock down-range, and dings. */
+    /**
+     * The per-pellet damage for the shot being fired now: weakest with a full pair of magazines, climbing to
+     * the full {@link #PELLET_DAMAGE} as they empty. So a mag dump opens soft and only sharpens at its tail,
+     * and — since the mags auto-reload to full — sustained fire never sits at full damage.
+     */
+    private double pelletDamage(Player player) {
+        Mag mag = mags.get(player.getUniqueId());
+        int total = mag == null ? 0 : mag.right + mag.left;
+        double emptiness = 1.0 - Math.min(1.0, total / (double) (2 * MAG)); // 0 = brimming, 1 = dry
+        return PELLET_DAMAGE * (MIN_MAG_FACTOR + (1.0 - MIN_MAG_FACTOR) * emptiness);
+    }
+
     private void fireShot(Player player, boolean left) {
         World world = player.getWorld();
         Location eye = player.getEyeLocation();
@@ -313,7 +329,7 @@ public final class SolemnLamentWeapon implements EgoWeapon {
         rightV.normalize();
         ThreadLocalRandom rng = ThreadLocalRandom.current();
 
-        fireGun(player, world, eye, dir, rightV, rng, left);
+        fireGun(player, world, eye, dir, rightV, rng, left, pelletDamage(player));
         shotDing(world, eye, rng);
 
         // Every shot ALSO throws flying billboarded images down the aim line. Which images depends on the
@@ -423,7 +439,7 @@ public final class SolemnLamentWeapon implements EgoWeapon {
      * line with the odd butterfly bit lingering beside it. Nothing bursts in the wielder's face.
      */
     private void fireGun(Player player, World world, Location eye, Vector dir, Vector rightV,
-                         ThreadLocalRandom rng, boolean left) {
+                         ThreadLocalRandom rng, boolean left, double damage) {
         boolean black = left;                              // left barrel = lament for the living = dark wings
         double side = left ? -HAND_OFFSET : HAND_OFFSET;   // left barrel flashes left, right barrel flashes right
         Location muzzle = eye.clone()
@@ -432,7 +448,7 @@ public final class SolemnLamentWeapon implements EgoWeapon {
                 .add(0, -0.15, 0);
 
         for (int i = 0; i < PELLETS_PER_GUN; i++) {
-            resolvePellet(player, world, eye, coneDir(rng, dir), muzzle, black, RANGE);
+            resolvePellet(player, world, eye, coneDir(rng, dir), muzzle, black, RANGE, damage);
         }
     }
 
@@ -449,7 +465,7 @@ public final class SolemnLamentWeapon implements EgoWeapon {
      * of damage with NO knockback (velocity captured and restored). Draws a faint tracer either way.
      */
     private void resolvePellet(Player player, World world, Location eye, Vector dir, Location muzzle,
-                               boolean black, double range) {
+                               boolean black, double range, double damage) {
         double maxDist = range;
         // Ignore passable blocks (tall/short grass, flowers, fluids) so only real walls clip the shot —
         // otherwise a shot that grazes a grass tuft dies on the grass. Same fix as Beak/Crimson.
@@ -473,7 +489,7 @@ public final class SolemnLamentWeapon implements EgoWeapon {
             le.setNoDamageTicks(0);
             shooting.add(le.getUniqueId());
             try {
-                le.damage(PELLET_DAMAGE, player);
+                le.damage(damage, player);
             } finally {
                 shooting.remove(le.getUniqueId());
             }

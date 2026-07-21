@@ -103,7 +103,7 @@ public final class MagicBulletWeapon implements EgoWeapon {
 
     // ---- tuning --------------------------------------------------------------------
     private static final int    CHARGE_STEPS   = 24;    // onTick steps to full charge → ~2.4s (weighty, dramatic)
-    private static final long   SHOT_COOLDOWN_MS = 13000L; // real post-shot reload before the next charge (~13s, musket-slow)
+    private static final long   SHOT_COOLDOWN_MS = 6500L;  // real post-shot reload before the next charge (~6.5s; halved from 13s in playtest)
     private static final double RANGE          = 48.0;  // hitscan reach
     private static final double RAY_SIZE       = 0.6;   // entity ray fatness (forgiving aim) when unmarked
     // The six normal shots are 10. The old hub note recorded a "cap 16→10" retune that this file never
