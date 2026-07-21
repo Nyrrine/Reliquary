@@ -723,15 +723,16 @@ public final class DiscordWeapon implements EgoWeapon {
         return true;
     }
 
-    /** The pendant's cooldown and the marks currently held, in the shared E.G.O grammar. */
+    /**
+     * The pendant's cooldown and the marks currently held, composed onto ONE line via {@link EgoHud#row} in
+     * the shared E.G.O grammar — both states always present, so neither ever flashes in over the other.
+     */
     private void showHud(Player player) {
         UUID id = player.getUniqueId();
         long rem = remaining(lastPendant.get(id), PENDANT_CD_MS);
         Component cd = rem > 0 ? EgoHud.cooldown("Devil's Pendant", rem, PALE)
                                : EgoHud.ready("Devil's Pendant", PALE);
-        player.sendActionBar(cd
-                .append(EgoHud.status("   ", FAINT))
-                .append(EgoHud.pips("Marks", PALE, markCount(id), MARK_MAX)));
+        player.sendActionBar(EgoHud.row(cd, EgoHud.pips("Marks", PALE, markCount(id), MARK_MAX)));
     }
 
     /** Milliseconds left on a cooldown clock, or 0 if it is ready. Whole seconds are EgoHud's problem. */

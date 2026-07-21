@@ -7,6 +7,7 @@ import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.GameMode;
@@ -145,7 +146,7 @@ public final class FourthMatchFlameWeapon implements EgoWeapon {
         if (last != null) {
             long remaining = COOLDOWN_MS - (now - last);
             if (remaining > 0) {
-                player.sendActionBar(EgoHud.cooldown("Fourth Match Flame", remaining, CINDER));
+                renderBar(player); // the always-on line already shows the reload counting down
                 player.playSound(player.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.4f, 0.7f);
                 return;
             }
@@ -178,7 +179,31 @@ public final class FourthMatchFlameWeapon implements EgoWeapon {
         }
 
         EgoDurability.wearMainHand(player);                 // one point of wear per heavy shot
-        player.sendActionBar(EgoHud.cooldown("Fourth Match Flame", COOLDOWN_MS, molten ? CINDER : EMBER));
+        renderBar(player);                                  // reflect the fresh reload on the composed line at once
+    }
+
+    /**
+     * The always-on readout. Fourth Match Flame is genuinely single-state — one heavy reload gate — so the
+     * line is just that state, ready or counting down, rendered every tick rather than flashed on fire. Every
+     * path that used to send a lone cooldown now sends this, so the readout is never a momentary flash.
+     */
+    @Override
+    public boolean onTick(Player player, long tick) {
+        if (!matches(player.getInventory().getItemInMainHand())) return false;
+        renderBar(player);
+        return true;
+    }
+
+    private void renderBar(Player player) {
+        player.sendActionBar(cannonReadout(player.getUniqueId(), System.currentTimeMillis()));
+    }
+
+    /** The cannon's reload state: counting down while it winds, else ready to roar again. */
+    private Component cannonReadout(UUID id, long now) {
+        Long last = lastShot.get(id);
+        long rem = last == null ? 0L : COOLDOWN_MS - (now - last);
+        return rem > 0 ? EgoHud.cooldown("Fourth Match Flame", rem, CINDER)
+                       : EgoHud.ready("Fourth Match Flame", EMBER);
     }
 
     /** One cannon blast: boom SFX, recoil kick, the big chaotic cone VFX, then scald the cone. */

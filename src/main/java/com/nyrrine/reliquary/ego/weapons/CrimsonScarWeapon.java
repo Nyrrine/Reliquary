@@ -7,6 +7,7 @@ import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.FluidCollisionMode;
@@ -279,8 +280,52 @@ public final class CrimsonScarWeapon implements EgoWeapon {
         // A form-swap is a non-vanilla use — wear the new main-hand item a mild point.
         EgoDurability.wearMainHand(player);
 
-        player.sendActionBar(EgoHud.status(
-                toPistol ? "Crimson Scar — Flintlock" : "Crimson Scar — Steel", NAME));
+        renderBar(player); // the composed line already names the form we just snapped into
+    }
+
+    /**
+     * The always-on composed readout, branching on the form in hand. The flintlock reads its reload gate;
+     * the steel sickle reads its lunging-stab combo and, below half HP, its blood-drunk stance — every state
+     * the wielder is carrying, on ONE line via {@link EgoHud#row}. Every path that used to flash a lone form
+     * name or reload clock now sends this, so no single state replaces the line as the wielder acts.
+     */
+    @Override
+    public boolean onTick(Player player, long tick) {
+        if (!matches(player.getInventory().getItemInMainHand())) return false;
+        renderBar(player);
+        return true;
+    }
+
+    private void renderBar(Player player) {
+        ItemStack held = player.getInventory().getItemInMainHand();
+        if (isPistol(held)) {
+            player.sendActionBar(EgoHud.row(formReadout(true), reloadReadout(player)));
+        } else {
+            player.sendActionBar(EgoHud.row(formReadout(false), lungeReadout(player), bloodReadout(player)));
+        }
+    }
+
+    /** Which form is in hand: the flintlock, or the steel sickle. */
+    private Component formReadout(boolean pistol) {
+        return pistol ? EgoHud.status("Flintlock", STEEL) : EgoHud.status("Steel", NAME);
+    }
+
+    /** The flintlock half: its reload gate counting down, else ready to fire. */
+    private Component reloadReadout(Player player) {
+        Long last = lastFire.get(player.getUniqueId());
+        long rem = last == null ? 0L : RELOAD_MS - (System.currentTimeMillis() - last);
+        return rem > 0 ? EgoHud.cooldown("Reload", rem, STEEL) : EgoHud.ready("Reload", STEEL);
+    }
+
+    /** The steel half: the strike pips climbing toward the third-strike lunging stab. */
+    private Component lungeReadout(Player player) {
+        int n = Math.min(strikeCount.getOrDefault(player.getUniqueId(), 0), LUNGE_STRIKE);
+        return EgoHud.pips("Lunge", BLOOD, n, LUNGE_STRIKE);
+    }
+
+    /** The blood-drunk stance, shown only while the wielder is below the frenzy threshold, else dropped. */
+    private Component bloodReadout(Player player) {
+        return isBloodDrunk(player) ? EgoHud.status("Blood-Drunk", BLOOD) : null;
     }
 
     /**
@@ -296,8 +341,7 @@ public final class CrimsonScarWeapon implements EgoWeapon {
         if (last != null) {
             long remaining = RELOAD_MS - (now - last);
             if (remaining > 0) {
-                player.sendActionBar(EgoHud.cooldown("Reload", remaining, STEEL)
-                        .append(EgoHud.status("   — swap to steel", FAINT)));
+                renderBar(player); // the composed line already shows the reload counting down
                 player.playSound(player.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.4f, 1.1f);
                 return;
             }
@@ -347,9 +391,7 @@ public final class CrimsonScarWeapon implements EgoWeapon {
         // A flintlock shot is a non-vanilla use — mild wear.
         EgoDurability.wearMainHand(player);
 
-        // Show the reload clock straight away (+ a hint to swap back to melee).
-        player.sendActionBar(EgoHud.cooldown("Reload", RELOAD_MS, STEEL)
-                .append(EgoHud.status("   — swap to steel", FAINT)));
+        renderBar(player); // reflect the fresh reload on the composed line at once
     }
 
     // ---- melee on-hit: wet chops + a blood-drunk frenzy (preserved) ----------------

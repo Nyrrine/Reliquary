@@ -509,7 +509,7 @@ public final class FaintAromaWeapon implements EgoWeapon {
     private void fullBloom(Player player, Bloom bloom) {
         long now = System.currentTimeMillis();
         if (now < bloom.fullBloomCd) {
-            player.sendActionBar(EgoHud.cooldown("Full Bloom", bloom.fullBloomCd - now, FAINT));
+            renderBar(player, bloom); // the composed line already shows the Full Bloom rest counting down
             player.playSound(player.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.4f, 1.7f);
             return;
         }
@@ -1115,33 +1115,44 @@ public final class FaintAromaWeapon implements EgoWeapon {
     }
 
     /**
-     * The two meters this weapon runs. The spec asks for the petal charge "in your hotbar"; the action
-     * bar is this roster's readout, so both live there: the petals gauge with the live +N% it is worth
-     * and the unlock cue once [Magnificent End] is off the leash, then the aroma charge gathering
-     * toward its next Weakness.
+     * The weapon's full readout on ONE line via {@link EgoHud#row}: the petals gauge with the live +N% it
+     * is worth and the unlock cue once [Magnificent End] is off the leash, the aroma charge gathering
+     * toward its next Weakness, and — while it is cooling — the Full Bloom rest. Composing them here rather
+     * than flashing each on its own event is the whole standard: pressing Full Bloom on cooldown now
+     * repaints this same line instead of stomping the two gauges with a lone timer.
      *
      * <p>The aroma reads 0/9 through 8/9 and never 9/9 — that is correct, not an off-by-one: the ninth
      * arrow triggers the scent and empties the meter in the same instant, so 8/9 means "the next one
      * catches".
      */
     private void renderBar(Player player, Bloom bloom) {
+        player.sendActionBar(EgoHud.row(petalReadout(bloom), aromaReadout(bloom), fullBloomReadout(bloom)));
+    }
+
+    /** The petals gauge: the live +N% it is worth, and the Magnificent End unlock cue once at full bloom. */
+    private Component petalReadout(Bloom bloom) {
         boolean bloomed = bloom.petals >= PETAL_CAP;
         TextColor fill = bloomed ? CYAN : LAVENDER;
-
         Component label = plain("Petals  " + bloom.petals + "/" + PETAL_CAP, COUNT)
                 .append(plain("  +" + (bloom.petals * PETAL_DAMAGE_PER_STACK_PCT) + "%",
                         bloomed ? CYAN : FAINT));
         if (bloomed) {
             label = label.append(plain("  ", COUNT)).append(EgoHud.ready("Magnificent End", CYAN));
         }
+        return EgoHud.gauge(fill, (double) bloom.petals / PETAL_CAP, label);
+    }
 
-        Component aroma = EgoHud.gauge(CYAN, (double) bloom.aroma / AROMA_CHARGE_STRIKES,
-                AROMA_CHARGE_STRIKES,
+    /** The aroma charge gathering toward its next Weakness. */
+    private Component aromaReadout(Bloom bloom) {
+        return EgoHud.gauge(CYAN, (double) bloom.aroma / AROMA_CHARGE_STRIKES, AROMA_CHARGE_STRIKES,
                 plain("Aroma  " + bloom.aroma + "/" + AROMA_CHARGE_STRIKES, COUNT));
+    }
 
-        player.sendActionBar(EgoHud.gauge(fill, (double) bloom.petals / PETAL_CAP, label)
-                .append(plain("   ", COUNT))
-                .append(aroma));
+    /** The Full Bloom rest, shown only while it is cooling; row() drops it once the burst is ready again. */
+    private Component fullBloomReadout(Bloom bloom) {
+        long now = System.currentTimeMillis();
+        if (now < bloom.fullBloomCd) return EgoHud.cooldown("Full Bloom", bloom.fullBloomCd - now, FAINT);
+        return null;
     }
 
     private static Component plain(String s, TextColor c) {

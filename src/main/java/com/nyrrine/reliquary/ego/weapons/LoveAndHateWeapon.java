@@ -190,30 +190,43 @@ public final class LoveAndHateWeapon implements EgoWeapon {
 
     // ---- HUD ----------------------------------------------------------------------
 
-    /** Form indicator plus the current form's ult cooldown, spoken through the shared E.G.O grammar. */
+    /**
+     * The always-on composed readout: the current form, that form's ult (its cooldown or ready), and — in
+     * Hate — the Salvo cooldown while it runs, all on ONE line via {@link EgoHud#row}. Every form-flip and
+     * every gated cast sends this, so a form indicator and a cooldown never flash in over one another.
+     */
     private void showHud(Player player) {
         UUID id = player.getUniqueId();
         boolean hate = isHate(id);
         long now = System.currentTimeMillis();
-        Component form;
-        Component cd;
+        player.sendActionBar(EgoHud.row(
+                formReadout(hate),
+                ultReadout(id, hate, now),
+                salvoReadout(id, hate, now)));
+    }
+
+    /** The form indicator — the heart the wand is speaking through right now. */
+    private Component formReadout(boolean hate) {
+        return hate ? EgoHud.status("✖ Hate", HATE_TEXT) : EgoHud.status("♥ Love", LOVE_TEXT);
+    }
+
+    /** The current form's ultimate: its cooldown while recharging, else ready. */
+    private Component ultReadout(UUID id, boolean hate, long now) {
         if (hate) {
-            form = EgoHud.status("✖ Hate", HATE_TEXT);
             long rem = cooldownRemaining(lastReverse.get(id), REVERSE_CD_MS, now);
-            cd = rem > 0 ? EgoHud.cooldown("Reverse Arcana", rem, HATE_TEXT)
-                         : EgoHud.ready("Reverse Arcana", HATE_TEXT);
-            long salvoRem = cooldownRemaining(lastSalvo.get(id), SALVO_CD_MS, now);
-            if (salvoRem > 0) {
-                cd = cd.append(EgoHud.status("   ", NAME))
-                       .append(EgoHud.cooldown("Salvo", salvoRem, HATE_TEXT));
-            }
-        } else {
-            form = EgoHud.status("♥ Love", LOVE_TEXT);
-            long rem = cooldownRemaining(lastMinor.get(id), MINOR_CD_MS, now);
-            cd = rem > 0 ? EgoHud.cooldown("Minor Arcana", rem, LOVE_TEXT)
-                         : EgoHud.ready("Minor Arcana", LOVE_TEXT);
+            return rem > 0 ? EgoHud.cooldown("Reverse Arcana", rem, HATE_TEXT)
+                           : EgoHud.ready("Reverse Arcana", HATE_TEXT);
         }
-        player.sendActionBar(form.append(EgoHud.status("   ", NAME)).append(cd));
+        long rem = cooldownRemaining(lastMinor.get(id), MINOR_CD_MS, now);
+        return rem > 0 ? EgoHud.cooldown("Minor Arcana", rem, LOVE_TEXT)
+                       : EgoHud.ready("Minor Arcana", LOVE_TEXT);
+    }
+
+    /** The Hate-form Salvo's cooldown while it runs; dropped entirely in Love or once the salvo is ready. */
+    private Component salvoReadout(UUID id, boolean hate, long now) {
+        if (!hate) return null;
+        long rem = cooldownRemaining(lastSalvo.get(id), SALVO_CD_MS, now);
+        return rem > 0 ? EgoHud.cooldown("Salvo", rem, HATE_TEXT) : null;
     }
 
     private static long cooldownRemaining(Long last, long cd, long now) {

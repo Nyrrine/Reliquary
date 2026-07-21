@@ -8,6 +8,7 @@ import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.FluidCollisionMode;
@@ -262,7 +263,7 @@ public final class LifeForADaredevilWeapon implements EgoWeapon {
 
         Long ready = dashReadyAt.get(id);
         if (ready != null && now < ready) {
-            player.sendActionBar(EgoHud.cooldown("Dash", ready - now, FAINT));
+            renderBar(player); // the composed line already shows the dash cooldown counting down
             player.playSound(player.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_HIT, 0.4f, 1.3f);
             return;
         }
@@ -301,7 +302,7 @@ public final class LifeForADaredevilWeapon implements EgoWeapon {
         world.playSound(player.getLocation(), Sound.ITEM_TRIDENT_RETURN, 0.7f, 1.9f);
 
         dashTrail(player, world);
-        player.sendActionBar(EgoHud.cooldown("Dash", DASH_COOLDOWN_MS, FAINT));
+        renderBar(player); // send the full composed line, not a lone dash timer
     }
 
     /**
@@ -464,10 +465,28 @@ public final class LifeForADaredevilWeapon implements EgoWeapon {
     public boolean onTick(Player player, long tick) {
         if (matches(player.getInventory().getItemInMainHand())) {
             applyBurden(player);
+            renderBar(player);                                // keep the dash readout on-screen, not just on cast
             return true;                                      // still held — keep ticking
         }
         clearBurden(player);
         return false;                                         // blade is away — drop the burden, stop ticking
+    }
+
+    /**
+     * The blade's one persistent readout: the dash, resting or ready. Composed through {@link EgoHud#row}
+     * so a later state would simply slot in beside it — and, more to the point, so every dash press repaints
+     * this same always-on line instead of flashing a lone timer that the next tick would wipe.
+     */
+    private void renderBar(Player player) {
+        player.sendActionBar(EgoHud.row(dashReadout(player)));
+    }
+
+    /** The dash half: its cooldown while resting, else ready. */
+    private Component dashReadout(Player player) {
+        long now = System.currentTimeMillis();
+        Long ready = dashReadyAt.get(player.getUniqueId());
+        if (ready != null && now < ready) return EgoHud.cooldown("Dash", ready - now, FAINT);
+        return EgoHud.ready("Dash", NAME);
     }
 
     /** Apply the keyed two-heart MAX_HEALTH modifier if it is not already present (remove-before-add safe). */

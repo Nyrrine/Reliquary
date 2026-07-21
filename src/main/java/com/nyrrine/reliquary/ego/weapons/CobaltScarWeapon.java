@@ -249,7 +249,7 @@ public final class CobaltScarWeapon implements EgoWeapon {
         long now = System.currentTimeMillis();
         long ready = dashReadyAt.getOrDefault(id, 0L);
         if (now < ready) {
-            player.sendActionBar(EgoHud.cooldown("Dash", ready - now, FAINT));
+            renderBar(player); // the persistent line already shows the Dash cooldown
             player.playSound(player.getLocation(), Sound.ITEM_AXE_SCRAPE, 0.3f, 1.6f + jitter());
             return;
         }
@@ -331,10 +331,27 @@ public final class CobaltScarWeapon implements EgoWeapon {
                 }
             }
             if (offhandNotified.add(id)) {
+                // A one-off seal cue; let it stand this tick, then the persistent Dash bar resumes next tick.
                 player.sendActionBar(EgoHud.status("Off hand sealed", FAINT));
+                return true;
             }
         }
+
+        renderBar(player);
         return true;
+    }
+
+    /**
+     * Dash is Cobalt Scar's only cooldown, so its readout is the whole line: its rest while cooling, else
+     * ready — kept always on screen rather than only flashed on a blocked cast.
+     */
+    private void renderBar(Player player) {
+        UUID id = player.getUniqueId();
+        long now = System.currentTimeMillis();
+        long ready = dashReadyAt.getOrDefault(id, 0L);
+        player.sendActionBar(now < ready
+                ? EgoHud.cooldown("Dash", ready - now, FAINT)
+                : EgoHud.ready("Dash", COBALT));
     }
 
     // ---- lifecycle ----------------------------------------------------------------

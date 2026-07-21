@@ -659,22 +659,31 @@ public final class HarmonyWeapon implements EgoWeapon {
 
     // ---- HUD -----------------------------------------------------------------------
 
-    /** {@code Rhythm ◆ ◆ ◆ ◇ ◇ ◇ ◇   Obsession   Note — 4s} — pips, stance, and whole seconds. */
+    /**
+     * {@code Rhythm ◆ ◆ ◆ ◇ ◇ ◇ ◇   Obsession   Note — 4s} — the pips, the stance, and the Note's refresh in
+     * whole seconds, composed onto ONE line via {@link EgoHud#row}. All three are always present, so no part
+     * ever drops out; every cast and the tick loop send this same composed line, never a lone state.
+     */
     private void hud(Player player, Performance perf) {
+        player.sendActionBar(EgoHud.row(
+                rhythmReadout(perf), stanceReadout(perf), noteReadout(perf)));
+    }
+
+    /** The Rhythm pips — reddening to the ember accent once the seventh stack lands. */
+    private static Component rhythmReadout(Performance perf) {
         boolean full = perf.rhythm >= MAX_RHYTHM;
-        Component pips = EgoHud.pips("Rhythm", full ? EMBER : STEEL, perf.rhythm, MAX_RHYTHM);
-        Component stance = perf.obsession
-                ? EgoHud.status("Obsession", EMBER)
-                : EgoHud.status("Idle", FAINT);
+        return EgoHud.pips("Rhythm", full ? EMBER : STEEL, perf.rhythm, MAX_RHYTHM);
+    }
 
+    /** The stance word: Obsession while it burns, else Idle. */
+    private static Component stanceReadout(Performance perf) {
+        return perf.obsession ? EgoHud.status("Obsession", EMBER) : EgoHud.status("Idle", FAINT);
+    }
+
+    /** The Note's refresh: counting down while it winds, else ready to fire. */
+    private static Component noteReadout(Performance perf) {
         long rem = remaining(perf.lastNote, noteCooldown(perf), System.currentTimeMillis());
-        Component note = rem > 0 ? EgoHud.cooldown("Note", rem, STEEL) : EgoHud.ready("Note", STEEL);
-
-        player.sendActionBar(pips
-                .append(EgoHud.status("  ", FAINT))
-                .append(stance)
-                .append(EgoHud.status("   ", FAINT))
-                .append(note));
+        return rem > 0 ? EgoHud.cooldown("Note", rem, STEEL) : EgoHud.ready("Note", STEEL);
     }
 
     // ---- presentation: the music notes ---------------------------------------------

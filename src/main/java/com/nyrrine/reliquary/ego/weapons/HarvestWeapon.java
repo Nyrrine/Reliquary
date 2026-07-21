@@ -9,7 +9,6 @@ import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -136,7 +135,7 @@ public final class HarvestWeapon implements EgoWeapon {
 
         int n = strikeCount.merge(id, 1, Integer::sum);
         if (n < STRIKES_PER_SLASH) {          // strikes 1 & 2: plain, no heal
-            showSlash(attacker);
+            renderBar(attacker);
             return;
         }
         strikeCount.put(id, 0);               // 3rd strike — reset the counter either way
@@ -144,12 +143,12 @@ public final class HarvestWeapon implements EgoWeapon {
         long now = System.currentTimeMillis();
         Long ready = slashReadyAt.get(id);
         if (ready != null && now < ready) {   // cooldown not up yet: still just a plain hit
-            showSlash(attacker);
+            renderBar(attacker);
             return;
         }
         slashReadyAt.put(id, now + SLASH_CD_MS);
         performSlash(attacker);
-        showSlash(attacker);
+        renderBar(attacker);
     }
 
     /**
@@ -249,16 +248,32 @@ public final class HarvestWeapon implements EgoWeapon {
         world.playSound(at, Sound.ITEM_TRIDENT_RETURN, 0.4f, 0.9f + rng.nextFloat() * 0.2f);
     }
 
-    /** Action-bar readout: strike pips toward the slash, plus its cooldown/ready state. Via EgoHud. */
-    private void showSlash(Player player) {
-        UUID id = player.getUniqueId();
-        int n = Math.min(strikeCount.getOrDefault(id, 0), STRIKES_PER_SLASH);
-        long rem = slashReadyAt.getOrDefault(id, 0L) - System.currentTimeMillis();
-        Component state = rem > 0 ? EgoHud.cooldown("Slash", rem, DENIM) : EgoHud.ready("Slash", RED);
-        Component bar = EgoHud.pips("Reap", STRAW, n, STRIKES_PER_SLASH)
-                .append(Component.text("  ").decoration(TextDecoration.ITALIC, false))
-                .append(state);
-        player.sendActionBar(bar);
+    /**
+     * The always-on action-bar readout: the strike pips climbing toward the slash and the slash's own
+     * cooldown/ready state, composed onto ONE line via {@link EgoHud#row}. Rendered every tick so neither
+     * half ever flashes in over the other as the wielder chops.
+     */
+    @Override
+    public boolean onTick(Player player, long tick) {
+        if (!matches(player.getInventory().getItemInMainHand())) return false;
+        renderBar(player);
+        return true;
+    }
+
+    private void renderBar(Player player) {
+        player.sendActionBar(EgoHud.row(reapReadout(player), slashReadout(player)));
+    }
+
+    /** The reap half: strike pips climbing toward the third-strike slash. */
+    private Component reapReadout(Player player) {
+        int n = Math.min(strikeCount.getOrDefault(player.getUniqueId(), 0), STRIKES_PER_SLASH);
+        return EgoHud.pips("Reap", STRAW, n, STRIKES_PER_SLASH);
+    }
+
+    /** The slash half: its cooldown while recharging, else ready. */
+    private Component slashReadout(Player player) {
+        long rem = slashReadyAt.getOrDefault(player.getUniqueId(), 0L) - System.currentTimeMillis();
+        return rem > 0 ? EgoHud.cooldown("Slash", rem, DENIM) : EgoHud.ready("Slash", RED);
     }
 
     // ---- Harvest passive: what the rake fells, it reaps into the pack --------------

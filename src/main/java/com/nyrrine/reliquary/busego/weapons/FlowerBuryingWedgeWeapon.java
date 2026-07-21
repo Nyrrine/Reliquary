@@ -3,6 +3,7 @@ package com.nyrrine.reliquary.busego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.busego.BusEgoModels;
 import com.nyrrine.reliquary.core.Weapon;
+import com.nyrrine.reliquary.ego.EgoHud;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -170,7 +171,9 @@ public final class FlowerBuryingWedgeWeapon implements Weapon {
             if (gone != null) gone.dispose();
             return false;
         }
-        halos.computeIfAbsent(id, k -> new Halo(this, player)).tick(player, tick);
+        Halo halo = halos.computeIfAbsent(id, k -> new Halo(this, player));
+        halo.tick(player, tick);
+        player.sendActionBar(charges(halo)); // always-on wedge readout, so the count never flashes then vanishes
         return true;
     }
 
@@ -245,8 +248,7 @@ public final class FlowerBuryingWedgeWeapon implements Weapon {
     }
 
     private Component charges(Halo halo) {
-        return Component.text("Wedges ", CRIMSON)
-                .append(Component.text(halo.readyCount() + "/" + WEDGE_COUNT, FAINT));
+        return EgoHud.pips("Wedges", CRIMSON, halo.readyCount(), WEDGE_COUNT);
     }
 
     // ---- death-defiance passive: the sky-reckoning ---------------------------------

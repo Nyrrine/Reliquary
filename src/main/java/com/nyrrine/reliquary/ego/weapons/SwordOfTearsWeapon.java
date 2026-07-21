@@ -194,6 +194,7 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
         }
         Formation f = formations.computeIfAbsent(id, k -> new Formation(this, player));
         f.tick(player, tick);
+        renderBar(player, f); // the fan and the Impale gate, held on screen every tick — never flashed on a press
         return true;
     }
 
@@ -210,7 +211,7 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
         if (reentry.contains(attacker.getUniqueId())) return; // our rapier's own damage re-entered — ignore
 
         Formation f = formations.computeIfAbsent(attacker.getUniqueId(), k -> new Formation(this, attacker));
-        if (f.doubleTag(attacker, victim)) attacker.sendActionBar(hud(f));
+        if (f.doubleTag(attacker, victim)) renderBar(attacker, f);
     }
 
     // ---- command: aim the retinue ---------------------------------------------------
@@ -234,9 +235,9 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
             int committed = f.impale(player, mark);
             if (committed > 0) {
                 EgoDurability.wearMainHand(player, 2); // the whole fan commits — a heavier, non-vanilla use
-                player.sendActionBar(hud(f));
+                renderBar(player, f);
             } else if (committed < 0) {
-                player.sendActionBar(EgoHud.cooldown("Impale", f.impaleRemaining(), FAINT_HUD));
+                renderBar(player, f); // the composed line already shows the Impale gate counting down
             } else {
                 player.sendActionBar(EgoHud.status("No rapiers left in the fan.", FAINT_HUD));
             }
@@ -245,7 +246,7 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
 
         if (f.sendOne(player, mark)) {
             EgoDurability.wearMainHand(player); // a non-vanilla sortie -> a mild point of wear, once, at dispatch
-            player.sendActionBar(hud(f));
+            renderBar(player, f);
         } else {
             player.sendActionBar(EgoHud.status("No rapier ready to send.", FAINT_HUD));
         }
@@ -268,7 +269,7 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
             World w = player.getWorld();
             w.playSound(player.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.8f, 1.4f);
             w.playSound(player.getLocation(), Sound.ITEM_TRIDENT_RETURN, 0.5f, 1.6f);
-            player.sendActionBar(hud(f));
+            renderBar(player, f);
         } else {
             player.sendActionBar(EgoHud.status("The rapiers already circle you.", FAINT_HUD));
         }
@@ -300,9 +301,21 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
         return best;
     }
 
-    /** The action-bar readout: how much of the fan is still yours to spend. */
-    private static Component hud(Formation f) {
-        return EgoHud.pips("Rapiers", STAR_HUD, f.fanCount(), RAPIER_COUNT);
+    /**
+     * The always-on composed readout: how much of the fan is still yours to spend, and the Converging
+     * Impale's gate, on ONE line via {@link EgoHud#row}. Every command path that used to flash a lone pip
+     * count or a lone Impale cooldown now sends this, so neither state replaces the other as the retinue works.
+     */
+    private void renderBar(Player player, Formation f) {
+        player.sendActionBar(EgoHud.row(
+                EgoHud.pips("Rapiers", STAR_HUD, f.fanCount(), RAPIER_COUNT),
+                impaleReadout(f)));
+    }
+
+    /** The Impale half: its 45s gate counting down, else ready to commit the fan. */
+    private static Component impaleReadout(Formation f) {
+        long rem = f.impaleRemaining();
+        return rem > 0 ? EgoHud.cooldown("Impale", rem, FAINT_HUD) : EgoHud.ready("Impale", STAR_HUD);
     }
 
     // ---- damage: the two fenced strike paths ---------------------------------------

@@ -6,6 +6,7 @@ import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
@@ -223,7 +224,35 @@ public final class LampWeapon implements EgoWeapon {
 
         if (tick % AURA_INTERVAL == 0) applyAura(player);
         advanceGaze(player, tick);
+        // The active abilities are main-hand only (Gaze / Slam route through onInteract there), so their
+        // readout paints only while the lantern is actually held to swing — the off-hand aura carries no bar.
+        if (matches(player.getInventory().getItemInMainHand())) renderBar(player);
         return true;
+    }
+
+    /**
+     * The always-on readout for the lantern in the main hand: the Slam's cooldown (or that it is ready) and,
+     * while an eye is fixed, the mark it holds — composed on ONE line via {@link EgoHud#row}, which drops the
+     * mark half when there is none. Every Slam and every fresh Gaze repaints this whole line instead of
+     * flashing a lone timer, so the two states never stomp each other as the wielder acts.
+     */
+    private void renderBar(Player player) {
+        player.sendActionBar(EgoHud.row(slamReadout(player), gazeReadout(player)));
+    }
+
+    /** The slam half: its cooldown while resting, else ready. */
+    private Component slamReadout(Player player) {
+        long now = System.currentTimeMillis();
+        long ready = slamCd.getOrDefault(player.getUniqueId(), 0L);
+        if (now < ready) return EgoHud.cooldown("Slam", ready - now, FAINT);
+        return EgoHud.ready("Slam", EMBER);
+    }
+
+    /** The gaze half: the mark it currently holds, else null so row() drops it from the line. */
+    private Component gazeReadout(Player player) {
+        Gaze g = gazes.get(player.getUniqueId());
+        if (g == null) return null;
+        return EgoHud.status(ABILITY_NAME + " — marked", EMBER);
     }
 
     /** The lantern is being carried if it sits in either the main hand or the off-hand. */
@@ -326,7 +355,7 @@ public final class LampWeapon implements EgoWeapon {
         transferDebuffs(player, target); // snapshot on the cast
 
         gazeFx(player, target);
-        player.sendActionBar(EgoHud.status(ABILITY_NAME + " — marked", EMBER));
+        renderBar(player); // the composed line now carries the mark alongside the slam state
     }
 
     /** A radiant eye opening over the marked body — warm dust, a soft chime, an eye-like ring. */
@@ -346,7 +375,7 @@ public final class LampWeapon implements EgoWeapon {
         long now = System.currentTimeMillis();
         long ready = slamCd.getOrDefault(player.getUniqueId(), 0L);
         if (now < ready) {
-            player.sendActionBar(EgoHud.cooldown("Slam", ready - now, FAINT));
+            renderBar(player); // the composed line already shows the slam cooldown counting down
             player.playSound(player.getLocation(), Sound.BLOCK_LANTERN_STEP, 0.35f, 0.7f);
             return;
         }
@@ -364,7 +393,7 @@ public final class LampWeapon implements EgoWeapon {
         Gaze g = gazes.get(player.getUniqueId());
         if (g != null && g.target.equals(target.getUniqueId())) g.lastCombatAt = now;
 
-        player.sendActionBar(EgoHud.cooldown("Slam", SLAM_COOLDOWN_MS, EMBER));
+        renderBar(player); // send the full composed line, not a lone slam timer
     }
 
     /** Little damage (fenced), lots of outward knockback, a blunt clang and a burst of impact-dust. */

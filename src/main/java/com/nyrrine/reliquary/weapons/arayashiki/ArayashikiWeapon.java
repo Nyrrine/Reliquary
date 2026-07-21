@@ -321,6 +321,11 @@ public final class ArayashikiWeapon implements Weapon {
         return skills.dashedRecently(id);
     }
 
+    /** The dash pips for the wielder's composed action-bar line (memory bar + dashes on one readout). */
+    public net.kyori.adventure.text.Component dashReadout(UUID id) {
+        return skills.dashReadout(id);
+    }
+
     /** Drop a player's per-player state when they leave, so the maps don't grow over time. */
     @Override
     public void onQuit(UUID id) {

@@ -7,6 +7,7 @@ import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
@@ -187,6 +188,8 @@ public final class GreenStemWeapon implements EgoWeapon {
     public boolean onTick(Player player, long tick) {
         if (!matches(player.getInventory().getItemInMainHand())) return false; // sheathed -> idle
 
+        renderBar(player); // the wielder's one cooldown, held on screen every tick — never flashed
+
         if (tick % SCAN_INTERVAL != 0) return true;
 
         long now = System.currentTimeMillis();
@@ -315,7 +318,22 @@ public final class GreenStemWeapon implements EgoWeapon {
 
         thornCd.put(vid, now + THORN_COOLDOWN_MS);
         EgoDurability.wearMainHand(wielder); // non-vanilla hit — wears a touch
-        wielder.sendActionBar(EgoHud.status("Thorn — impaled", APPLE));
+        renderBar(wielder); // the eruption's own spectacle sells the impale; the bar keeps its standing readout
+    }
+
+    /**
+     * The always-on readout. Green Stem's one wielder-facing cooldown is the Bite; it is held on the action
+     * bar every tick, ready or counting down, so the finisher's spectacle and the denied-bite cue never leave
+     * a lone state flashing where the standing readout should be.
+     */
+    private void renderBar(Player player) {
+        player.sendActionBar(biteReadout(player));
+    }
+
+    /** The Bite's cooldown while it rests, else ready to take another mouthful of the fruit. */
+    private Component biteReadout(Player player) {
+        long rem = biteCd.getOrDefault(player.getUniqueId(), 0L) - System.currentTimeMillis();
+        return rem > 0 ? EgoHud.cooldown("Bite", rem, FAINT) : EgoHud.ready("Bite", APPLE);
     }
 
     /** A soft splintering rustle where the splinter bit, pitch-jittered so a flurry of hits doesn't drone. */
@@ -407,7 +425,7 @@ public final class GreenStemWeapon implements EgoWeapon {
         long now = System.currentTimeMillis();
         long ready = biteCd.getOrDefault(player.getUniqueId(), 0L);
         if (now < ready) {
-            player.sendActionBar(EgoHud.cooldown("Bite", ready - now, FAINT));
+            renderBar(player); // the composed line already shows the Bite counting down
             player.playSound(player.getLocation(), Sound.BLOCK_SWEET_BERRY_BUSH_BREAK, 0.35f, 0.7f);
             return;
         }
@@ -423,6 +441,7 @@ public final class GreenStemWeapon implements EgoWeapon {
         biteCd.put(player.getUniqueId(), now + BITE_COOLDOWN_MS);
         crunch(player);
         healBurst(player);
+        renderBar(player); // reflect the fresh Bite cooldown on the composed line at once
     }
 
     /** A crisp apple-bite crunch, pitch-jittered. */

@@ -407,7 +407,7 @@ public final class GazeWeapon implements EgoWeapon {
         Delight d = state(player.getUniqueId());
 
         if (now < d.cooldownReadyAt) {
-            player.sendActionBar(EgoHud.cooldown("Fixed Stare", d.cooldownReadyAt - now, FAINT_HUD));
+            sendDelightBar(player, now); // the composed line already carries the Fixed Stare rest
             player.playSound(player.getLocation(), Sound.BLOCK_WOODEN_TRAPDOOR_CLOSE, 0.35f, 0.6f);
             return;
         }
@@ -440,7 +440,7 @@ public final class GazeWeapon implements EgoWeapon {
         Delight d = state(id);
 
         if (now < d.lingerReadyAt) {
-            player.sendActionBar(EgoHud.cooldown("Lingering Gaze", d.lingerReadyAt - now, FAINT_HUD));
+            sendDelightBar(player, now); // the composed line already carries the Lingering Gaze rest
             player.playSound(player.getLocation(), Sound.BLOCK_WOODEN_TRAPDOOR_CLOSE, 0.35f, 0.6f);
             return;
         }
@@ -543,27 +543,47 @@ public final class GazeWeapon implements EgoWeapon {
         return true;
     }
 
-    /** {@code [▮▮▮▮▯▯▯▯▯▯]  Delight 8  +16%   Fixed Stare — ready} — stacks, bonus, and the stare state. */
+    /**
+     * The watcher's whole readout on ONE line via {@link EgoHud#row}: the Delight gauge with its stack count
+     * and bonus, then the Fixed Stare state, then the Lingering Gaze state — every cooldown at once, so none
+     * of them ever flashes in over the gauge as the wielder acts.
+     * <p>{@code [▮▮▮▮▯▯▯▯▯▯]  Delight 8  +16%   Fixed Stare — ready   Lingering Gaze — ready}
+     */
     private void sendDelightBar(Player player, long now) {
         Delight d = states.get(player.getUniqueId());
         if (d == null) return;
 
         int stacks = delight(d, now);
+        player.sendActionBar(EgoHud.row(
+                delightReadout(stacks),
+                stareReadout(d, now),
+                lingerReadout(d, now)));
+    }
+
+    /** The Delight half: the gauge, its stack count, and the bonus it is currently paying. */
+    private Component delightReadout(int stacks) {
         int pct = (int) Math.round(stacks * DAMAGE_PER_STACK * 100.0);
+        Component label = EgoHud.status("Delight " + stacks + "  +" + pct + "%", DELIGHT_HUD);
+        return EgoHud.gauge(DELIGHT_HUD, stacks / (double) MAX_DELIGHT, label);
+    }
 
-        Component stare;
+    /** The Fixed Stare half: the open window counting down, else its rest, else ready. */
+    private Component stareReadout(Delight d, long now) {
         if (now < d.stareUntil) {
-            stare = EgoHud.status("Watching — " + upSeconds(d.stareUntil - now) + "s", STARE_HUD);
-        } else if (now < d.cooldownReadyAt) {
-            stare = EgoHud.cooldown("Fixed Stare", d.cooldownReadyAt - now, FAINT_HUD);
-        } else {
-            stare = EgoHud.ready("Fixed Stare", FAINT_HUD);
+            return EgoHud.status("Watching — " + upSeconds(d.stareUntil - now) + "s", STARE_HUD);
         }
+        if (now < d.cooldownReadyAt) {
+            return EgoHud.cooldown("Fixed Stare", d.cooldownReadyAt - now, FAINT_HUD);
+        }
+        return EgoHud.ready("Fixed Stare", FAINT_HUD);
+    }
 
-        Component label = EgoHud.status("Delight " + stacks + "  +" + pct + "%", DELIGHT_HUD)
-                .append(EgoHud.status("   ", FAINT_HUD))
-                .append(stare);
-        player.sendActionBar(EgoHud.gauge(DELIGHT_HUD, stacks / (double) MAX_DELIGHT, label));
+    /** The Lingering Gaze half: its rest while cooling, else ready. */
+    private Component lingerReadout(Delight d, long now) {
+        if (now < d.lingerReadyAt) {
+            return EgoHud.cooldown("Lingering Gaze", d.lingerReadyAt - now, FAINT_HUD);
+        }
+        return EgoHud.ready("Lingering Gaze", FAINT_HUD);
     }
 
     /** Whole seconds, rounded up and never zero — the house rule for anything with a clock on it. */

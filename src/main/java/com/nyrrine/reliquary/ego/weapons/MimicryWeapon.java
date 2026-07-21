@@ -807,7 +807,7 @@ public final class MimicryWeapon implements EgoWeapon {
 
         Long readyAt = onrushReadyAt.get(id);
         if (readyAt != null && now < readyAt) {
-            player.sendActionBar(EgoHud.cooldown("Onrush", readyAt - now, RUST));
+            renderBar(player); // the composed line already shows Onrush's rest beside the reservoir gauge
             return;
         }
         onrushReadyAt.remove(id);
@@ -1005,18 +1005,35 @@ public final class MimicryWeapon implements EgoWeapon {
         long now = System.currentTimeMillis();
         if (now - lastPruneMs >= PRUNE_PERIOD_MS) prune(now);
 
-        UUID id = player.getUniqueId();
-        double amount = pooled(id, now);
-
-        Long readyAt = onrushReadyAt.get(id);
-        Component onrush = (readyAt != null && now < readyAt)
-                ? EgoHud.cooldown("Onrush", readyAt - now, RUST)     // whole seconds, never milliseconds
-                : EgoHud.ready("Onrush", BONE);
-
-        Component label = plain("Hello.  " + (long) Math.round(amount))
-                .append(plain("  ")).append(onrush);
-        player.sendActionBar(EgoHud.gauge(RUST, amount / RESERVOIR_FULL, label));
+        renderBar(player);
         return true;
+    }
+
+    /**
+     * The reservoir and Onrush, composed onto ONE line via {@link EgoHud#row} — both states at once, so a
+     * spent Onrush never flashes its cooldown in over the "Hello." gauge. The gauge is scaled to
+     * {@link #RESERVOIR_FULL} (see the tick docs), while the count beside it climbs on unclamped. Every path
+     * that used to send a lone Onrush cooldown now sends this.
+     */
+    private void renderBar(Player player) {
+        UUID id = player.getUniqueId();
+        long now = System.currentTimeMillis();
+        double amount = pooled(id, now);
+        player.sendActionBar(EgoHud.row(reservoirReadout(amount), onrushReadout(id, now)));
+    }
+
+    /** The reservoir half: the "Hello." gauge, scaled to {@link #RESERVOIR_FULL}, and its unclamped count. */
+    private Component reservoirReadout(double amount) {
+        Component label = plain("Hello.  " + (long) Math.round(amount));
+        return EgoHud.gauge(RUST, amount / RESERVOIR_FULL, label);
+    }
+
+    /** The Onrush half: its cooldown while resting (whole seconds, never millis), else ready. */
+    private Component onrushReadout(UUID id, long now) {
+        Long readyAt = onrushReadyAt.get(id);
+        return (readyAt != null && now < readyAt)
+                ? EgoHud.cooldown("Onrush", readyAt - now, RUST)
+                : EgoHud.ready("Onrush", BONE);
     }
 
     // ---- the held heart-row ------------------------------------------------------------

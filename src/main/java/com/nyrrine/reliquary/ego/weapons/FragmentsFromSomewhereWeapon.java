@@ -8,6 +8,7 @@ import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.FluidCollisionMode;
@@ -294,7 +295,7 @@ public final class FragmentsFromSomewhereWeapon implements EgoWeapon {
 
         long wait = remaining(lungeReadyAt, id, now);
         if (wait > 0) {
-            player.sendActionBar(EgoHud.cooldown("Lunge", wait, FAINT));
+            renderBar(player); // the composed line already shows the lunge cooldown beside the refraction state
             player.playSound(player.getLocation(), Sound.BLOCK_AMETHYST_BLOCK_HIT, 0.4f, 1.5f + jitter());
             return;
         }
@@ -391,7 +392,7 @@ public final class FragmentsFromSomewhereWeapon implements EgoWeapon {
 
         long cooling = remaining(refractionReadyAt, id, now);
         if (cooling > 0) {
-            player.sendActionBar(EgoHud.cooldown("Refraction", cooling, FAINT));
+            renderBar(player); // the composed line already shows the refraction cooldown beside the lunge state
             denyFx(player);
             return;
         }
@@ -429,7 +430,7 @@ public final class FragmentsFromSomewhereWeapon implements EgoWeapon {
         player.teleport(dest);
         arriveFx(dest.clone().add(0, 1.0, 0));
 
-        player.sendActionBar(EgoHud.cooldown("Refraction", REFRACTION_COOLDOWN_MS, FAINT));
+        renderBar(player); // the composed line now shows Refraction's fresh cooldown beside the lunge state
     }
 
 
@@ -611,23 +612,44 @@ public final class FragmentsFromSomewhereWeapon implements EgoWeapon {
             lungeReadyAt.remove(id);
             refractionReadyAt.remove(id);
             fallGraceUntil.remove(id);
-            if (readyPending.remove(id)) player.sendActionBar(EgoHud.ready("Lunge", PRIMARY));
+            if (readyPending.remove(id)) renderBar(player); // one last composed line: "Lunge — ready"
             return false;
         }
 
-        // The live window outranks the cooldowns on the bar: it's the thing that's running out.
+        renderBar(player);
+        return true;
+    }
+
+    /**
+     * The lunge and the refraction window, composed onto ONE line via {@link EgoHud#row} — the two states
+     * shown together rather than one flashing in over the other. The refraction half is the live return
+     * window running out, else its cooldown, else nothing (Refraction is only castable inside a window).
+     * Every path that used to send a lone cooldown now sends this.
+     */
+    private void renderBar(Player player) {
+        UUID id = player.getUniqueId();
+        long now = System.currentTimeMillis();
+        player.sendActionBar(EgoHud.row(lungeReadout(id, now), refractionReadout(id, now)));
+    }
+
+    /** The lunge half: its cooldown while recharging, else ready. */
+    private Component lungeReadout(UUID id, long now) {
+        long wait = remaining(lungeReadyAt, id, now);
+        return wait > 0 ? EgoHud.cooldown("Lunge", wait, FAINT) : EgoHud.ready("Lunge", PRIMARY);
+    }
+
+    /** The refraction half: the live return window running out, else its cooldown, else nothing to say. */
+    private Component refractionReadout(UUID id, long now) {
+        Anchor anchor = anchors.get(id);
         if (anchor != null) {
             long left = anchor.expiresAt() - now;
             double frac = left / (double) REFRACTION_WINDOW_MS;
             long secs = Math.max(1L, (left + 999L) / 1000L); // whole seconds, always — never raw millis
-            player.sendActionBar(EgoHud.gauge(SECONDARY, frac,
-                    EgoHud.status("Refraction  " + secs + "s", SECONDARY)));
-        } else if (refractWait > 0) {
-            player.sendActionBar(EgoHud.cooldown("Refraction", refractWait, FAINT));
-        } else {
-            player.sendActionBar(EgoHud.cooldown("Lunge", lungeWait, FAINT));
+            return EgoHud.gauge(SECONDARY, frac, EgoHud.status("Refraction  " + secs + "s", SECONDARY));
         }
-        return true;
+        long refractWait = remaining(refractionReadyAt, id, now);
+        if (refractWait > 0) return EgoHud.cooldown("Refraction", refractWait, FAINT);
+        return null; // no window, no cooldown — Refraction is only meaningful inside a window
     }
 
     /** Milliseconds left on a clock, or 0 if it's absent or already past. */

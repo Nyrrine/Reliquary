@@ -82,10 +82,18 @@ public final class ArayashikiWielder {
             lastLevel.remove(id); // repaint the item the next time it's drawn
         }
 
-        // Live readout while there's memory to spend or clear (unless briefly muted).
-        if (cur < ArayashikiWeapon.MAX_USE_TICKS) {
+        // Live readout. While the blade is in hand it is ONE composed line — the memory bar (which drops
+        // out once the mind is full) beside the dash pips (always there to read at a glance) — so a dash no
+        // longer blanks the memory bar to flash its own charges. Sheathed, the memory bar still shows while
+        // the mind is recovering, and the "clear again" note still pops once it is whole.
+        if (holding) {
+            Component memory = cur < ArayashikiWeapon.MAX_USE_TICKS ? chargeBar(cur, holding) : null;
+            if (!weapon.isActionBarMuted(id)) {
+                player.sendActionBar(EgoHud.row(memory, weapon.dashReadout(id)));
+            }
+        } else if (cur < ArayashikiWeapon.MAX_USE_TICKS) {
             if (!weapon.isActionBarMuted(id)) player.sendActionBar(chargeBar(cur, holding));
-        } else if (!holding && hollowSeen.remove(id)) {
+        } else if (hollowSeen.remove(id)) {
             // Only pops when the mind has climbed all the way back from hollow.
             player.sendActionBar(EgoHud.status("Your mind is clear again.", TextColor.color(0x9FD8FF)));
         }

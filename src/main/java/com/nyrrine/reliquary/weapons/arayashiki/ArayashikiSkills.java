@@ -65,13 +65,17 @@ public final class ArayashikiSkills {
         dashRechargeAt.remove(id);
     }
 
-    /** An erased kill: refill dashes, ding, and re-show the pips so the subtitle updates. */
+    /** An erased kill: refill dashes and ding. The refreshed pips show on the wielder's composed line. */
     public void onKillRefresh(Player killer) {
         UUID id = killer.getUniqueId();
         resetDashes(id);
         killer.playSound(killer.getLocation(), Sound.ENTITY_ARROW_HIT_PLAYER, 1.0f, 1.2f);
-        weapon.muteActionBar(id, 2200);              // let the refreshed pips stay visible
-        killer.sendActionBar(dashPips(MAX_DASH));    // <- the fix: push the updated charges
+    }
+
+    /** The dash pips for the wielder's composed readout, refilled to the moment. Always shown while holding. */
+    public net.kyori.adventure.text.Component dashReadout(UUID id) {
+        refillDashes(id, System.currentTimeMillis());
+        return dashPips(dashCharges.getOrDefault(id, MAX_DASH));
     }
 
     /** Drop this player's skill state on quit. */
@@ -113,8 +117,7 @@ public final class ArayashikiSkills {
 
         weapon.setUseTicks(id, weapon.useTicksOf(id) - ArayashikiWeapon.MAX_USE_TICKS / 20); // small cost
         dash(player);
-        weapon.muteActionBar(id, 2200); // keep the memory bar quiet so the pips stay visible
-        player.sendActionBar(dashPips(dashCharges.get(id)));
+        // The spent dash shows on the wielder's composed line next tick, alongside the memory bar.
     }
 
     /** Restores charges that have finished recharging since we last looked. */

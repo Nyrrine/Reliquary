@@ -303,7 +303,7 @@ public final class FrostSplinterWeapon implements EgoWeapon {
         if (last != null) {
             long remaining = THROW_COOLDOWN_MS - (now - last);
             if (remaining > 0) {
-                player.sendActionBar(EgoHud.cooldown("Third Kiss", remaining, FROST_DIM));
+                showGauge(player); // the composed line already carries the Third Kiss cooldown beside the charge
                 player.playSound(player.getLocation(), Sound.BLOCK_POWDER_SNOW_STEP, 0.4f, 1.6f);
                 return;
             }

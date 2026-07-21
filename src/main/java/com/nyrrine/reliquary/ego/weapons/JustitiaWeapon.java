@@ -8,6 +8,7 @@ import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
@@ -478,7 +479,7 @@ public final class JustitiaWeapon implements EgoWeapon {
             return;
         }
         if (now < w.persecutionReadyAt) {
-            player.sendActionBar(EgoHud.cooldown("Persecution", w.persecutionReadyAt - now, BONE_HUD));
+            renderBar(player); // the composed line already shows Persecution's rest beside Judgement
             return;
         }
 
@@ -677,31 +678,47 @@ public final class JustitiaWeapon implements EgoWeapon {
             }
         }
 
-        showBalance(player, w, now);
+        renderBar(player);
         return true;
     }
 
     /**
-     * The balance, on the action bar: the open stance's remaining moment, else Judgement's rest, else the
-     * live proc coefficients with the Jurisdiction ramp as the gauge. Always whole seconds, never
-     * milliseconds.
+     * The balance, on the action bar — the whole readout at once, never one state flashing over another.
+     * Judgement's half (its rest, or the live proc coefficients with the Jurisdiction ramp as the gauge) and
+     * Persecution's half (the open stance's moment, else its rest, else ready) are composed onto a single
+     * line via {@link EgoHud#row}, so a passed verdict and a taken stance never overwrite one another. Every
+     * path that used to send a lone cooldown now sends this. Always whole seconds, never milliseconds.
      */
-    private void showBalance(Player player, Wielder w, long now) {
-        if (w.stanceOpen()) {
-            // "Stance", not "Persecution" — this is the window counting down, and it must not read as
-            // the rest that onInteract reports under the ability's own name.
-            player.sendActionBar(EgoHud.cooldown("Stance", w.stanceEndsAt - now, GOLD_HUD));
-            return;
-        }
+    private void renderBar(Player player) {
+        Wielder w = wielder(player.getUniqueId());
+        long now = System.currentTimeMillis();
+        player.sendActionBar(EgoHud.row(judgementReadout(w, now), persecutionReadout(w, now)));
+    }
+
+    /** Judgement's half: its rest while it sleeps, else the live proc gauge carrying the Jurisdiction ramp. */
+    private Component judgementReadout(Wielder w, long now) {
         if (now < w.judgementReadyAt) {
-            player.sendActionBar(EgoHud.cooldown("Judgement", w.judgementReadyAt - now, BONE_HUD));
-            return;
+            return EgoHud.cooldown("Judgement", w.judgementReadyAt - now, BONE_HUD);
         }
         String label = String.format(Locale.ROOT, "Judgement  5× %.1f%%  10× %.1f%%",
                 fiveHitChance(w) * 100.0, tenHitChance(w) * 100.0);
-        player.sendActionBar(EgoHud.gauge(GOLD_HUD,
-                w.swingStacks / (double) MAX_BONUS_STACKS,
-                EgoHud.status(label, BONE_HUD)));
+        return EgoHud.gauge(GOLD_HUD, w.swingStacks / (double) MAX_BONUS_STACKS,
+                EgoHud.status(label, BONE_HUD));
+    }
+
+    /**
+     * Persecution's half: the open stance's remaining moment (shown as "Stance", not "Persecution", so the
+     * window counting down never reads as the rest {@link #onInteract} reports under the ability's own name),
+     * else its rest, else ready.
+     */
+    private Component persecutionReadout(Wielder w, long now) {
+        if (w.stanceOpen()) {
+            return EgoHud.cooldown("Stance", w.stanceEndsAt - now, GOLD_HUD);
+        }
+        if (now < w.persecutionReadyAt) {
+            return EgoHud.cooldown("Persecution", w.persecutionReadyAt - now, BONE_HUD);
+        }
+        return EgoHud.ready("Persecution", GOLD_HUD);
     }
 
     // ---- lifecycle: never orphan an entity ------------------------------------------
@@ -1225,7 +1242,7 @@ public final class JustitiaWeapon implements EgoWeapon {
 
     /**
      * The stance settles unanswered: a single low, disappointed chime. Deliberately no action bar —
-     * {@link #showBalance} paints the very same tick and would swallow any message written here.
+     * {@link #renderBar} paints the very same tick and would swallow any message written here.
      */
     private void lapseFx(Player player) {
         player.getWorld().playSound(player.getLocation(), Sound.BLOCK_BELL_RESONATE, 0.5f, 0.6f);
