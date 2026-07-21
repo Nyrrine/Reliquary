@@ -3,12 +3,15 @@ package com.nyrrine.reliquary.ego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoHud;
+import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import com.nyrrine.reliquary.ego.SlashVfx;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
@@ -16,7 +19,10 @@ import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.attribute.AttributeModifier;
+import org.bukkit.entity.BlockDisplay;
+import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -32,7 +38,10 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -103,10 +112,12 @@ public final class TwilightWeapon implements Weapon, Listener {
     private static final TextColor C_WHITE = TextColor.color(0xFFFFFF);
     private static final TextColor C_AMBER = TextColor.color(0xE8A23C);
     private static final TextColor C_FAINT = TextColor.color(0x9A8F73);
-    private static final TextColor C_VOID  = TextColor.color(0x6A4CC0); // twilight violet
     private static final Color GOLD_DUST = Color.fromRGB(0xFF, 0xD5, 0x4A);
     private static final Color WHITE_DUST = Color.fromRGB(0xFF, 0xF4, 0xD8);
+    private static final Color AMBER_DUST = Color.fromRGB(0xE8, 0xA2, 0x3C);
     private static final Color VOID_DUST = Color.fromRGB(0x6A, 0x4C, 0xC0);
+    /** Tag on every Display this weapon spawns, so a reload can sweep any that outlived their task. */
+    private static final String VFX_TAG = "twilight_vfx";
 
     // ---- per-player state (UUID-keyed, cleared on quit/disable) ----------------------
     private final Map<UUID, Integer> sin          = new HashMap<>();
@@ -166,14 +177,27 @@ public final class TwilightWeapon implements Weapon, Listener {
         busyUntil.remove(id);
         fallGraceUntil.remove(id);
         Player p = plugin.getServer().getPlayer(id);
-        if (p != null) clearBonusHp(p);
+        if (p != null) clearBonusHp(p); // best-effort on quit; onJoin is the real backstop for a dirty exit
+    }
+
+    @Override
+    public void onJoin(Player player) {
+        // An unclean server shutdown can save the bonus-HP modifier to a player's NBT. If they log in
+        // WITHOUT Twilight in hand, that modifier is unjustified — strip it so it can never harden into a
+        // permanent +10 hearts. If they are holding it, onTick keeps the live one.
+        if (!matches(player.getInventory().getItemInMainHand())) clearBonusHp(player);
     }
 
     @Override
     public void onDisable() {
-        // No persistent entities — the projectiles and slams are particle-only, and the scheduler cancels
-        // their tasks on disable. Only the live max-health modifiers need lifting off the online wielders.
+        // Lift the live max-health modifiers off the online wielders...
         for (Player p : plugin.getServer().getOnlinePlayers()) clearBonusHp(p);
+        // ...and sweep any VFX Display (eye body / shockwave block) that outlived its task on a crash/reload.
+        for (World w : plugin.getServer().getWorlds()) {
+            for (Entity e : w.getEntitiesByClass(Display.class)) {
+                if (e.getScoreboardTags().contains(VFX_TAG)) e.remove();
+            }
+        }
     }
 
     @Override
@@ -296,8 +320,8 @@ public final class TwilightWeapon implements Weapon, Listener {
         World world = player.getWorld();
         Location eye = player.getEyeLocation();
         Vector look = eye.getDirection().normalize();
-        // Each ruin swings on a different axis, so the four read as one climbing sequence, not one repeated.
-        slashVfx(player, index);
+        // Each ruin swings on its own plane and colour, building strike to strike — four distinct crescents.
+        crescent(player, index);
         world.playSound(eye, Sound.ITEM_TRIDENT_RETURN, 0.7f, 0.8f + index * 0.18f);
         world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.8f, 0.6f + index * 0.15f);
         for (Entity e : player.getNearbyEntities(COMBO_REACH, COMBO_REACH, COMBO_REACH)) {
@@ -457,31 +481,36 @@ public final class TwilightWeapon implements Weapon, Listener {
             @Override public void run() {
                 Player p = plugin.getServer().getPlayer(id);
                 if (p == null || !p.isOnline() || t++ > 14) { cancel(); return; }
-                Location o = p.getLocation().add(0, 1.2, 0);
-                for (int i = 0; i < 10; i++) {
+                // A wide golden curtain overhead, streaming DOWN past the wielder as they rise.
+                Location o = p.getLocation().add(0, 2.4, 0);
+                for (int i = 0; i < 24; i++) {
                     double a = ThreadLocalRandom.current().nextDouble(0, Math.PI * 2);
-                    double r = ThreadLocalRandom.current().nextDouble(0.2, 1.1);
-                    Location s = o.clone().add(Math.cos(a) * r, ThreadLocalRandom.current().nextDouble(0, 1.0), Math.sin(a) * r);
-                    p.getWorld().spawnParticle(Particle.DUST, s, 1, 0, 0, 0, 0,
-                            new Particle.DustOptions(i % 2 == 0 ? GOLD_DUST : VOID_DUST, 1.1f));
-                    p.getWorld().spawnParticle(Particle.END_ROD, s, 1, 0, -0.25, 0, 0.12); // streaming down
+                    double r = 0.9 + ThreadLocalRandom.current().nextDouble(0, 1.0);
+                    double h = ThreadLocalRandom.current().nextDouble(-0.6, 2.2);
+                    Location s = o.clone().add(Math.cos(a) * r, h, Math.sin(a) * r);
+                    p.getWorld().spawnParticle(Particle.DUST_COLOR_TRANSITION, s, 1, 0.02, 0, 0.02, 0,
+                            new Particle.DustTransition(GOLD_DUST, i % 3 == 0 ? VOID_DUST : WHITE_DUST, 1.3f));
+                    p.getWorld().spawnParticle(Particle.END_ROD, s, 1, 0, -0.35, 0, 0.22); // streaming steeply down
                 }
             }
         }.runTaskTimer(plugin, 0L, 1L);
     }
 
-    // ---- Brilliant Eye: a golden homing projectile, particle-only ------------------
+    // ---- Brilliant Eye: a glowing golden eye (ItemDisplay) trailing a ribbon --------
 
     private final class BrilliantEye extends BukkitRunnable {
         private final UUID ownerId;
         private final Location pos;
         private final LivingEntity target;
         private final int index;
+        private ItemDisplay body;
+        private Location prev;
         private int age = 0;
 
         BrilliantEye(UUID ownerId, Location origin, LivingEntity target, int index) {
             this.ownerId = ownerId;
             this.pos = origin;
+            this.prev = origin.clone();
             this.target = target;
             this.index = index;
         }
@@ -490,9 +519,10 @@ public final class TwilightWeapon implements Weapon, Listener {
             Player owner = plugin.getServer().getPlayer(ownerId);
             if (owner == null || age++ > 60 || target == null || !target.isValid() || target.isDead()
                     || !target.getWorld().equals(pos.getWorld())) {
-                cancel();
+                remove();
                 return;
             }
+            if (body == null) body = spawnEyeBody(pos); // real geometry: a glowing golden eye
             Location aim = target.getLocation().add(0, target.getHeight() * 0.55, 0);
             Vector step = aim.toVector().subtract(pos.toVector());
             double dist = step.length();
@@ -500,19 +530,55 @@ public final class TwilightWeapon implements Weapon, Listener {
             if (dist <= 1.1) {
                 dealRuin(owner, target, EYES_DAMAGE);
                 world.spawnParticle(Particle.FLASH, aim, 1);
-                world.spawnParticle(Particle.DUST, aim, 10, 0.25, 0.25, 0.25, 0,
-                        new Particle.DustOptions(GOLD_DUST, 1.2f));
+                world.spawnParticle(Particle.DUST, aim, 12, 0.25, 0.25, 0.25, 0, new Particle.DustOptions(GOLD_DUST, 1.3f));
                 world.playSound(aim, Sound.ENTITY_BLAZE_HURT, 0.5f, 1.6f);
-                cancel();
+                remove();
                 return;
             }
             // A slight curve for the first few ticks so the swarm fans out before it homes.
             Vector head = step.normalize();
             if (age < 5) head.add(new Vector((index % 3 - 1) * 0.35, 0.12, (index % 2 == 0 ? 0.25 : -0.25))).normalize();
+            prev = pos.clone();
             pos.add(head.multiply(Math.min(1.1, dist)));
-            world.spawnParticle(Particle.DUST_COLOR_TRANSITION, pos, 2, 0.03, 0.03, 0.03, 0,
-                    new Particle.DustTransition(GOLD_DUST, WHITE_DUST, 1.0f));
-            world.spawnParticle(Particle.END_ROD, pos, 1, 0.02, 0.02, 0.02, 0.005);
+            if (body.isValid()) {
+                body.teleport(pos);
+                body.setRotation(owner.getLocation().getYaw() + age * 26f, 0f); // the eye turns as it flies
+            }
+            ribbon(world, prev, pos); // a glowing golden ribbon streaming behind it
+        }
+
+        private void remove() {
+            if (body != null && body.isValid()) body.remove();
+            cancel();
+        }
+    }
+
+    /** A glowing golden eye body — an ItemDisplay stand-in the pack can remodel; full-bright, viewer-facing. */
+    private ItemDisplay spawnEyeBody(Location at) {
+        return at.getWorld().spawn(at, ItemDisplay.class, d -> {
+            d.setItemStack(new ItemStack(Material.GLOWSTONE_DUST));
+            d.setBillboard(Display.Billboard.CENTER);
+            d.setBrightness(new Display.Brightness(15, 15));
+            d.setPersistent(false);
+            d.addScoreboardTag(VFX_TAG);
+            d.setTransformation(new Transformation(
+                    new Vector3f(), new Quaternionf(), new Vector3f(0.55f, 0.55f, 0.55f), new Quaternionf()));
+        });
+    }
+
+    /** A dense, continuous gold-to-white dust ribbon between two points — a trailing streamer, not a dot cloud. */
+    private void ribbon(World world, Location from, Location to) {
+        Vector d = to.toVector().subtract(from.toVector());
+        double len = d.length();
+        if (len < 1.0e-4) return;
+        int steps = Math.max(2, (int) (len / 0.12));
+        Vector unit = d.multiply(1.0 / steps);
+        Location p = from.clone();
+        for (int i = 0; i <= steps; i++) {
+            world.spawnParticle(Particle.DUST_COLOR_TRANSITION, p, 1, 0.01, 0.01, 0.01, 0,
+                    new Particle.DustTransition(GOLD_DUST, WHITE_DUST, 1.1f));
+            if (i % 3 == 0) world.spawnParticle(Particle.END_ROD, p, 1, 0, 0, 0, 0.0);
+            p.add(unit);
         }
     }
 
@@ -564,21 +630,24 @@ public final class TwilightWeapon implements Weapon, Listener {
         }
     }
 
-    private void slashVfx(Player player, int index) {
-        World world = player.getWorld();
-        Location eye = player.getEyeLocation();
-        Vector look = eye.getDirection().normalize();
-        Vector right = look.clone().crossProduct(new Vector(0, 1, 0)).normalize();
-        Vector up = right.clone().crossProduct(look).normalize();
-        // A different arc per strike — the "totally different slash fidelity" Nyrrine asked for.
-        double roll = index * (Math.PI / 4) + (index == 3 ? Math.PI / 2 : 0);
-        Location base = eye.clone().add(look.clone().multiply(2.0));
-        for (double s = -1.0; s <= 1.0; s += 0.12) {
-            double x = Math.cos(roll) * s, y = Math.sin(roll) * s;
-            Location p = base.clone().add(right.clone().multiply(x * 1.6)).add(up.clone().multiply(y * 1.6));
-            world.spawnParticle(Particle.DUST_COLOR_TRANSITION, p, 1, 0.02, 0.02, 0.02, 0,
-                    new Particle.DustTransition(index == 3 ? WHITE_DUST : GOLD_DUST, WHITE_DUST, 1.3f));
-            if (index >= 2) world.spawnParticle(Particle.ENCHANTED_HIT, p, 1, 0, 0, 0, 0.0);
+    /**
+     * One of the four combo crescents, drawn through Yae's shared {@link SlashVfx}. Each strike swings on a
+     * different plane (tilt) and colour, and grows in reach/span/thickness — so the sequence climbs rather
+     * than repeats, ending on a vertical overhead cleave with a swept blade.
+     */
+    private void crescent(Player player, int index) {
+        Location origin = player.getEyeLocation();
+        Vector aim = origin.getDirection();
+        switch (index) {
+            case 0 -> SlashVfx.slash(plugin, origin, aim).tilt(-42).arcSpan(130).reach(3.8)
+                    .colours(GOLD_DUST, WHITE_DUST).thickness(1.1f).duration(4).play();
+            case 1 -> SlashVfx.slash(plugin, origin, aim).tilt(42).arcSpan(140).reach(4.1)
+                    .colours(GOLD_DUST, WHITE_DUST).thickness(1.2f).duration(4).play();
+            case 2 -> SlashVfx.slash(plugin, origin, aim).tilt(-8).arcSpan(160).reach(4.6)
+                    .colours(AMBER_DUST, GOLD_DUST).thickness(1.4f).duration(5).play();
+            default -> SlashVfx.slash(plugin, origin, aim).tilt(90).arcSpan(185).reach(5.3)
+                    .colours(WHITE_DUST, GOLD_DUST).thickness(1.7f).duration(6)
+                    .blade(Material.NETHERITE_SWORD).bladeScale(2.4).play();
         }
     }
 
@@ -595,20 +664,47 @@ public final class TwilightWeapon implements Weapon, Listener {
         }
     }
 
+    /** A real expanding ring: glowing BlockDisplays grow outward across the ground from the slam, over a crack. */
     private void shockwaveVfx(Location c, boolean empowered) {
         World world = c.getWorld();
-        world.spawnParticle(Particle.EXPLOSION_EMITTER, c, empowered ? 2 : 1);
-        world.spawnParticle(Particle.FLASH, c.clone().add(0, 1, 0), 1);
-        for (double r = 0.5; r <= PEACE_RADIUS; r += 0.7) {
-            int pts = (int) (r * 6);
-            for (int i = 0; i < pts; i++) {
-                double a = (Math.PI * 2 * i) / pts;
-                Location p = c.clone().add(Math.cos(a) * r, 0.2, Math.sin(a) * r);
-                world.spawnParticle(Particle.DUST, p, 1, 0, 0, 0, 0,
-                        new Particle.DustOptions(empowered ? VOID_DUST : GOLD_DUST, 1.4f));
-                if (empowered && i % 3 == 0) world.spawnParticle(Particle.END_ROD, p, 1, 0, 0.05, 0, 0.02);
-            }
+        world.spawnParticle(Particle.FLASH, c.clone().add(0, 1, 0), empowered ? 2 : 1);
+        world.spawnParticle(Particle.EXPLOSION_EMITTER, c, 1);
+        final var groundData = c.getBlock().getRelative(0, -1, 0).getBlockData();
+        final var blockData = (empowered ? Material.AMETHYST_BLOCK : Material.GLOWSTONE).createBlockData();
+        final int seg = 20;
+        final List<BlockDisplay> ring = new ArrayList<>();
+        for (int i = 0; i < seg; i++) {
+            double a = (Math.PI * 2 * i) / seg;
+            Location at = c.clone().add(Math.cos(a) * 0.7, 0.05, Math.sin(a) * 0.7);
+            ring.add(world.spawn(at, BlockDisplay.class, d -> {
+                d.setBlock(blockData);
+                d.setBrightness(new Display.Brightness(15, 15));
+                d.setPersistent(false);
+                d.addScoreboardTag(VFX_TAG);
+                d.setTransformation(new Transformation(
+                        new Vector3f(-0.2f, 0f, -0.2f), new Quaternionf(), new Vector3f(0.4f, 0.4f, 0.4f), new Quaternionf()));
+            }));
         }
+        new BukkitRunnable() {
+            int t = 0;
+            @Override public void run() {
+                if (t++ >= 14) { ring.forEach(Entity::remove); cancel(); return; }
+                double r = 0.7 + t * (PEACE_RADIUS - 0.7) / 14.0;
+                float sc = (float) Math.max(0.05, 0.45 * (1.0 - t / 18.0));
+                for (int i = 0; i < seg; i++) {
+                    BlockDisplay d = ring.get(i);
+                    if (!d.isValid()) continue;
+                    double a = (Math.PI * 2 * i) / seg;
+                    Location p = c.clone().add(Math.cos(a) * r, 0.05, Math.sin(a) * r);
+                    d.teleport(p);
+                    d.setTransformation(new Transformation(
+                            new Vector3f(-sc / 2f, 0f, -sc / 2f), new Quaternionf(),
+                            new Vector3f(sc, sc * 0.35f, sc), new Quaternionf()));
+                    world.spawnParticle(Particle.BLOCK, p, 4, 0.25, 0.05, 0.25, 0, groundData);
+                    if (empowered && i % 4 == 0) world.spawnParticle(Particle.END_ROD, p, 1, 0, 0.1, 0, 0.03);
+                }
+            }
+        }.runTaskTimer(plugin, 1L, 1L);
     }
 
     private void eyesOpenVfx(Player player) {
@@ -655,58 +751,61 @@ public final class TwilightWeapon implements Weapon, Listener {
         return meta != null && meta.getPersistentDataContainer().has(key, PersistentDataType.BYTE);
     }
 
+    /** The roster-standard tooltip — gold primary, white secondary, the same shape every E.G.O weapon wears. */
+    private static final EgoLore.Tooltip TOOLTIP = EgoLore.egoLore(
+            "Twilight",
+            "Apocalypse Bird",
+            C_GOLD, C_WHITE,
+            List.of(
+                    "Just like how the ever-watching eyes, the",
+                    "scale that could measure any and all sin,",
+                    "and the beak that could swallow everything",
+                    "protected the peace of the Black Forest...",
+                    "",
+                    "The wielder of this armament may also",
+                    "bring peace as they did."),
+            List.of(
+                    new EgoLore.Ability("[Passive] Third Trumpet",
+                            "Great health, but no natural healing.",
+                            "The whole pool pours back every 66.6s."),
+                    new EgoLore.Ability("[Passive] John Lobotomy",
+                            "Every blow is physical, magic and hunger",
+                            "at once, tearing through most armour."),
+                    new EgoLore.Ability("[Passive] Tilted Scale",
+                            "Every hit weighs the target's sin. At full",
+                            "weight, Peace For All cripples, and",
+                            "Brilliant Eyes strikes twice."),
+                    new EgoLore.Ability("[Left Click] Attack Sequence",
+                            "A four-hit greatsword combo — one",
+                            "strike for each kind of ruin."),
+                    new EgoLore.Ability("[Right Click] Peace For All",
+                            "Wind up, then a shockwave that ruins",
+                            "everything around you. 14s cooldown."),
+                    new EgoLore.Ability("[Shift + Right] Brilliant Eyes",
+                            "Open the golden eyes: ten homing lights",
+                            "seek your foes. 16s cooldown."),
+                    new EgoLore.Ability("[Shift + Left] Punishment",
+                            "A dashing strike that launches foes. Hit a",
+                            "wall mid-lunge and you are flung skyward.",
+                            "12s cooldown.")));
+
+    /** The Cogito-unobtainable marker, a clean line below the standard footer. */
+    private static final Component SPECIAL_MARK = Component.text("SPECIAL", C_GOLD)
+            .decoration(TextDecoration.ITALIC, false).decoration(TextDecoration.BOLD, false);
+
     @Override
     public ItemStack createItem() {
         ItemStack item = new ItemStack(EgoModels.TWILIGHT.material());
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(gradient("Twilight", C_GOLD, C_WHITE, true));
-        meta.lore(tooltipLore());
+        TOOLTIP.applyTo(meta);
+        List<Component> lore = new ArrayList<>(meta.lore()); // append the SPECIAL marker under the E.G.O footer
+        lore.add(SPECIAL_MARK);
+        meta.lore(lore);
         meta.setUnbreakable(true);
         meta.setEnchantmentGlintOverride(true); // the flagship glimmers
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.TWILIGHT);
         item.setItemMeta(meta);
         return item;
-    }
-
-    /** A name/label drawn letter by letter across a colour gradient. */
-    private static Component gradient(String text, TextColor from, TextColor to, boolean bold) {
-        var b = Component.text();
-        int n = text.length();
-        for (int i = 0; i < n; i++) {
-            float f = n <= 1 ? 0f : (float) i / (n - 1);
-            b.append(Component.text(String.valueOf(text.charAt(i)), TextColor.lerp(f, from, to)));
-        }
-        Component c = b.build().decoration(TextDecoration.ITALIC, false);
-        return bold ? c.decoration(TextDecoration.BOLD, true) : c;
-    }
-
-    private List<Component> tooltipLore() {
-        List<Component> out = new ArrayList<>();
-        for (String line : List.of(
-                "Just like how the ever-watching eyes, the",
-                "scale that could measure any and all sin,",
-                "and the beak that could swallow everything",
-                "protected the peace of the Black Forest...",
-                "The wielder of this armament may also",
-                "bring peace as they did.")) {
-            out.add(Component.text(line, C_FAINT).decoration(TextDecoration.ITALIC, true));
-        }
-        out.add(Component.empty());
-        addAbility(out, "Third Trumpet", "Great health, but no natural healing. The whole pool pours back every 66.6s.");
-        addAbility(out, "John Lobotomy", "Every blow is physical, magic and hunger at once, tearing most armour.");
-        addAbility(out, "Tilted Scale", "Every hit weighs the target's sin. At full weight, Peace For All cripples and Brilliant Eyes doubles.");
-        addAbility(out, "Attack Sequence", "[Left] A four-hit greatsword combo — one strike for each ruin.");
-        addAbility(out, "Peace For All", "[Right] Wind up, then a shockwave that ruins all around you.");
-        addAbility(out, "Brilliant Eyes", "[Shift+Right] Open the golden eyes — ten homing lights seek your foes.");
-        addAbility(out, "Punishment", "[Shift+Left] A dashing strike that launches foes. Hit a wall and you are flung skyward.");
-        out.add(Component.empty());
-        out.add(gradient("✦ SPECIAL ✦", C_VOID, C_GOLD, true));
-        return out;
-    }
-
-    private void addAbility(List<Component> out, String name, String desc) {
-        out.add(Component.text(name, C_GOLD).decoration(TextDecoration.ITALIC, false).decoration(TextDecoration.BOLD, true));
-        out.add(Component.text("  " + desc, C_FAINT).decoration(TextDecoration.ITALIC, false));
     }
 }
