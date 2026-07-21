@@ -138,12 +138,16 @@ public final class CobaltScarWeapon implements Weapon {
             return;
         }
 
-        // TRUE 1.8-combo multi-hit: vanilla just stamped the victim with hurt-immunity (i-frames),
-        // which would swallow the next fast swing. Cobalt Scar's whole point is the flurry, so we
-        // strip those i-frames right here — the event fires AFTER noDamageTicks was set, so zeroing
-        // it now sticks and the very next swing lands full damage. Fairness stays in the small
-        // per-hit bite (stamped by EgoModels) and the short REACH gate above, not in a swing-timer.
-        victim.setNoDamageTicks(0);
+        // TRUE 1.8-combo multi-hit: vanilla stamps the victim with hurt-immunity (i-frames) that would
+        // swallow the next fast swing, and Cobalt Scar's whole point is the flurry. The catch the old
+        // inline clear missed: vanilla re-applies that stamp AFTER this event returns, overwriting a clear
+        // made from in here — so the strip was inert and the flurry only connected once every ~10 ticks
+        // (~10 DPS). Clearing on the NEXT tick, once the stamp has settled, lets the very next swing land,
+        // so the flurry actually flurries. Fairness stays in the small per-hit bite and the short REACH
+        // gate above, not in a swing-timer.
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            if (!victim.isDead() && victim.isValid()) victim.setNoDamageTicks(0);
+        });
 
         clawFx(attacker, victim);
         startBleed(attacker, victim);
