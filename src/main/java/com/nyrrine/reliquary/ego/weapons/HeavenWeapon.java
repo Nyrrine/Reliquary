@@ -124,6 +124,10 @@ public final class HeavenWeapon implements EgoWeapon, Listener {
     private static final double ALL_SEEING_PER_LVL = 0.10;
     private static final int    ALL_SEEING_MAX_LVL = 3;
     private static final int    GROVE_MAX_LVL      = 3;
+    // Ascension (ego-enchant, the Wind Burst slot — Heaven is a blade, not a mace, so it's read as a custom
+    // ego-enchant): when the stasis releases, the pinned target is flung upward. CC/disruption, never damage.
+    private static final double ASCENSION_LAUNCH_PER_LVL = 0.5;
+    private static final int    ASCENSION_MAX_LVL        = 3;
     /** How long the stasis holds — ~1.5s. */
     private static final int    STASIS_TICKS   = 30;
     /** Slowness amplifier during stasis — 6 → Slowness VII, a near-total crawl on top of the velocity zero. */
@@ -281,7 +285,8 @@ public final class HeavenWeapon implements EgoWeapon, Listener {
         double stunChance = STUN_CHANCE + ALL_SEEING_PER_LVL * Math.min(
                 EgoEnchants.level(attacker.getInventory().getItemInMainHand(), "all_seeing"), ALL_SEEING_MAX_LVL);
         if (looking && ThreadLocalRandom.current().nextDouble() < stunChance) {
-            openHeaven(victim);
+            openHeaven(victim, Math.min(
+                    EgoEnchants.level(attacker.getInventory().getItemInMainHand(), "ascension"), ASCENSION_MAX_LVL));
         }
     }
 
@@ -343,7 +348,7 @@ public final class HeavenWeapon implements EgoWeapon, Listener {
     // ---- the stasis: heaven burrows and holds --------------------------------------
 
     /** Open the heaven beneath a victim: pin them for {@link #STASIS_TICKS}, cutting mob AI for the hold. */
-    private void openHeaven(LivingEntity victim) {
+    private void openHeaven(LivingEntity victim, int ascension) {
         UUID id = victim.getUniqueId();
         if (!stunned.add(id)) return; // already held — don't stack tasks or double-touch the AI flag
 
@@ -353,7 +358,7 @@ public final class HeavenWeapon implements EgoWeapon, Listener {
         }
 
         openSfx(victim.getLocation());
-        StasisTask task = new StasisTask(victim);
+        StasisTask task = new StasisTask(victim, ascension);
         activeStasis.add(task); // tracked so onDisable can restore a frozen mob's AI on reload
         task.runTaskTimer(plugin, 0L, 1L);
     }
@@ -366,10 +371,12 @@ public final class HeavenWeapon implements EgoWeapon, Listener {
      */
     private final class StasisTask extends BukkitRunnable {
         private final LivingEntity target;
+        private final int ascension; // Ascension level captured at the proc — the release-launch strength
         private int ticks = 0;
 
-        StasisTask(LivingEntity target) {
+        StasisTask(LivingEntity target, int ascension) {
             this.target = target;
+            this.ascension = ascension;
         }
 
         @Override
@@ -391,6 +398,10 @@ public final class HeavenWeapon implements EgoWeapon, Listener {
             stunned.remove(target.getUniqueId());
             if (target instanceof Mob mob) {
                 plugin.weapons().restoreAi(mob);
+            }
+            // Ascension: as the heaven releases, fling the still-living target upward — CC, not damage.
+            if (ascension > 0 && target.isValid() && !target.isDead()) {
+                target.setVelocity(target.getVelocity().setY(ASCENSION_LAUNCH_PER_LVL * ascension));
             }
             activeStasis.remove(this);
             cancel();

@@ -141,6 +141,11 @@ public final class LifeForADaredevilWeapon implements EgoWeapon {
     private static final double ADRENALINE_HP_FRACTION = 0.35; // "low" = at/below this fraction of max HP
     private static final int    ADRENALINE_TICKS     = 20;     // short; refreshed each 2-tick onTick
 
+    // Second Wind (ego-enchant): landing a decapitation execute grants a brief recovery — Regeneration +
+    // Absorption, no damage. Gated to the kill (a faltering foe within reach), so it's a reward, not sustain.
+    private static final int SECOND_WIND_MAX_LVL = 3;
+    private static final int SECOND_WIND_TICKS   = 100; // ~5s of recovery after the kill
+
     /** HP-fraction thresholds below which a struck target qualifies for the decapitation. */
     private static final double THRESH_MOB    = 0.25; // a normal mob under a quarter
     private static final double THRESH_PLAYER = 0.10; // a player under a tenth
@@ -374,7 +379,10 @@ public final class LifeForADaredevilWeapon implements EgoWeapon {
         // knockback, sweep, on-hit enchant procs and durability wear.
         event.setDamage(plugin.weapons().pierceInput(victim, event.getDamage(), DAREDEVIL_ARMOR_IGNORE));
 
-        if (faltering) decapitate(attacker, victim);          // already low before the swing — take the head
+        if (faltering) {
+            decapitate(attacker, victim);                     // already low before the swing — take the head
+            applySecondWind(attacker);                        // and, if enchanted, a breath of recovery for it
+        }
     }
 
     /**
@@ -526,6 +534,18 @@ public final class LifeForADaredevilWeapon implements EgoWeapon {
         int speedAmp = Math.min(lvl - 1, 1); // Speed I at I-II, Speed II at III
         player.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, ADRENALINE_TICKS, speedAmp, false, false, true));
         player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, ADRENALINE_TICKS, 0, false, false, true));
+    }
+
+    /**
+     * Second Wind (ego-enchant): a landed decapitation execute grants a brief Regeneration + Absorption — a
+     * breath after the kill. Never damage; gated to the execute; short-lived. Amplifier climbs one step at
+     * the top level so the recovery is felt without becoming sustain.
+     */
+    private void applySecondWind(Player attacker) {
+        int lvl = Math.min(EgoEnchants.level(attacker.getInventory().getItemInMainHand(), "second_wind"), SECOND_WIND_MAX_LVL);
+        if (lvl <= 0) return;
+        attacker.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, SECOND_WIND_TICKS, Math.min(lvl - 1, 1), false, false, true));
+        attacker.addPotionEffect(new PotionEffect(PotionEffectType.ABSORPTION, SECOND_WIND_TICKS, 0, false, false, true));
     }
 
     /** Strip the keyed burden from a live player, if present. */

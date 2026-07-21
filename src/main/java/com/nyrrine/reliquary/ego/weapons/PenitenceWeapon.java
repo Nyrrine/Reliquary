@@ -3,6 +3,7 @@ package com.nyrrine.reliquary.ego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -20,6 +21,7 @@ import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -88,6 +90,14 @@ public final class PenitenceWeapon implements EgoWeapon {
 
     /** Per-player mending ramp. Grows by {@link #HEAL_CHANCE_STEP} per miss, resets to base on proc. */
     private final Map<UUID, Double> healChance = new ConcurrentHashMap<>();
+
+    // Stigmata (ego-enchant): banks a fraction of damage the wielder takes and releases it as EXTRA HEAL on
+    // the next mend proc (never durability — Mending is dead). Pure heal utility, capped, no damage output.
+    private static final double STIGMATA_FRACTION = 0.15; // of each blow, per level, into the bank
+    private static final int    STIGMATA_MAX_LVL  = 3;
+    private static final double STIGMATA_BANK_MAX = 6.0;  // cap the stored wound (three hearts of extra mend)
+    /** Per-player banked wound, spent into the next mend. */
+    private final Map<UUID, Double> stigmataBank = new ConcurrentHashMap<>();
 
     public PenitenceWeapon(Reliquary plugin) {
         this.plugin = plugin;
@@ -192,19 +202,37 @@ public final class PenitenceWeapon implements EgoWeapon {
 
     /** Mend a flat sip of health, clamped to max — never overheals. Returns true if any HP was restored. */
     private boolean mend(Player attacker) {
+        UUID id = attacker.getUniqueId();
         AttributeInstance maxAttr = attacker.getAttribute(Attribute.MAX_HEALTH);
         double maxHp = maxAttr != null ? maxAttr.getValue() : 20.0;
         double current = attacker.getHealth();
-        double healed = Math.min(maxHp, current + HEAL_PER_HIT);
+        double bank = stigmataBank.getOrDefault(id, 0.0); // Stigmata: the banked wound pours into this mend
+        double healed = Math.min(maxHp, current + HEAL_PER_HIT + bank);
         if (healed <= current) return false;
         attacker.setHealth(healed);
+        stigmataBank.remove(id); // spent (or nothing to spend) — the wound is answered
         return true;
     }
 
-    /** Drop the per-player ramp when a wielder leaves. */
+    /**
+     * Stigmata (ego-enchant): while the wielder holds Penitence, bank a fraction of every blow they take, to
+     * be released as extra healing on the next mend. Read-only on the event — this only ever adds to the
+     * heal, never to any outgoing damage.
+     */
+    @Override
+    public void onDamaged(Player victim, EntityDamageEvent event) {
+        int lvl = Math.min(EgoEnchants.level(victim.getInventory().getItemInMainHand(), "stigmata"), STIGMATA_MAX_LVL);
+        if (lvl <= 0) return;
+        UUID id = victim.getUniqueId();
+        double banked = stigmataBank.getOrDefault(id, 0.0) + event.getFinalDamage() * STIGMATA_FRACTION * lvl;
+        stigmataBank.put(id, Math.min(STIGMATA_BANK_MAX, banked));
+    }
+
+    /** Drop the per-player ramp and banked wound when a wielder leaves. */
     @Override
     public void onQuit(UUID id) {
         healChance.remove(id);
+        stigmataBank.remove(id);
     }
 
     /** A soft church-bell toll on the mend, pitch-jittered so repeated strikes don't drone. */
