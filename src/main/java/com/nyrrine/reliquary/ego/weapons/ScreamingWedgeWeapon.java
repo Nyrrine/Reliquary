@@ -73,6 +73,12 @@ public final class ScreamingWedgeWeapon implements EgoWeapon {
     private static final double LONG_HAIR_PER_LEVEL = 0.25;
     private static final int    LONG_HAIR_CAP       = 3;
 
+    // Tangle (a custom enchant — id "tangle"): the hair clings harder. +25% to the on-hit root duration per
+    // level, up to +75% at level 3. Crowd control only — it never touches the strand's blow, reach, or the
+    // tangle chance, only how long a caught body stays rooted.
+    private static final double TANGLE_PER_LEVEL = 0.25;
+    private static final int    TANGLE_CAP       = 3;
+
     /** Chance, per shot, that firing costs the wielder a steak's worth of nourishment. */
     private static final double COST_CHANCE = 0.50;
 
@@ -140,10 +146,12 @@ public final class ScreamingWedgeWeapon implements EgoWeapon {
 
     /** Loose the strand and sell the shot with a piercing, air-splitting scream. */
     private void fire(Player player) {
-        int lvl = Math.min(LONG_HAIR_CAP,
-                EgoEnchants.level(player.getInventory().getItemInMainHand(), "long_hair"));
-        double reach = 1.0 + LONG_HAIR_PER_LEVEL * lvl; // Long Hair: reach only, no damage
-        new ScreamingWedgeStrand(plugin, player, SHOT_DAMAGE, reach).launch();
+        ItemStack held = player.getInventory().getItemInMainHand();
+        double reach = 1.0 + LONG_HAIR_PER_LEVEL
+                * Math.min(LONG_HAIR_CAP, EgoEnchants.level(held, "long_hair"));   // reach only, no damage
+        double tangle = 1.0 + TANGLE_PER_LEVEL
+                * Math.min(TANGLE_CAP, EgoEnchants.level(held, "tangle"));         // root duration only, no damage
+        new ScreamingWedgeStrand(plugin, player, SHOT_DAMAGE, reach, tangle).launch();
 
         World world = player.getWorld();
         Location at = player.getEyeLocation();

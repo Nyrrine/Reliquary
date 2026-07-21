@@ -64,7 +64,8 @@ final class ScreamingWedgeStrand extends BukkitRunnable {
     private final UUID ownerId;
     private final World world;
     private final double damage;
-    private final double reachMult; // Long Hair: scales travel range and acquisition radius — reach only, never damage
+    private final double reachMult;  // Long Hair: scales travel range and acquisition radius — reach only, never damage
+    private final double tangleMult; // Tangle: scales the on-hit root duration — crowd control only, never damage
 
     private final Location pos;   // the strand tip
     private Vector dir;           // current heading (unit)
@@ -72,12 +73,13 @@ final class ScreamingWedgeStrand extends BukkitRunnable {
     private int flightTicks = 0;
     private int weaveStep = 0;    // drives the thin waver of the trail
 
-    ScreamingWedgeStrand(Reliquary plugin, Player owner, double damage, double reachMult) {
+    ScreamingWedgeStrand(Reliquary plugin, Player owner, double damage, double reachMult, double tangleMult) {
         this.plugin = plugin;
         this.ownerId = owner.getUniqueId();
         this.world = owner.getWorld();
         this.damage = damage;
         this.reachMult = reachMult;
+        this.tangleMult = tangleMult;
         this.pos = owner.getEyeLocation().add(owner.getEyeLocation().getDirection().multiply(0.6));
         this.dir = owner.getEyeLocation().getDirection().normalize();
     }
@@ -158,7 +160,7 @@ final class ScreamingWedgeStrand extends BukkitRunnable {
 
         if (ThreadLocalRandom.current().nextDouble() < ROOT_CHANCE) {
             victim.addPotionEffect(new PotionEffect(
-                    PotionEffectType.SLOWNESS, ROOT_TICKS, ROOT_AMPLIFIER, false, true, true));
+                    PotionEffectType.SLOWNESS, (int) (ROOT_TICKS * tangleMult), ROOT_AMPLIFIER, false, true, true));
             tangleFx(victim);
             // A clear bell ding to the wielder — the tangle landed, the root is implanted.
             owner.playSound(owner.getLocation(), Sound.BLOCK_NOTE_BLOCK_BELL, 1.0f, 1.5f);
