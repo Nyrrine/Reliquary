@@ -64,6 +64,7 @@ final class ScreamingWedgeStrand extends BukkitRunnable {
     private final UUID ownerId;
     private final World world;
     private final double damage;
+    private final double reachMult; // Long Hair: scales travel range and acquisition radius — reach only, never damage
 
     private final Location pos;   // the strand tip
     private Vector dir;           // current heading (unit)
@@ -71,11 +72,12 @@ final class ScreamingWedgeStrand extends BukkitRunnable {
     private int flightTicks = 0;
     private int weaveStep = 0;    // drives the thin waver of the trail
 
-    ScreamingWedgeStrand(Reliquary plugin, Player owner, double damage) {
+    ScreamingWedgeStrand(Reliquary plugin, Player owner, double damage, double reachMult) {
         this.plugin = plugin;
         this.ownerId = owner.getUniqueId();
         this.world = owner.getWorld();
         this.damage = damage;
+        this.reachMult = reachMult;
         this.pos = owner.getEyeLocation().add(owner.getEyeLocation().getDirection().multiply(0.6));
         this.dir = owner.getEyeLocation().getDirection().normalize();
     }
@@ -111,7 +113,7 @@ final class ScreamingWedgeStrand extends BukkitRunnable {
 
             traveled += step;
             moved += step;
-            if (traveled >= MAX_RANGE) { dissipate(); return; }
+            if (traveled >= MAX_RANGE * reachMult) { dissipate(); return; }
         }
 
         // A recurring hiss of air being split — sparse so it doesn't drone.
@@ -124,7 +126,8 @@ final class ScreamingWedgeStrand extends BukkitRunnable {
     private void steerTowardMark() {
         LivingEntity best = null;
         double bestDist = Double.MAX_VALUE;
-        for (Entity e : world.getNearbyEntities(pos, AIM_RADIUS, AIM_RADIUS, AIM_RADIUS)) {
+        double aim = AIM_RADIUS * reachMult;
+        for (Entity e : world.getNearbyEntities(pos, aim, aim, aim)) {
             if (e.getUniqueId().equals(ownerId) || !(e instanceof LivingEntity le) || le.isDead()) continue;
             Vector to = center(le).subtract(pos.toVector());
             double dist = to.length();

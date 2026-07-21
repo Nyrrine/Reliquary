@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -65,6 +66,12 @@ public final class ScreamingWedgeWeapon implements EgoWeapon {
 
     /** Small per-shot damage — the tangle, not the bite, is the payoff. */
     private static final double SHOT_DAMAGE = 3.0;
+
+    // Long Hair (a custom enchant — id "long_hair"): longer strands reach further. +25% travel range and
+    // acquisition radius per level, up to +75% at level 3. Reach only — it never touches the strand's blow,
+    // its hit radius, or the tangle chance.
+    private static final double LONG_HAIR_PER_LEVEL = 0.25;
+    private static final int    LONG_HAIR_CAP       = 3;
 
     /** Chance, per shot, that firing costs the wielder a steak's worth of nourishment. */
     private static final double COST_CHANCE = 0.50;
@@ -133,7 +140,10 @@ public final class ScreamingWedgeWeapon implements EgoWeapon {
 
     /** Loose the strand and sell the shot with a piercing, air-splitting scream. */
     private void fire(Player player) {
-        new ScreamingWedgeStrand(plugin, player, SHOT_DAMAGE).launch();
+        int lvl = Math.min(LONG_HAIR_CAP,
+                EgoEnchants.level(player.getInventory().getItemInMainHand(), "long_hair"));
+        double reach = 1.0 + LONG_HAIR_PER_LEVEL * lvl; // Long Hair: reach only, no damage
+        new ScreamingWedgeStrand(plugin, player, SHOT_DAMAGE, reach).launch();
 
         World world = player.getWorld();
         Location at = player.getEyeLocation();
