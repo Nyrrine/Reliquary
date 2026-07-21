@@ -90,6 +90,13 @@ public final class BeakWeapon implements EgoWeapon {
     private static final int  RAVENOUS_PER_LEVEL = 2;
     private static final int  RAVENOUS_CAP       = 3;
 
+    // Preening (a vanilla enchant — a crossbow holds Quick Charge at an anvil, so this needs no catalogue
+    // entry): a faster-loading bird cuts its dry-magazine reload wait by 15% per level, up to 45% at Quick
+    // Charge III (a 2.75s reload). Utility only — it never touches a pellet's blow or the magazine size,
+    // only how long the empty gun is out of the fight.
+    private static final double PREENING_PER_LEVEL = 0.15;
+    private static final int    PREENING_CAP       = 3;
+
     // Palette — white/gray bird with a red-cannon accent.
     /** Primary — pale feather white. Display name, "How to use:", ability headers. */
     private static final TextColor NAME = TextColor.color(0xE8E8EC);
@@ -286,11 +293,18 @@ public final class BeakWeapon implements EgoWeapon {
         return MAG_SIZE + Math.max(0, extra);
     }
 
+    /** The reload time for the bird held right now: the base wait cut by its Preening bonus (Quick Charge, capped). */
+    private long reloadMs(Player player) {
+        int qc = Math.min(PREENING_CAP,
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.QUICK_CHARGE));
+        return (long) (RELOAD_MS * (1.0 - PREENING_PER_LEVEL * qc));
+    }
+
     /** Render the held-weapon action bar: the reload gauge while reloading, else the live ammo count. */
     private void renderBar(Player player, Mag mag) {
         if (mag.reloading()) {
             long elapsed = System.currentTimeMillis() - mag.reloadStart;
-            double frac = Math.min(1.0, (double) elapsed / RELOAD_MS);
+            double frac = Math.min(1.0, (double) elapsed / reloadMs(player));
             player.sendActionBar(EgoHud.gauge(RED, frac, EgoHud.status("Reloading", RED)));
         } else {
             player.sendActionBar(EgoHud.ammo(RED, "Bullets", mag.rounds, magSize(player)));
@@ -304,7 +318,7 @@ public final class BeakWeapon implements EgoWeapon {
 
         if (mag != null && mag.reloading()) {
             long elapsed = System.currentTimeMillis() - mag.reloadStart;
-            if (elapsed >= RELOAD_MS) {
+            if (elapsed >= reloadMs(player)) {
                 mag.rounds = magSize(player);
                 mag.reloadStart = 0L;
                 if (held) {

@@ -5,6 +5,7 @@ import com.nyrrine.reliquary.core.Blink;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -132,6 +133,13 @@ public final class DiscordWeapon implements EgoWeapon {
     private static final double PENDANT_SPEED = 1.6;
     /** Bounce cap. "Ricochets off every wall for a bit" — a beam that bounces forever is a real perf hazard. */
     private static final int PENDANT_MAX_BOUNCES = 8;
+    /**
+     * Hall of Mirrors (a custom enchant — no vanilla equivalent on a falchion): the beam mirrors off more
+     * walls, +1 to the bounce cap per level up to +3, for an 11-bounce beam at most. It only turns more
+     * corners — the travel and tick caps still bound the ricochet exactly as before, and no cut hits harder.
+     * Applied with /reliquary enchant hall_of_mirrors.
+     */
+    private static final int PENDANT_HALL_OF_MIRRORS_CAP = 3;
     /** Total path-length cap, in blocks. With PENDANT_SPEED this bounds the beam to ~30 ticks of life. */
     private static final double PENDANT_MAX_TRAVEL = 48.0;
     /** Belt-and-braces lifetime cap, in ticks — the beam can never outlive this even if the maths misbehaves. */
@@ -544,6 +552,7 @@ public final class DiscordWeapon implements EgoWeapon {
         private int bounces = 0;
         private int ticks = 0;
         private int spin = 0;
+        private final int maxBounces;
         private final Set<UUID> cut = new HashSet<>();
 
         DevilsPendantBeam(Player owner) {
@@ -552,6 +561,9 @@ public final class DiscordWeapon implements EgoWeapon {
             Location eye = owner.getEyeLocation();
             this.dir = eye.getDirection().normalize();
             this.pos = eye.clone().add(dir.clone().multiply(0.5));
+            // Read Hall of Mirrors once at launch — the beam's bounce budget is fixed for its whole life.
+            this.maxBounces = PENDANT_MAX_BOUNCES + Math.min(PENDANT_HALL_OF_MIRRORS_CAP,
+                    EgoEnchants.level(owner.getInventory().getItemInMainHand(), "hall_of_mirrors"));
         }
 
         @Override
@@ -584,7 +596,7 @@ public final class DiscordWeapon implements EgoWeapon {
                 budget -= segment;
 
                 if (hit == null) continue;                       // clear leg — the budget is spent
-                if (++bounces > PENDANT_MAX_BOUNCES) { end(); return; }
+                if (++bounces > maxBounces) { end(); return; }
 
                 BlockFace face = hit.getHitBlockFace();
                 if (face == null) { end(); return; }

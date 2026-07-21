@@ -18,6 +18,7 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -119,6 +120,13 @@ public final class HornetWeapon implements EgoWeapon {
     private static final int  BUCKSHOT_MAG = 6;      // buckshot rounds per magazine (shotgun)
     private static final long RELOAD_MS    = 5000L;  // auto-reload, fires only when BOTH magazines are dry
     private static final long DRY_HINT_MS  = 2000L;  // how long the spent-chamber hint holds the bar's tail
+
+    // Twin Reload (a vanilla enchant — the gun holds Quick Charge at an anvil, so this needs no catalogue
+    // entry): both magazines come back faster, cutting the shared auto-reload by 15% per level, up to 45%
+    // at Quick Charge III (a 2.75s reload). Utility only — it never touches a round's damage, the magazine
+    // sizes, or the both-barrels-dry rule that arms the reload in the first place.
+    private static final double TWIN_RELOAD_PER_LEVEL = 0.15;
+    private static final int    TWIN_RELOAD_CAP       = 3;
 
     // ---- tuning: rifle (spore rounds) ----------------------------------------------
     // A single deliberate round a second. 6.0 x 10 rounds = 60 damage a magazine, and 6.0/s sustained sits
@@ -556,6 +564,13 @@ public final class HornetWeapon implements EgoWeapon {
      * and no partial top-up, by design. One mild point of durability wear is paid here, once per reload
      * rather than per pellet, so a buckshot blast doesn't cost six times what a spore round does.
      */
+    /** The reload time for the gun held right now: the base wait cut by its Twin Reload bonus (Quick Charge, capped). */
+    private long reloadMs(Player player) {
+        int qc = Math.min(TWIN_RELOAD_CAP,
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.QUICK_CHARGE));
+        return (long) (RELOAD_MS * (1.0 - TWIN_RELOAD_PER_LEVEL * qc));
+    }
+
     private void beginReload(Player player, Hive hive) {
         if (hive.reloading()) return;
         hive.reloadStart = System.currentTimeMillis();
@@ -600,7 +615,7 @@ public final class HornetWeapon implements EgoWeapon {
 
         if (hive != null && hive.reloading()) {
             long elapsed = System.currentTimeMillis() - hive.reloadStart;
-            if (elapsed >= RELOAD_MS) {
+            if (elapsed >= reloadMs(player)) {
                 hive.spore = SPORE_MAG;
                 hive.buckshot = BUCKSHOT_MAG;
                 hive.reloadStart = 0L;
@@ -631,9 +646,10 @@ public final class HornetWeapon implements EgoWeapon {
      */
     private void renderBar(Player player, Hive hive) {
         if (hive.reloading()) {
+            long reload = reloadMs(player);
             long elapsed = System.currentTimeMillis() - hive.reloadStart;
-            double frac = Math.min(1.0, (double) elapsed / RELOAD_MS);
-            long remaining = Math.max(0L, RELOAD_MS - elapsed);
+            double frac = Math.min(1.0, (double) elapsed / reload);
+            long remaining = Math.max(0L, reload - elapsed);
             player.sendActionBar(EgoHud.gauge(BUCKSHOT, frac,
                     EgoHud.cooldown("Reloading", remaining, BUCKSHOT)));
             return;

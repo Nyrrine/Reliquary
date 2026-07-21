@@ -40,6 +40,14 @@ public record EgoEnchant(String id, String displayName, int maxLevel, String des
     // Ravenous: a hungrier Beak carries a bigger magazine — +2 rounds per level, more shots between reloads.
     public static final EgoEnchant RAVENOUS = reg("ravenous", "Ravenous", 3,
             "Beak: +2 rounds in the magazine per level.");
+    // Hall of Mirrors: Discord's Devil's Pendant mirrors off more walls — +1 to the beam's bounce cap per
+    // level, up to +3 (an 11-bounce beam). It turns more corners, never cuts harder.
+    public static final EgoEnchant HALL_OF_MIRRORS = reg("hall_of_mirrors", "Hall of Mirrors", 3,
+            "Discord: +1 bounce to the Devil's Pendant per level (a beam that mirrors farther).");
+    // Deep Freeze: Frost Splinter's parting chill lingers longer — +0.5s to the Second Kiss slowness per
+    // level, up to +1.5s. A longer chill, never a deeper one; the amplifier is untouched.
+    public static final EgoEnchant DEEP_FREEZE = reg("deep_freeze", "Deep Freeze", 3,
+            "Frost Splinter: +0.5s to the Second Kiss slowness per level (a longer chill).");
 
     /** The enchant with this id, or {@code null} if no such enchant is catalogued. */
     public static EgoEnchant get(String id) {

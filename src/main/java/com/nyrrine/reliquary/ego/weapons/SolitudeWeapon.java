@@ -17,6 +17,7 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -97,6 +98,13 @@ public final class SolitudeWeapon implements EgoWeapon {
     private static final long   SHOT_INTERVAL_MS  = 750L;   // the hammer cycle between aimed rounds
     private static final long   RELOAD_MS         = 2500L;  // the on-demand shift+RC reload
     private static final double SHOT_DAMAGE       = 8.0;    // per aimed round — a netherite sword's hit, paid for by the 1.5s cycle
+
+    // Practiced Thumbs (a vanilla enchant — the revolver holds Quick Charge at an anvil, so this needs no
+    // catalogue entry): steadier hands thumb rounds home faster, cutting the shift+RC reload by 15% per
+    // level, up to 45% at Quick Charge III. Utility only — it touches the manual reload wait and nothing
+    // else; the hammer cycle between aimed rounds and the free Stories reload are both left alone.
+    private static final double PRACTICED_THUMBS_PER_LEVEL = 0.15;
+    private static final int    PRACTICED_THUMBS_CAP       = 3;
     private static final double SHOT_SPREAD       = 0.012;  // a hair of scatter so an aimed shot isn't a laser
     private static final double RANGE             = 30.0;   // hitscan reach, shared by both fire modes
     private static final double RAY_SIZE          = 0.5;    // entity ray fatness (forgiving aim)
@@ -294,7 +302,7 @@ public final class SolitudeWeapon implements EgoWeapon {
 
         Cyl cyl = cylinders.computeIfAbsent(player.getUniqueId(), k -> new Cyl());
 
-        if (cyl.reloading() && System.currentTimeMillis() - cyl.reloadStart >= RELOAD_MS) {
+        if (cyl.reloading() && System.currentTimeMillis() - cyl.reloadStart >= reloadMs(player)) {
             cyl.rounds = MAG;
             cyl.reloadStart = 0L;
             reloadReadyFx(player);
@@ -302,6 +310,16 @@ public final class SolitudeWeapon implements EgoWeapon {
 
         renderBar(player, cyl);
         return true;
+    }
+
+    /**
+     * The manual-reload time for the revolver held right now: the base wait cut by Practiced Thumbs (Quick
+     * Charge, capped). The hammer cycle and the free Stories reload never read this.
+     */
+    private long reloadMs(Player player) {
+        int qc = Math.min(PRACTICED_THUMBS_CAP,
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.QUICK_CHARGE));
+        return (long) (RELOAD_MS * (1.0 - PRACTICED_THUMBS_PER_LEVEL * qc));
     }
 
     /**
@@ -315,7 +333,7 @@ public final class SolitudeWeapon implements EgoWeapon {
         Component bar = EgoHud.ammo(PRIMARY, "Chambers", cyl.rounds, MAG);
         if (cyl.reloading()) {
             bar = bar.append(plain("  ", FAINT))
-                    .append(EgoHud.cooldown("Reloading", RELOAD_MS - (now - cyl.reloadStart), PRIMARY));
+                    .append(EgoHud.cooldown("Reloading", reloadMs(player) - (now - cyl.reloadStart), PRIMARY));
         } else if (cyl.rounds <= 0) {
             bar = bar.append(plain("  ", FAINT)).append(now < cyl.storiesReady
                     ? EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT)

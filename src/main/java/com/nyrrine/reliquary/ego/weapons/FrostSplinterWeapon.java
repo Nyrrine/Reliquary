@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -156,6 +157,13 @@ public final class FrostSplinterWeapon implements EgoWeapon {
     /** Amplifier of that lingering Slowness — 2 => Slowness III, a real drag but still walkable. */
     private static final int SECOND_KISS_SLOW_AMP = 2;
 
+    // [Deep Freeze] a custom enchant — no vanilla equivalent on a spear, applied with /reliquary enchant. The
+    // parting chill lingers longer: +0.5s (10 ticks) onto the Second Kiss's leaving Slowness per level, up to
+    // +1.5s (a 13.5s chill). It extends only the duration — never the amplifier, never any damage — so the
+    // chill reaches further without biting deeper. The seal itself and the Third Kiss root are left alone.
+    private static final int DEEP_FREEZE_PER_LEVEL_TICKS = 10;
+    private static final int DEEP_FREEZE_CAP             = 3;
+
     // [Right-click] The Third Kiss.
     /** One hurled block of ice every 20 seconds. */
     private static final long THROW_COOLDOWN_MS = 20_000L;
@@ -287,8 +295,15 @@ public final class FrostSplinterWeapon implements EgoWeapon {
      * the hold. Landing it as the ice releases gives the honest 1.5s seal followed by the full 12s chill.
      */
     private void secondKiss(Player attacker, LivingEntity victim) {
-        root(victim, SECOND_KISS_ROOT_TICKS, SECOND_KISS_SLOW_TICKS);
+        root(victim, SECOND_KISS_ROOT_TICKS, secondKissSlowTicks(attacker));
         secondKissFx(attacker, victim);
+    }
+
+    /** The Second Kiss's parting Slowness for the spear held right now: the base 12s plus its Deep Freeze bonus. */
+    private int secondKissSlowTicks(Player attacker) {
+        int extra = DEEP_FREEZE_PER_LEVEL_TICKS * Math.min(DEEP_FREEZE_CAP,
+                EgoEnchants.level(attacker.getInventory().getItemInMainHand(), "deep_freeze"));
+        return SECOND_KISS_SLOW_TICKS + Math.max(0, extra);
     }
 
     // ---- [Right-click] The Third Kiss ----------------------------------------------
