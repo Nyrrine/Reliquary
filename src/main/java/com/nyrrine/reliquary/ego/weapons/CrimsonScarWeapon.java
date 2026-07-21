@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -108,6 +109,12 @@ public final class CrimsonScarWeapon implements EgoWeapon {
     private static final double FLINTLOCK_RANGE    = 30.0;   // hitscan reach
     private static final double FLINTLOCK_RAY_SIZE = 0.5;    // entity ray fatness (forgiving aim)
     private static final long   RELOAD_MS          = 4000L;  // long reload — swap back to steel meanwhile
+
+    // Ram the Powder (a custom enchant — id "ram_the_powder"): the melee form is an axe, which can't hold
+    // Quick Charge at an anvil, so a vanilla read is impossible — this is an ego-enchant that cuts the
+    // flintlock's reload lock by 12% per level, up to 36% at level 3. Cadence only — never the ball's blow.
+    private static final double RAM_THE_POWDER_PER_LEVEL = 0.12;
+    private static final int    RAM_THE_POWDER_CAP       = 3;
 
     // Lunging-stab combo tuning — every 3rd properly-spaced chop lunges in and opens a bleed.
     private static final long   MIN_HIT_INTERVAL_MS = 350L; // hits closer than this are mash — they don't count
@@ -229,12 +236,17 @@ public final class CrimsonScarWeapon implements EgoWeapon {
         return item;
     }
 
-    /** Carry enchantments (always) and durability (by wear-fraction) from one form to the other. */
+    /** Carry enchantments (vanilla and ego) and durability (by wear-fraction) from one form to the other. */
     private void carryOver(ItemStack from, ItemStack to) {
         ItemMeta tm = to.getItemMeta();
         if (tm == null) return;
         for (var e : from.getEnchantments().entrySet()) {
             tm.addEnchant(e.getKey(), e.getValue(), true);
+        }
+        // Ego-enchants live in a PDC sub-container, not the vanilla map — carry them too, or a swap to the
+        // flintlock would drop Ram the Powder (and any future Crimson ego-enchant) the axe was holding.
+        for (var e : EgoEnchants.all(from).entrySet()) {
+            EgoEnchants.set(tm, e.getKey(), e.getValue());
         }
         ItemMeta fm = from.getItemMeta();
         if (fm instanceof Damageable fd && tm instanceof Damageable td) {
@@ -310,10 +322,17 @@ public final class CrimsonScarWeapon implements EgoWeapon {
         return pistol ? EgoHud.status("Flintlock", STEEL) : EgoHud.status("Steel", NAME);
     }
 
+    /** The flintlock reload for the pistol held right now: the base lock cut by its Ram the Powder bonus. */
+    private long reloadMs(Player player) {
+        int lvl = Math.min(RAM_THE_POWDER_CAP,
+                EgoEnchants.level(player.getInventory().getItemInMainHand(), "ram_the_powder"));
+        return (long) (RELOAD_MS * (1.0 - RAM_THE_POWDER_PER_LEVEL * lvl));
+    }
+
     /** The flintlock half: its reload gate counting down, else ready to fire. */
     private Component reloadReadout(Player player) {
         Long last = lastFire.get(player.getUniqueId());
-        long rem = last == null ? 0L : RELOAD_MS - (System.currentTimeMillis() - last);
+        long rem = last == null ? 0L : reloadMs(player) - (System.currentTimeMillis() - last);
         return rem > 0 ? EgoHud.cooldown("Reload", rem, STEEL) : EgoHud.ready("Reload", STEEL);
     }
 
@@ -339,7 +358,7 @@ public final class CrimsonScarWeapon implements EgoWeapon {
 
         Long last = lastFire.get(id);
         if (last != null) {
-            long remaining = RELOAD_MS - (now - last);
+            long remaining = reloadMs(player) - (now - last);
             if (remaining > 0) {
                 renderBar(player); // the composed line already shows the reload counting down
                 player.playSound(player.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.4f, 1.1f);
