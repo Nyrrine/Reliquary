@@ -52,6 +52,20 @@ public record EgoEnchant(String id, String displayName, int maxLevel, String des
     // feeds the barrel. -5% to the reload per level while on fire, up to -15%. Cadence only, never damage.
     public static final EgoEnchant BACKDRAFT = reg("backdraft", "Backdraft", 3,
             "Fourth Match Flame: -5% reload per level while you are on fire (up to -15%).");
+    // Fixation: Gaze holds its Delight — +1.5s of decay grace per level. It never raises the Delight damage
+    // cap (full Delight stays level with the band); it just makes reaching and keeping that peak easier.
+    public static final EgoEnchant FIXATION = reg("fixation", "Fixation", 2,
+            "Gaze: +1.5s of Delight decay grace per level (hold your peak, not a higher one).");
+    // Swift Justice: Judgement recurs sooner — -2s to its cooldown per level, floored at 8s. Cadence only.
+    public static final EgoEnchant SWIFT_JUSTICE = reg("swift_justice", "Swift Justice", 3,
+            "Justitia: -2s to the Judgement cooldown per level (floor 8s).");
+    // Bloodthirst: Mimicry drinks deeper — +0.05 to its lifesteal fraction per level. Sustain, not damage;
+    // still clamped to max health, so it stays in band.
+    public static final EgoEnchant BLOODTHIRST = reg("bloodthirst", "Bloodthirst", 3,
+            "Mimicry: +0.05 lifesteal per level (sustain, clamped to max health).");
+    // Arcana Focus: the current form's ultimate returns sooner — -15s to its cooldown per level, floor 60s.
+    public static final EgoEnchant ARCANA_FOCUS = reg("arcana_focus", "Arcana Focus", 3,
+            "Love & Hate: -15s to the current form's ult cooldown per level (floor 60s).");
 
     /** The enchant with this id, or {@code null} if no such enchant is catalogued. */
     public static EgoEnchant get(String id) {
