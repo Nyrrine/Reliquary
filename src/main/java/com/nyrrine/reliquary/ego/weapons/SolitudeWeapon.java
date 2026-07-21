@@ -123,9 +123,6 @@ public final class SolitudeWeapon implements Weapon {
     private static final Particle.DustOptions    VOID_CORE = new Particle.DustOptions(VOID_DARK, 1.4f);
     private static final Particle.DustOptions    RUST_FLAKE = new Particle.DustOptions(RUST, 0.7f);
 
-    /** Reload spinner frames — a cylinder turning, no milliseconds. */
-    private static final String[] SPIN = {"◐", "◓", "◑", "◒"};
-
     /** The void bloom's ring: motes placed evenly on a small circle around the impact. */
     private static final int    RING_MOTES  = 8;
     private static final double RING_RADIUS = 0.55;
@@ -187,7 +184,7 @@ public final class SolitudeWeapon implements Weapon {
         if (cyl.reloading()) { dryClick(player); return; }   // mid-reload the trigger is dead
         if (cyl.rounds <= 0) {                               // an empty gun stays empty — it never auto-reloads
             dryClick(player);
-            renderBar(player, cyl, 0);
+            renderBar(player, cyl);
             return;
         }
         // The hammer is still cycling. Silent — the action bar already reads "Hammer — Ns"; a click on
@@ -198,7 +195,7 @@ public final class SolitudeWeapon implements Weapon {
         cyl.rounds--;
         loose(player, SHOT_DAMAGE, SHOT_SPREAD, true);
         EgoDurability.wearMainHand(player); // mild — one point per aimed round
-        renderBar(player, cyl, 0);
+        renderBar(player, cyl);
     }
 
     // ---- Stories that Never Cease / Reload --------------------------------------------
@@ -270,7 +267,7 @@ public final class SolitudeWeapon implements Weapon {
         cyl.reloadStart = 0L;   // the free reload cancels any wait outright
         if (player != null) {
             reloadReadyFx(player);
-            renderBar(player, cyl, 0);
+            renderBar(player, cyl);
         }
     }
 
@@ -280,7 +277,7 @@ public final class SolitudeWeapon implements Weapon {
         if (cyl.rounds >= MAG) { dryClick(player); return; } // already full — nothing to top up
         cyl.reloadStart = now;
         reloadStartFx(player);
-        renderBar(player, cyl, 0);
+        renderBar(player, cyl);
     }
 
     // ---- tick: reload finish + HUD ----------------------------------------------------
@@ -299,34 +296,26 @@ public final class SolitudeWeapon implements Weapon {
             reloadReadyFx(player);
         }
 
-        renderBar(player, cyl, tick);
+        renderBar(player, cyl);
         return true;
     }
 
     /**
-     * The held-weapon action bar: a filling reload gauge, or the live chamber count with at most ONE
-     * trailing status — the ability's state while the gun is dry (that is when it matters), otherwise the
-     * hammer cycle while it turns. Everything reads in whole seconds.
+     * The held-weapon action bar. The base readout — the live chamber count {@code Chambers x/6} — is
+     * ALWAYS shown; a state only ever APPENDS onto it, never replaces the line. At most one trailing state:
+     * the reload while the cylinder is filling, otherwise the ability's state while the gun is dry (that is
+     * when it matters). Everything reads in whole seconds.
      */
-    private void renderBar(Player player, Cyl cyl, long tick) {
-        if (cyl.reloading()) {
-            long elapsed = System.currentTimeMillis() - cyl.reloadStart;
-            double frac = Math.min(1.0, (double) elapsed / RELOAD_MS);
-            Component label = plain("Reloading ", PRIMARY)
-                    .append(plain(SPIN[(int) Math.floorMod(tick, SPIN.length)], FAINT));
-            player.sendActionBar(EgoHud.gauge(PRIMARY, frac, label));
-            return;
-        }
-
-        Component bar = EgoHud.ammo(PRIMARY, "Chambers", cyl.rounds, MAG);
+    private void renderBar(Player player, Cyl cyl) {
         long now = System.currentTimeMillis();
-        if (cyl.rounds <= 0) {
+        Component bar = EgoHud.ammo(PRIMARY, "Chambers", cyl.rounds, MAG);
+        if (cyl.reloading()) {
+            bar = bar.append(plain("  ", FAINT))
+                    .append(EgoHud.cooldown("Reloading", RELOAD_MS - (now - cyl.reloadStart), PRIMARY));
+        } else if (cyl.rounds <= 0) {
             bar = bar.append(plain("  ", FAINT)).append(now < cyl.storiesReady
                     ? EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT)
                     : EgoHud.ready(STORIES, PRIMARY));
-        } else if (now - cyl.lastShot < SHOT_INTERVAL_MS) {
-            bar = bar.append(plain("  ", FAINT))
-                    .append(EgoHud.cooldown("Hammer", SHOT_INTERVAL_MS - (now - cyl.lastShot), FAINT));
         }
         player.sendActionBar(bar);
     }

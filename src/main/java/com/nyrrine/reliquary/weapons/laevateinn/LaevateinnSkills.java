@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.weapons.laevateinn;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.ego.EgoHud;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Location;
@@ -539,8 +540,9 @@ public final class LaevateinnSkills {
     // ---- shared --------------------------------------------------------------------
 
     private void onCooldown(Player player, long remainingMs, String name) {
-        player.sendActionBar(Component.text(name + " — " + (remainingMs / 1000 + 1) + "s",
-                TextColor.color(0x8C8A93)));
+        // Shared cooldown vocabulary. EgoHud rounds up to whole seconds (the house rule), which can read one
+        // second higher than the old floor+1 at an exact-second boundary — otherwise identical.
+        player.sendActionBar(EgoHud.cooldown(name, remainingMs, TextColor.color(0x8C8A93)));
         player.playSound(player.getLocation(), Sound.BLOCK_CHAIN_HIT, 0.5f, 0.8f);
     }
 

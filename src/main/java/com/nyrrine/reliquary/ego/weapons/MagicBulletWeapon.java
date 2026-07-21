@@ -324,7 +324,9 @@ public final class MagicBulletWeapon implements Weapon {
                 player.sendActionBar(bulletMeter(st.bullets));
             } else {
                 long rem = st.downtimeUntil - now;
-                player.sendActionBar(EgoHud.status("Magic Bullet - reloading in " + secs(rem) + "s", NAME));
+                // Keep the Bullet Counter on the line and append the reload state, rather than replacing it.
+                player.sendActionBar(bulletMeter(st.bullets)
+                        .append(plain("  reloading in " + secs(rem) + "s", NAME)));
                 return true;
             }
         }
@@ -343,9 +345,9 @@ public final class MagicBulletWeapon implements Weapon {
                 fire(player, st);
             }
         } else if (now < st.gateUntil) {
-            double frac = 1.0 - (st.gateUntil - now) / (double) SHOT_COOLDOWN_MS;
-            player.sendActionBar(EgoHud.gauge(NAME, Math.max(0.0, Math.min(1.0, frac)),
-                    plain("Magic Bullet - reloading in " + secs(st.gateUntil - now) + "s", NamedTextColor.GRAY)));
+            // Keep the base meter and append the between-shots reload countdown, not a lone gauge.
+            player.sendActionBar(bulletMeter(st.bullets)
+                    .append(plain("  reloading in " + secs(st.gateUntil - now) + "s", NamedTextColor.GRAY)));
         } else if (now < st.holdMsgUntil) {
             return true; // keep the "Target locked / lost" message up for a beat before the meter resumes
         } else {

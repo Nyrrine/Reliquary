@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.weapons.arayashiki;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.ego.EgoHud;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
@@ -86,7 +87,7 @@ public final class ArayashikiWielder {
             if (!weapon.isActionBarMuted(id)) player.sendActionBar(chargeBar(cur, holding));
         } else if (!holding && hollowSeen.remove(id)) {
             // Only pops when the mind has climbed all the way back from hollow.
-            player.sendActionBar(Component.text("Your mind is clear again.", TextColor.color(0x9FD8FF)));
+            player.sendActionBar(EgoHud.status("Your mind is clear again.", TextColor.color(0x9FD8FF)));
         }
 
         // Stay engaged while actively holding or still regenerating; idle-at-full disengages.

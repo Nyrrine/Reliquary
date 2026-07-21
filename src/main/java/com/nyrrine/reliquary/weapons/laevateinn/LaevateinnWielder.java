@@ -1,6 +1,7 @@
 package com.nyrrine.reliquary.weapons.laevateinn;
 
 import com.nyrrine.reliquary.Reliquary;
+import com.nyrrine.reliquary.ego.EgoHud;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
@@ -254,7 +255,7 @@ public final class LaevateinnWielder {
         Location o = player.getLocation().add(0, 1.0, 0);
         world.spawnParticle(Particle.SMOKE, o, 10, 0.3, 0.5, 0.3, 0.02);
         world.playSound(o, Sound.BLOCK_FIRE_EXTINGUISH, 0.6f, 0.9f);
-        player.sendActionBar(Component.text("The packaging closes — a seal reforms.",
+        player.sendActionBar(EgoHud.status("The packaging closes — a seal reforms.",
                 TextColor.color(0x8C8A93)));
     }
 
@@ -409,15 +410,11 @@ public final class LaevateinnWielder {
         }
         frac = Math.max(0.0, Math.min(1.0, frac));
 
-        int seg = 10;
-        int filled = (int) Math.round(frac * seg);
         TextColor fill = LaevateinnWeapon.tierColor(form);
 
-        Component bar = Component.text("[", NamedTextColor.DARK_GRAY)
-                .append(Component.text("▮".repeat(filled), fill))
-                .append(Component.text("▮".repeat(seg - filled), NamedTextColor.DARK_GRAY))
-                .append(Component.text("]  ", NamedTextColor.DARK_GRAY))
-                .append(Component.text(FORM_LABEL[form], fill));
+        // The unseal gauge, in the shared EgoHud vocabulary — an identical 10-segment bar whose label is
+        // the form name. The cooling hint and ability cooldowns still append onto it below.
+        Component bar = EgoHud.gauge(fill, frac, Component.text(FORM_LABEL[form], fill));
 
         // Cooling hint when out of combat.
         if (form > 0 && !weapon.inCombat(id)) {
