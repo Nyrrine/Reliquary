@@ -51,7 +51,7 @@ public final class ChristmasWeapon implements Weapon {
      * Chance, per landed melee hit, that a gift is given. Rolled independently for the wielder's buff
      * and the enemy's gift. Kept small so it stays a delight, not a crutch.
      */
-    private static final int GIFT_CHANCE_PERCENT = 11;
+    private static final int GIFT_CHANCE_PERCENT = 18;
 
     public ChristmasWeapon(Reliquary plugin) {
         this.plugin = plugin;
@@ -147,7 +147,7 @@ public final class ChristmasWeapon implements Weapon {
     /** Fleeting gifts for the struck enemy — always a "gift", never a "debuff". */
     private enum EnemyGift {
         SLUGGISHNESS("Sluggishness", PotionEffectType.SLOWNESS,        80, 1), // Slowness II, 4s
-        WEAKNESS("Weakness",         PotionEffectType.WEAKNESS,       100, 0), // Weakness I, 5s
+        WEAKNESS("Weakness",         PotionEffectType.WEAKNESS,       100, 1), // Weakness II, 5s — the enemy-gift damage debuff (§3)
         DIZZINESS("Dizziness",       PotionEffectType.NAUSEA,         100, 0), // Nausea, 5s
         PRICKLE("a Prickle",         PotionEffectType.POISON,          80, 0), // Poison I, 4s
         HEAVY_HANDS("Heavy Hands",   PotionEffectType.MINING_FATIGUE, 100, 1), // Mining Fatigue II, 5s
