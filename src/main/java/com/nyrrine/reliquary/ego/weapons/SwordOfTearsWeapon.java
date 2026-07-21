@@ -459,9 +459,10 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
 
         // Formation geometry — a curved fan that WRAPS around behind the wielder (not a rigid line).
         private static final double FORM_RADIUS   = 1.90;   // orbit radius of the fan behind the wielder
-        private static final double FORM_HEIGHT   = 1.25;   // hover height
+        private static final double FORM_HEIGHT   = 1.55;   // hover height — up behind the shoulders, a radiant fan
         private static final double FORM_ARC_DEG  = 62.0;   // half-span of the arc; blades wrap toward the flanks
-        private static final double FORM_ARC_LIFT = 0.18;   // the outer blades ride a touch higher -> a curved fan
+        private static final double FORM_ARC_LIFT = 0.35;   // the outer blades ride higher -> a tall, curved fan
+        private static final double FORM_POINT_UP = 0.90;   // how far the blade tips tilt UP off their outward spoke
 
         // Dart feel (Double Tag + the opening of a sortie). Blocks / blocks-per-tick. SLOW tip-leading
         // glide-in, then a FAST stab — the contrast is the whole read.
@@ -571,10 +572,10 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
         /** A blade at rest in the fan: wheeling into its slot, tip levelled where the wielder looks, weeping the occasional tear. */
         private void hoverStep(Player owner, ItemDisplay b, int i, long tick) {
             if (b.getTeleportDuration() != 3) b.setTeleportDuration(3); // restore the smooth hover cadence
-            // Point the blade out along the wielder's facing (a levelled wuxia poise), not hanging tip-down.
-            double rad = Math.toRadians(owner.getLocation().getYaw());
-            Vector face = new Vector(-Math.sin(rad), 0, Math.cos(rad));
-            b.setTransformation(hoverPointing(face));
+            // Point the blade OUT along its own spoke (away from the back, toward its flank) and tilted UP, so the
+            // retinue reads as a radiant fan of swords rising behind the wielder — not lying flat where you look.
+            Vector point = bladeSpoke(owner, i).setY(FORM_POINT_UP);
+            b.setTransformation(hoverPointing(point.normalize()));
             b.teleport(slotFor(owner, i, tick));
             if ((tick % 18) == 0) { // an occasional tear weeping from the hovering blade + a faint sparkle
                 Location w = b.getLocation().add(0, -0.2, 0);
@@ -594,14 +595,8 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
         private Location slotFor(Player owner, int i, long tick) {
             Location base = owner.getLocation();
             float yaw = base.getYaw();
-            double rad = Math.toRadians(yaw);
-            Vector forward = new Vector(-Math.sin(rad), 0, Math.cos(rad));
-            Vector right   = new Vector(Math.cos(rad), 0, Math.sin(rad));
-            // spread the blades symmetrically across the arc: frac in [-1, 1]
             double frac = RAPIER_COUNT == 1 ? 0.0 : (i / (double) (RAPIER_COUNT - 1)) * 2.0 - 1.0;
-            double theta = Math.toRadians(frac * FORM_ARC_DEG); // angle off "directly behind"
-            // direction from the wielder out to the blade: behind, swung around toward a flank
-            Vector dir = forward.clone().multiply(-Math.cos(theta)).add(right.clone().multiply(Math.sin(theta)));
+            Vector dir = bladeSpoke(owner, i); // the blade's spoke: out behind, swung toward its flank
             double bob  = Math.sin(tick * 0.12 + i * 1.6) * 0.10;
             double lift = Math.abs(frac) * FORM_ARC_LIFT; // curve the fan vertically at its ends
             Location slot = base.clone()
@@ -610,6 +605,16 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
             slot.setYaw(yaw + (float) (frac * FORM_ARC_DEG)); // angle each blade outward along the arc
             slot.setPitch(0f);
             return slot;
+        }
+
+        /** The horizontal spoke blade {@code i} rides: pointing out behind the wielder, swung toward its flank. */
+        private Vector bladeSpoke(Player owner, int i) {
+            double rad = Math.toRadians(owner.getLocation().getYaw());
+            Vector forward = new Vector(-Math.sin(rad), 0, Math.cos(rad));
+            Vector right   = new Vector(Math.cos(rad), 0, Math.sin(rad));
+            double frac = RAPIER_COUNT == 1 ? 0.0 : (i / (double) (RAPIER_COUNT - 1)) * 2.0 - 1.0;
+            double theta = Math.toRadians(frac * FORM_ARC_DEG); // angle off "directly behind"
+            return forward.multiply(-Math.cos(theta)).add(right.multiply(Math.sin(theta)));
         }
 
         // ---- the duel: a sent blade fighting on its own ---------------------------
