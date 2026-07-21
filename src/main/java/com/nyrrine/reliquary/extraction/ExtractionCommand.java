@@ -831,7 +831,7 @@ public final class ExtractionCommand {
             return;
         }
         ItemStack item = weapon.createItem();
-        stampAttribution(item, player.getName(), pick.grade().minCogito(), 100.0);
+        stampAttribution(item, player.getName());
         item = plugin.tracker().register(item, weapon.id(), player.getName() + " (ticket)");
         giveOrDrop(player, item);
         plugin.weapons().engage(weapon, player.getUniqueId());
@@ -1454,22 +1454,21 @@ public final class ExtractionCommand {
             return;
         }
         ItemStack item = weapon.createItem();
-        stampAttribution(item, player.getName(), r.cogitoGrade(), r.certified() ? 100.0 : r.purity());
+        stampAttribution(item, player.getName());
         item = plugin.tracker().register(item, weapon.id(), player.getName() + " (extracted)");
         giveOrDrop(player, item);
         plugin.weapons().engage(weapon, player.getUniqueId());
     }
 
-    /** Append the §17 attribution stamp — "Extracted by X" + grade — to the bottom of a weapon's lore. */
-    private void stampAttribution(ItemStack item, String extractor, Grade grade, double purity) {
+    /** Append the §17 attribution stamp — "Extracted by X" — to the bottom of a weapon's lore. The quality
+     *  (grade/purity) is deliberately NOT listed on the extracted weapon any more (her call, 2026-07-21). */
+    private void stampAttribution(ItemStack item, String extractor) {
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return;
         List<Component> lore = meta.lore();
         List<Component> out = lore != null ? new ArrayList<>(lore) : new ArrayList<>();
         out.add(Component.empty());
         out.add(Component.text("Extracted by " + extractor, FAINT).decoration(TextDecoration.ITALIC, true));
-        out.add(Component.text(String.format("%s grade · %.1f%% purity", grade.display(), purity), grade.color())
-                .decoration(TextDecoration.ITALIC, true));
         meta.lore(out);
         item.setItemMeta(meta);
     }
