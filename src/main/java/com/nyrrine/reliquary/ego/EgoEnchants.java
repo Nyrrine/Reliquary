@@ -72,7 +72,10 @@ public final class EgoEnchants {
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return;
         List<EgoLore.EnchantLine> lines = new ArrayList<>();
-        all(item).forEach((id, lvl) -> lines.add(new EgoLore.EnchantLine(pretty(id), lvl)));
+        all(item).forEach((id, lvl) -> {
+            EgoEnchant def = EgoEnchant.get(id);
+            lines.add(new EgoLore.EnchantLine(def != null ? def.displayName() : pretty(id), lvl));
+        });
         EgoLore.withEnchants(weapon.egoTooltip(), lines).applyTo(meta);
         item.setItemMeta(meta);
     }

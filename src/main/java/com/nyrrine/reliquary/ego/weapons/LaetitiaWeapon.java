@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -85,8 +86,9 @@ public final class LaetitiaWeapon implements EgoWeapon {
     private static final double DAMAGE       = 5.0;    // 2.5 hearts — modest
     private static final int    MAX_LIFETIME = 50;     // ticks before a bolt gives up
 
-    // Charge pool (PLACEHOLDERS — balance wave). A small magazine the future Multishot enchant grows.
+    // Charge pool (PLACEHOLDERS — balance wave). A small magazine the Multishot enchant grows.
     private static final int    MAX_CHARGES  = 5;      // bolts before a reload is forced
+    private static final int    MULTISHOT_CAP = 3;     // Multishot adds one bolt per level, up to +3 (an 8-pool)
     private static final long   RELOAD_MS    = 2_000L; // reload time once the pool runs dry
     private static final long   FIRE_GAP_MS  = 300L;   // min gap between bolts, so holding RC can't drain instantly
     private static final double MARK_RANGE   = 30.0;   // how far the crosshair-mark reaches
@@ -147,10 +149,11 @@ public final class LaetitiaWeapon implements EgoWeapon {
     private void fireBolt(Player player) {
         UUID id = player.getUniqueId();
         long now = System.currentTimeMillis();
-        Magazine m = magazine(id, now);
+        int max = maxCharges(player);
+        Magazine m = magazine(id, now, max);
 
         if (m.charges <= 0) {                          // dry — the toy is winding a fresh magazine, not firing
-            player.sendActionBar(ammoBar(m, now));
+            player.sendActionBar(ammoBar(m, now, max));
             player.playSound(player.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.4f, 1.8f);
             return;
         }
@@ -173,22 +176,41 @@ public final class LaetitiaWeapon implements EgoWeapon {
         player.getWorld().playSound(player.getEyeLocation(), Sound.ENTITY_PHANTOM_FLAP, 0.35f, 0.65f);
         player.getWorld().playSound(player.getEyeLocation(), Sound.ITEM_CROSSBOW_SHOOT, 0.4f, 0.8f);
 
-        player.sendActionBar(ammoBar(m, now)); // reflect the spent charge on the HUD at once
+        player.sendActionBar(ammoBar(m, now, max)); // reflect the spent charge on the HUD at once
     }
 
-    /** The caster's magazine, realising a completed reload into a full pool on read. */
-    private Magazine magazine(UUID id, long now) {
-        Magazine m = magazines.computeIfAbsent(id, k -> new Magazine());
+    /**
+     * The pool size for the doll held right now: the base magazine plus one bolt per Multishot level (capped).
+     * Multishot is reinterpreted here as "a bigger magazine before the reload", exactly as the enchant doc asks.
+     */
+    private int maxCharges(Player player) {
+        int extra = Math.min(MULTISHOT_CAP,
+                EgoEnchants.level(player.getInventory().getItemInMainHand(), "multishot"));
+        return MAX_CHARGES + Math.max(0, extra);
+    }
+
+    /**
+     * The caster's magazine, realising a completed reload into a full pool on read. A fresh magazine starts full
+     * at the current {@code max}, and every refill fills to {@code max}, so growing it with Multishot takes hold
+     * immediately rather than waiting a reload.
+     */
+    private Magazine magazine(UUID id, long now, int max) {
+        Magazine m = magazines.get(id);
+        if (m == null) {
+            m = new Magazine();
+            m.charges = max;
+            magazines.put(id, m);
+        }
         if (m.charges <= 0 && m.reloadAt != 0L && now >= m.reloadAt) {
-            m.charges = MAX_CHARGES; // the reload finished — the pool is full again
+            m.charges = max; // the reload finished — the pool is full again
             m.reloadAt = 0L;
         }
         return m;
     }
 
     /** The always-on charge readout: the ammo bar, with a reload countdown appended while the pool is dry. */
-    private Component ammoBar(Magazine m, long now) {
-        Component bar = EgoHud.ammo(BODY, "Bolts", m.charges, MAX_CHARGES);
+    private Component ammoBar(Magazine m, long now, int max) {
+        Component bar = EgoHud.ammo(BODY, "Bolts", m.charges, max);
         if (m.charges <= 0 && m.reloadAt > now) {
             bar = bar.append(EgoHud.status("  ", FAINT))
                      .append(EgoHud.cooldown("Reload", m.reloadAt - now, FAINT));
@@ -204,7 +226,8 @@ public final class LaetitiaWeapon implements EgoWeapon {
     public boolean onTick(Player player, long tick) {
         if (!matches(player.getInventory().getItemInMainHand())) return false;
         long now = System.currentTimeMillis();
-        player.sendActionBar(ammoBar(magazine(player.getUniqueId(), now), now));
+        int max = maxCharges(player);
+        player.sendActionBar(ammoBar(magazine(player.getUniqueId(), now, max), now, max));
         return true;
     }
 

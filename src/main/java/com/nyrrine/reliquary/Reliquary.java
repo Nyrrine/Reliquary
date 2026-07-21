@@ -1,8 +1,11 @@
 package com.nyrrine.reliquary;
 
+import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.RelicTracker;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.core.WeaponManager;
+import com.nyrrine.reliquary.ego.EgoEnchant;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.data.PlayerDataListener;
 import com.nyrrine.reliquary.data.PlayerStore;
 import com.nyrrine.reliquary.data.YamlPlayerStore;
@@ -219,7 +222,8 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         }
 
         String sub = args[0].toLowerCase();
-        if ((sub.equals("give") || sub.equals("giveall") || sub.equals("admin") || sub.equals("purge"))
+        if ((sub.equals("give") || sub.equals("giveall") || sub.equals("admin") || sub.equals("purge")
+                || sub.equals("enchant"))
                 && !sender.hasPermission(com.nyrrine.reliquary.extraction.ExtractionCommand.ADMIN_PERM)) {
             sender.sendMessage(Component.text("Admin only — normal play is at the crafted stations.")
                     .color(NamedTextColor.RED));
@@ -232,6 +236,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
                 sender.sendMessage(Component.text(sb.toString()).color(NamedTextColor.GRAY));
             }
             case "give" -> giveWeapon(sender, args);
+            case "enchant" -> enchantCmd(sender, args);
             case "giveall" -> giveAll(sender, args);
             case "admin" -> adminGive(sender, args);
             case "track" -> trackCmd(sender);
@@ -287,6 +292,71 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
                     .append(Component.text(id).color(NamedTextColor.WHITE))
                     .append(Component.text(".").color(NamedTextColor.GRAY)));
         }
+    }
+
+    /**
+     * /reliquary enchant &lt;id&gt; &lt;level&gt; — apply (or remove, at level 0) an E.G.O enchant on the
+     * weapon in the sender's main hand. Only weapons that implement {@link EgoWeapon} take enchants; relics
+     * and the bus-ego are refused. The level is bounded by the enchant's catalogued max, and the tooltip's
+     * Enchantments block is rebuilt from the weapon's base tooltip so it never stacks stale lines.
+     */
+    private void enchantCmd(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(Component.text("Only a player can enchant a held weapon.").color(NamedTextColor.RED));
+            return;
+        }
+        if (args.length < 3) {
+            sender.sendMessage(Component.text("Usage: /reliquary enchant <id> <level>  (level 0 removes it)")
+                    .color(NamedTextColor.GRAY));
+            return;
+        }
+
+        String id = args[1].toLowerCase();
+        EgoEnchant def = EgoEnchant.get(id);
+        if (def == null) {
+            StringBuilder known = new StringBuilder("Unknown enchant. Known:");
+            for (EgoEnchant e : EgoEnchant.all()) known.append(' ').append(e.id());
+            sender.sendMessage(Component.text(known.toString()).color(NamedTextColor.RED));
+            return;
+        }
+
+        int level;
+        try {
+            level = Integer.parseInt(args[2]);
+        } catch (NumberFormatException ex) {
+            sender.sendMessage(Component.text("Level must be a number 0-" + def.maxLevel() + ".")
+                    .color(NamedTextColor.RED));
+            return;
+        }
+        if (level < 0 || level > def.maxLevel()) {
+            sender.sendMessage(Component.text(def.displayName() + " goes from 1 to " + def.maxLevel()
+                    + " (0 removes it).").color(NamedTextColor.RED));
+            return;
+        }
+
+        ItemStack item = player.getInventory().getItemInMainHand();
+        Weapon weapon = weapons.fromItem(item);
+        if (!(weapon instanceof EgoWeapon egoWeapon)) {
+            sender.sendMessage(Component.text("Hold an E.G.O weapon — relics and bus-egos can't be enchanted.")
+                    .color(NamedTextColor.RED));
+            return;
+        }
+
+        var meta = item.getItemMeta();
+        EgoEnchants.set(meta, id, level);
+        item.setItemMeta(meta);
+        EgoEnchants.reapplyLore(egoWeapon, item);
+
+        Component verb = level == 0
+                ? Component.text("Removed ").color(NamedTextColor.GRAY)
+                        .append(Component.text(def.displayName()).color(NamedTextColor.WHITE))
+                        .append(Component.text(" from ").color(NamedTextColor.GRAY))
+                : Component.text("Applied ").color(NamedTextColor.GRAY)
+                        .append(Component.text(def.displayName() + " " + level).color(NamedTextColor.WHITE))
+                        .append(Component.text(" to ").color(NamedTextColor.GRAY));
+        sender.sendMessage(verb
+                .append(Component.text(weapon.id()).color(NamedTextColor.WHITE))
+                .append(Component.text(".").color(NamedTextColor.GRAY)));
     }
 
     /**
@@ -439,6 +509,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         help(sender, "/reliquary help", "this help");
         help(sender, "/reliquary list", "list relic ids");
         help(sender, "/reliquary give <id> [player]", "give a relic to yourself or a player");
+        help(sender, "/reliquary enchant <id> <level>", "enchant the E.G.O weapon in your hand (level 0 removes)");
         help(sender, "/reliquary giveall <relics|egoequipment|busego> [player]", "give every weapon of a category");
         help(sender, "/reliquary admin <id> [player]", "give an admin/debug variant (e.g. Worthy Lævateinn)");
         help(sender, "/reliquary track", "list every relic and who holds it");
@@ -463,7 +534,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
 
         if (args.length == 1) {
             List<String> subs = new ArrayList<>(List.of("list", "track", "help"));
-            if (admin) subs.addAll(List.of("give", "giveall", "admin", "purge", "ext"));
+            if (admin) subs.addAll(List.of("give", "giveall", "admin", "purge", "enchant", "ext"));
             return filter(subs, args[0]);
         }
         // /reliquary ext ...: hand the tail (sub-args) to the extraction completer (admin-only).
@@ -472,8 +543,21 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
             return extraction.tabComplete(java.util.Arrays.copyOfRange(args, 1, args.length), admin);
         }
         if (!admin && (args[0].equalsIgnoreCase("give") || args[0].equalsIgnoreCase("giveall")
-                || args[0].equalsIgnoreCase("admin") || args[0].equalsIgnoreCase("purge"))) {
+                || args[0].equalsIgnoreCase("admin") || args[0].equalsIgnoreCase("purge")
+                || args[0].equalsIgnoreCase("enchant"))) {
             return Collections.emptyList();
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("enchant")) {
+            List<String> ids = new ArrayList<>();
+            for (EgoEnchant e : EgoEnchant.all()) ids.add(e.id());
+            return filter(ids, args[1]);
+        }
+        if (args.length == 3 && args[0].equalsIgnoreCase("enchant")) {
+            EgoEnchant e = EgoEnchant.get(args[1]);
+            List<String> levels = new ArrayList<>();
+            int maxLevel = e == null ? 5 : e.maxLevel();
+            for (int i = 0; i <= maxLevel; i++) levels.add(Integer.toString(i));
+            return filter(levels, args[2]);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("giveall")) {
             return filter(List.of("relics", "egoequipment", "busego"), args[1]);
