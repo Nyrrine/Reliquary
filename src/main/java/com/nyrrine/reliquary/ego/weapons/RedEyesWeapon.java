@@ -25,6 +25,7 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
@@ -231,10 +232,28 @@ public final class RedEyesWeapon implements EgoWeapon {
             }
         }
 
+        // Venom Fang: a Sharpness-enchanted blade turns the spider's bite venomous.
+        venomFang(attacker, victim);
+
         // Penitence off-hand: inherit its on-hit passive (flat food chance + ramping heal).
         if (holdingPenitenceOffhand(attacker)) {
             penitencePassive(attacker);
         }
+    }
+
+    // Venom Fang: Sharpness is reinterpreted as venom. Sharpness already boosts the blade's own damage
+    // natively, so the added bite is deliberately tiny — a short Poison I (refreshed, never stacked), a couple
+    // seconds longer at higher levels. Poison can't drop a target below 1 HP, so it never becomes a finisher.
+    private static final int VENOM_BASE_TICKS = 30; // 1.5s at Sharpness I
+    private static final int VENOM_PER_LEVEL  = 10; // +0.5s per level, capped
+    private static final int VENOM_LEVEL_CAP  = 3;
+
+    /** If the blade carries vanilla Sharpness, lay a short Poison I on the bitten target. */
+    private void venomFang(Player attacker, LivingEntity victim) {
+        int sharpness = attacker.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.SHARPNESS);
+        if (sharpness <= 0) return;
+        int ticks = VENOM_BASE_TICKS + VENOM_PER_LEVEL * Math.min(VENOM_LEVEL_CAP, sharpness);
+        victim.addPotionEffect(new PotionEffect(PotionEffectType.POISON, ticks, 0, false, true, true));
     }
 
     /** Root a target for ~1s with a strong SLOWNESS and a burst of red spider-eyes. */
