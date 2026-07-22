@@ -809,6 +809,9 @@ public final class CensoredWeapon implements EgoWeapon {
      */
     @Override
     public boolean onTick(Player player, long tick) {
+        // Sheathed -> return false so the manager stops ticking us and releases the HUD; else we would spam the
+        // action bar forever and override every other weapon's line once Censored had been held.
+        if (!matches(player.getInventory().getItemInMainHand())) return false;
         if (!feastGear.containsKey(player.getUniqueId())) lookScan(player);
         player.sendActionBar(hud(player.getUniqueId())); // one composed line every tick, never a lone flash
         return true;
