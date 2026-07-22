@@ -614,7 +614,6 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
          */
         private Location slotFor(Player owner, int i, long tick) {
             Location base = owner.getLocation();
-            float yaw = base.getYaw();
             double frac = RAPIER_COUNT == 1 ? 0.0 : (i / (double) (RAPIER_COUNT - 1)) * 2.0 - 1.0;
             Vector dir = bladeSpoke(owner, i); // the blade's spoke: out behind, swung toward its flank
             double bob  = Math.sin(tick * 0.12 + i * 1.6) * 0.10;
@@ -622,7 +621,12 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
             Location slot = base.clone()
                     .add(dir.multiply(FORM_RADIUS))
                     .add(0, FORM_HEIGHT + lift + bob, 0);
-            slot.setYaw(yaw + (float) (frac * FORM_ARC_DEG)); // angle each blade outward along the arc
+            // Zero the display's entity yaw/pitch: the blade's whole orientation must come from the
+            // lookRotation transformation alone. A non-zero entity yaw compounds with that transform and
+            // double-rotates the blade (the twist + wrong facing). The fan spread lives in bladeSpoke's
+            // theta -> both the spoke `dir` and the transform, so the blades still splay out along their
+            // spokes, now facing consistently. The duel path already zeros this the same way.
+            slot.setYaw(0f);
             slot.setPitch(0f);
             return slot;
         }
