@@ -74,8 +74,8 @@ public final class TwilightWeapon implements Weapon, Listener {
     // ---- balance (ALL PLACEHOLDER — flag for Nyrrine's balance wave) ----------------
     /** Third Trumpet: bonus max health while held (ten hearts). */
     private static final double BONUS_MAX_HP   = 20.0;
-    /** Third Trumpet: the whole bonus pool is restored on this cadence. 66.6s, the Bird's number. */
-    private static final long   REGEN_CYCLE_MS = 66_600L;
+    /** Third Trumpet: the whole bonus pool is restored on this cadence. 33.3s, half the Bird's 66.6. */
+    private static final long   REGEN_CYCLE_MS = 33_300L;
     /** Fraction of armour every ruin ignores — "most armour + resistances". */
     private static final double RUIN_PIERCE    = 0.60;
     /** The magic ruin rides on top of the physical one, ignoring armour entirely. */
@@ -259,7 +259,7 @@ public final class TwilightWeapon implements Weapon, Listener {
 
     private void spendSin(UUID id) { sin.put(id, 0); }
 
-    // ---- passive: Third Trumpet — great health, no natural regen, a full pour every 66.6s ----
+    // ---- passive: Third Trumpet — great health, no natural regen, a full pour every 33.3s ----
 
     /** Apply the bonus-health modifier if it is not already borne (remove-before-add safe). */
     private void applyBonusHp(Player player) {
@@ -836,7 +836,7 @@ public final class TwilightWeapon implements Weapon, Listener {
             List.of(
                     new EgoLore.Ability("[Passive] Third Trumpet",
                             "Great health, but no natural healing.",
-                            "The whole pool pours back every 66.6s."),
+                            "The whole pool pours back every 33.3s."),
                     new EgoLore.Ability("[Passive] John Lobotomy",
                             "Every blow is physical, magic and hunger",
                             "at once, tearing through most armour."),
