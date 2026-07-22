@@ -114,7 +114,7 @@ public final class SolemnLamentWeapon implements EgoWeapon {
     private static final int    MAG             = 12;    // shots per pistol
     private static final int    PELLETS_PER_GUN = 2;     // shotgun pellets each gun throws per trigger
     private static final double RANGE           = 16.0;  // "not too far" — a close-range reach
-    private static final double PELLET_DAMAGE   = 1.1;   // per pellet at a near-empty mag; scaled down while full (see pelletDamage)
+    private static final double PELLET_DAMAGE   = 0.275; // per pellet at a near-empty mag; scaled down while full (see pelletDamage). Quartered from 1.1 — the mag dump still hit like a truck.
     // A full mag dump was landing ~70 on a golem. The gun is now weakest with a full magazine and only bites
     // near its full pellet value as it empties, so a fresh two-mag dump is much softer than the tail of one.
     // Damage per pellet = PELLET_DAMAGE * (MIN_MAG_FACTOR .. 1.0), interpolated by how EMPTY the magazine is.
