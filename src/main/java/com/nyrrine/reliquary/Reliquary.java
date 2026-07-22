@@ -161,7 +161,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         this.brainVfx = new com.nyrrine.reliquary.extraction.CarmenBrainVfx(this, stations);
         brainVfx.start(); // idle floating-brain show at every placed Carmen's Brain, gated on watchers
         getServer().getPluginManager().registerEvents(
-                new com.nyrrine.reliquary.extraction.StationListener(extraction, stations, brainVfx), this);
+                new com.nyrrine.reliquary.extraction.StationListener(extraction, brainVfx), this);
 
         // The Index (/prescript) wires its own command and listener, and holds no state to disable.
         new com.nyrrine.reliquary.index.PrescriptCommand(this).register();

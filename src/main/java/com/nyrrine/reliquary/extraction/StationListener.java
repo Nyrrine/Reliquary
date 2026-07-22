@@ -1,50 +1,69 @@
 package com.nyrrine.reliquary.extraction;
 
-import org.bukkit.GameMode;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import org.bukkit.Location;
+import org.bukkit.block.Block;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
-import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.ItemStack;
 
 /**
- * Carmen's Brain as a crafted, placed custom block. Placing a Brain item registers that block's location
- * ({@link Stations}) and its idle show grows there ({@link CarmenBrainVfx}); breaking it gives the item back,
- * de-registers it, and reaps the show. Right-clicking a registered Brain runs the ticket pull. Ordinary heads
- * are untouched. This listener also guards the plugin's cosmetic items against being eaten by vanilla crafts.
+ * Carmen's Brain as a deployed floating entity — NOT a placed block. Right-clicking a surface with the Brain
+ * item deploys the floating brain/hitbox ({@link CarmenBrainVfx}) and consumes the item (the head block is
+ * never placed). Right-clicking the floating Brain with an Extraction Ticket runs the ticket pull; punching it
+ * knocks it loose and drops the item back. This listener also guards the plugin's cosmetic items against being
+ * eaten by vanilla crafts.
  */
 public final class StationListener implements Listener {
 
     private final ExtractionCommand extraction;
-    private final Stations stations;
     private final CarmenBrainVfx brainVfx;
 
-    public StationListener(ExtractionCommand extraction, Stations stations, CarmenBrainVfx brainVfx) {
+    public StationListener(ExtractionCommand extraction, CarmenBrainVfx brainVfx) {
         this.extraction = extraction;
-        this.stations = stations;
         this.brainVfx = brainVfx;
     }
 
+    /** Right-click a surface holding a Carmen's Brain: deploy the floating entity instead of placing a head. */
     @EventHandler
-    public void onPlace(BlockPlaceEvent event) {
-        StationType type = StationType.fromItem(event.getItemInHand());
-        if (type != null) stations.register(event.getBlockPlaced(), type);
-        // The idle VFX manager polls placed Brains and grows the show on its next frame — nothing to spawn here.
+    public void onDeploy(PlayerInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND) return;
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+        if (StationType.fromItem(event.getItem()) != StationType.WELL) return;
+
+        event.setCancelled(true); // never place the head as a block
+        Block clicked = event.getClickedBlock();
+        if (clicked == null) return;
+        Block target = clicked.getRelative(event.getBlockFace());
+        if (!target.getType().isAir()) {
+            event.getPlayer().sendActionBar(Component.text("No room to deploy Carmen's Brain here.")
+                    .color(NamedTextColor.RED));
+            return;
+        }
+        brainVfx.deploy(event.getPlayer(), target.getLocation());
     }
 
+    /** Belt-and-braces: the Carmen's Brain head must never place as a vanilla block. */
     @EventHandler
-    public void onBreak(BlockBreakEvent event) {
-        StationType type = stations.typeAt(event.getBlock());
-        if (type == null) return;
-        stations.unregister(event.getBlock());
-        brainVfx.onRemoved(event.getBlock().getLocation()); // reap the floating brain/nerves at once
-        event.setDropItems(false); // don't drop the plain vanilla block
-        if (event.getPlayer().getGameMode() != GameMode.CREATIVE) {
-            event.getBlock().getWorld().dropItemNaturally(event.getBlock().getLocation().add(0.5, 0.5, 0.5),
-                    type.createItem());
-        }
+    public void onBlockPlace(BlockPlaceEvent event) {
+        if (StationType.fromItem(event.getItemInHand()) == StationType.WELL) event.setCancelled(true);
+    }
+
+    /** Right-click the floating Brain with an Extraction Ticket → the existing pour. */
+    @EventHandler
+    public void onInteractEntity(PlayerInteractEntityEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND) return;
+        Location loc = brainVfx.locationOf(event.getRightClicked());
+        if (loc == null) return; // not a Carmen's Brain hitbox
+        event.setCancelled(true);
+        var player = event.getPlayer();
+        extraction.stationWell(player, loc, player.isSneaking());
     }
 
     /**
@@ -62,9 +81,8 @@ public final class StationListener implements Listener {
     public void onConsume(org.bukkit.event.player.PlayerItemConsumeEvent event) {
         if (Cogito.matches(event.getItem())) {
             event.setCancelled(true);
-            event.getPlayer().sendActionBar(net.kyori.adventure.text.Component
-                    .text("A Cogito vial isn't for drinking.")
-                    .color(net.kyori.adventure.text.format.NamedTextColor.RED));
+            event.getPlayer().sendActionBar(Component.text("A Cogito vial isn't for drinking.")
+                    .color(NamedTextColor.RED));
         }
     }
 
@@ -77,7 +95,7 @@ public final class StationListener implements Listener {
     public void onCraft(org.bukkit.event.inventory.PrepareItemCraftEvent event) {
         var recipe = event.getRecipe();
         if (recipe instanceof org.bukkit.Keyed keyed && keyed.getKey().getNamespace().equals("reliquary")) return;
-        for (org.bukkit.inventory.ItemStack it : event.getInventory().getMatrix()) {
+        for (ItemStack it : event.getInventory().getMatrix()) {
             if (it == null) continue;
             if (Catalyst.matches(it) || SinConcentrate.matches(it) || Cogito.matches(it)
                     || RawCogito.matches(it) || Enkephalin.matches(it) || ExtractionTicket.matches(it)
@@ -86,39 +104,5 @@ public final class StationListener implements Listener {
                 return;
             }
         }
-    }
-
-    // A Brain removed by anything other than a player break (explosion, piston) still needs de-registering and
-    // reaping, else a rebuild at the spot desyncs against the stale registry entry and orphan displays linger.
-    @EventHandler
-    public void onBlockExplode(org.bukkit.event.block.BlockExplodeEvent event) { cleanup(event.blockList()); }
-    @EventHandler
-    public void onEntityExplode(org.bukkit.event.entity.EntityExplodeEvent event) { cleanup(event.blockList()); }
-    @EventHandler
-    public void onPistonExtend(org.bukkit.event.block.BlockPistonExtendEvent event) { cleanup(event.getBlocks()); }
-    @EventHandler
-    public void onPistonRetract(org.bukkit.event.block.BlockPistonRetractEvent event) { cleanup(event.getBlocks()); }
-
-    private void cleanup(java.util.List<org.bukkit.block.Block> blocks) {
-        for (org.bukkit.block.Block b : blocks) {
-            if (stations.typeAt(b) != null) {
-                stations.unregister(b);
-                brainVfx.onRemoved(b.getLocation());
-            }
-        }
-    }
-
-    @EventHandler
-    public void onInteract(PlayerInteractEvent event) {
-        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
-        if (event.getHand() != EquipmentSlot.HAND) return; // main hand only — no off-hand double-fire
-        if (event.getClickedBlock() == null) return;
-
-        StationType type = stations.typeAt(event.getClickedBlock());
-        if (type != StationType.WELL) return; // an ordinary block — leave it vanilla
-
-        event.setCancelled(true); // it's a Carmen's Brain — suppress vanilla interaction and run the pull
-        var player = event.getPlayer();
-        extraction.stationWell(player, event.getClickedBlock().getLocation(), player.isSneaking());
     }
 }

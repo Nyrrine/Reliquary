@@ -16,14 +16,15 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Carmen's Brain as a <b>craftable, placeable custom block</b> — a {@link Material#PLAYER_HEAD} wearing the
- * brain skin and carrying a persistent {@code station} tag, so a placed one is a Carmen's Brain while every
- * ordinary head stays vanilla (the plugin tracks which <i>locations</i> are Brains, see {@link Stations}).
- * Right-clicking a placed Brain with an Extraction Ticket pulls a weapon; a placed Brain also grows an idle
- * floating-brain-and-nervous-system show ({@link CarmenBrainVfx}).
+ * Carmen's Brain as a <b>craftable deploy item</b> — a {@link Material#PLAYER_HEAD} wearing the brain skin and
+ * carrying a persistent {@code station} tag. It is NOT placed as a block: right-clicking a surface with it
+ * deploys the floating brain entity ({@link CarmenBrainVfx}) and consumes the item; right-clicking that
+ * floating Brain with an Extraction Ticket pulls a weapon, and punching it drops the item back. The
+ * {@code station} tag marks the item so {@link #fromItem} recognises it; deployed Brains are tracked by
+ * location in {@link Stations}.
  *
- * <p>The enum constant stays {@code WELL} on purpose — the station tag persists as {@code "WELL"} in
- * {@code stations.yml}, so renaming it would orphan every already-placed Brain.
+ * <p>The enum constant stays {@code WELL} on purpose — the tag persists as {@code "WELL"} in
+ * {@code stations.yml}, so renaming it would orphan every already-tracked Brain.
  */
 public enum StationType {
 
