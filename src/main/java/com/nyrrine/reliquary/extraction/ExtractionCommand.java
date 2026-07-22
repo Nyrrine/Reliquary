@@ -45,7 +45,7 @@ public final class ExtractionCommand {
 
     /** The cosmetic items {@code /cogito give <id>} can dispense (the 8 keepers; the 7 concentrates by sin). */
     private static final List<String> GIVE_ITEMS = List.of(
-            "enkephalin", "raw_cogito", "cogito", "radiant_cogito", "catalyst", "ember_distillate",
+            "well", "enkephalin", "raw_cogito", "cogito", "radiant_cogito", "catalyst", "ember_distillate",
             "wrath", "pride", "lust", "gloom", "sloth", "envy", "gluttony");
 
     private static final TextColor GREEN = TextColor.color(0x74F066);
@@ -109,6 +109,7 @@ public final class ExtractionCommand {
     /** The cosmetic item for a give id, or {@code null} if unknown. */
     private ItemStack cosmetic(String id) {
         return switch (id) {
+            case "well"             -> StationType.WELL.createItem(); // the craftable Pocket Well, for testing
             case "enkephalin"       -> Enkephalin.create(16);
             case "raw_cogito"       -> RawCogito.create(16);
             case "cogito"           -> Cogito.create();

@@ -70,8 +70,10 @@ public final class WeaponSignatures {
     // ---- ALEPH ----
     public static final WeaponSpec JUSTITIA = reg("justitia", "Justitia", ALEPH);
     public static final WeaponSpec MIMICRY = reg("mimicry", "Mimicry", ALEPH);
+    public static final WeaponSpec CENSORED = reg("censored", "CENSORED", ALEPH);
 
     // The bus E.G.O (Flower Burying Wedge) is NOT here — it's earned through its own mechanic, not the Well.
+    // Twilight is NOT here either — it's the SPECIAL, Cogito-unobtainable flagship.
 
     /** Look a weapon up by id, or {@code null}. */
     public static WeaponSpec byId(String id) { return REGISTRY.get(id); }
