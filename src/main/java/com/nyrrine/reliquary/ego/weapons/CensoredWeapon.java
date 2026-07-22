@@ -225,13 +225,17 @@ public final class CensoredWeapon implements EgoWeapon {
     private static final int    COGNITION_PERIOD   = 10;      // a pulse every 0.5s
     private static final int    COGNITION_TICKS    = 60;      // for ~3s
 
-    // ---- VFX tuning: the pierce-then-maw (M1 + grapple) ---------------------------
-    /** M1: the PIERCE — a dark spike lances out along the aim to {@link #MAW_REACH} this fast, then the maw. */
+    // ---- VFX tuning: the pierce-then-maw (M1 + grapple), THICK red + black PARTICLES ----
+    // Per Nyrrine's live pass: the maw is drawn in particles now, not BlockDisplay jaws — thicker, red AND
+    // black, so both the M1 and the grapple read as heavy gore-work rather than tidy geometry.
+    /** M1: the PIERCE — a thick dark-and-red particle lance thrusts to {@link #MAW_REACH} this fast. */
     private static final int    PIERCE_TICKS    = 3;      // a fast forward thrust
-    private static final float  PIERCE_THICK    = 0.30f;  // the spike's cross-section
-    /** M1: the MAW — two black jaws snap shut over this at the pierce's tip. */
+    private static final float  PIERCE_THICK    = 0.30f;  // the lance's mote jitter (how fat the thrust reads)
+    /** M1: the MAW — two particle jaws sweep shut over this at the pierce's tip. */
     private static final int    JAW_CLOSE_TICKS = 4;
-    private static final double MAW_JAW_SCALE   = 0.85;
+    private static final double MAW_SPAN        = 1.10;   // half-width the jaws yawn open before they snap
+    private static final float  MAW_DUST_SIZE   = 2.3f;   // THICK red mote (client clamps DustOptions at 4.0)
+    private static final float  MAW_VOID_SIZE   = 2.6f;   // THICK black mote
     /** Grapple: the PIERCE lances the full {@link #GRAPPLE_RANGE} line this fast before the jaws clamp it. */
     private static final int    GRAPPLE_LANCE_TICKS = 4;
     private static final float  GRAPPLE_LANCE_THICK = 0.55f;
@@ -253,9 +257,11 @@ public final class CensoredWeapon implements EgoWeapon {
      */
     private static final int    BAR_ENGULF      = 8;
     private static final int    BAR_HOLD        = 16;
-    private static final double BAR_W           = 4.6;   // wide
-    private static final double BAR_H           = 1.6;   // tall
-    private static final double BAR_TH          = 0.4;   // thin — a bar, not a slab
+    // Nyrrine's live pass: scale the box WAY up — a massive censored redaction. ~8x longer, ~3x taller than the
+    // first pass (was 4.6 x 1.6 x 0.4). Placeholder starting point for her feel-tune.
+    private static final double BAR_W           = 36.0;  // ~8x longer — a MASSIVE censored box
+    private static final double BAR_H           = 4.8;   // ~3x taller
+    private static final double BAR_TH          = 0.5;   // still thin: a bar, not a cube
     private static final int    SHARD_COUNT     = 16;
     private static final int    SHARD_LIFE      = 26;
     private static final double SHARD_SPEED     = 0.6;
@@ -316,6 +322,7 @@ public final class CensoredWeapon implements EgoWeapon {
     @Override
     public void onHit(Player attacker, LivingEntity victim, org.bukkit.event.entity.EntityDamageByEntityEvent event) {
         event.setDamage(0.0);
+        breakVanish(attacker); // striking anything spends the Feast stealth (the weapon's own pierce is fenced out)
     }
 
     // ---- [Left Click]: the grappling maw ------------------------------------------
@@ -373,7 +380,8 @@ public final class CensoredWeapon implements EgoWeapon {
         world.spawnParticle(Particle.ITEM, at, 6, 0.25, 0.3, 0.25, 0.03, BONE_ITEM);
         world.playSound(at, Sound.ENTITY_RAVAGER_ATTACK, 0.7f, 0.6f);
         world.playSound(at, Sound.BLOCK_HONEY_BLOCK_BREAK, 0.6f, 0.5f);
-        slashCrescent(at, dir); // the slash that lands after the maw snaps
+        slashCrescent(at, dir);   // the slash that lands after the maw snaps
+        breakVanish(player);      // a maw bite spends the Feast stealth (raytrace hit, past vanilla reach)
     }
 
     /** The saturation drain: push exhaustion onto a struck player and lay a short Hunger on any body. */
@@ -481,6 +489,7 @@ public final class CensoredWeapon implements EgoWeapon {
 
         Location mid = eye.clone().add(dir.clone().multiply(GRAPPLE_RANGE * 0.5));
         double half = GRAPPLE_RANGE * 0.5 + GRAPPLE_RADIUS;
+        boolean caught = false;
         for (Entity e : world.getNearbyEntities(mid, half, half, half)) {
             if (e.equals(owner) || !(e instanceof LivingEntity le) || le.isDead() || !le.isValid()) continue;
             Vector v = le.getLocation().add(0, le.getHeight() * 0.5, 0).toVector().subtract(eye.toVector());
@@ -492,13 +501,15 @@ public final class CensoredWeapon implements EgoWeapon {
                 plugin.weapons().pierceDamage(le, GRAPPLE_DAMAGE, PIERCE_FRACTION, owner);
             }
             starve(le);
-            // The maw: black jaws hold open at this body until the lance reaches it (openHold scaled by how far
-            // down the line it is), then snap shut. Cosmetic; reaps itself.
+            caught = true;
+            // The maw: particle jaws yawn open at this body until the lance reaches it (openHold scaled by how
+            // far down the line it is), then sweep shut. Cosmetic; self-cancelling.
             int hold = (int) Math.round(GRAPPLE_LANCE_TICKS * (t / GRAPPLE_RANGE));
             Location at = le.getLocation().add(0, le.getHeight() * 0.5, 0);
             track(new JawSnap(at, dir.clone(), hold)).runTaskTimer(plugin, 0L, 1L);
             shockwave(at); // a burst where the tear catches a body
         }
+        if (caught) breakVanish(owner); // the grapple striking a body spends the Feast stealth
     }
 
     // ---- [Right Click, no corpse]: the grasping arm ------------------------------
@@ -639,6 +650,15 @@ public final class CensoredWeapon implements EgoWeapon {
         }
     }
 
+    /**
+     * Spend the stealth: if this wielder is vanished mid-Feast, drop it now. Called the instant they attack
+     * something or stop holding the weapon — the stealth is spent on the attack (Nyrrine's call). The Feast
+     * show itself keeps playing on the corpse; only the invisibility ends. No-op if they are not vanished.
+     */
+    private void breakVanish(Player wielder) {
+        if (feastGear.containsKey(wielder.getUniqueId())) unvanish(wielder.getUniqueId());
+    }
+
     /** Players in the same world within a comfortable tracking range of the wielder. */
     private List<Player> nearbyViewers(Player wielder) {
         List<Player> out = new ArrayList<>();
@@ -678,6 +698,11 @@ public final class CensoredWeapon implements EgoWeapon {
             Player owner = plugin.getServer().getPlayer(ownerId);
             if (owner == null || !owner.isValid()) { stop(); return; } // logged off — reap + un-vanish
 
+            // Swapping off the weapon spends the stealth immediately; the show carries on at the corpse.
+            if (feastGear.containsKey(ownerId) && !matches(owner.getInventory().getItemInMainHand())) {
+                unvanish(ownerId);
+            }
+
             if (ticks == OPENING_BAR_TICKS && wielderBar != null) { // the opening redaction is over
                 if (wielderBar.isValid()) wielderBar.remove();
                 wielderBar = null;
@@ -689,7 +714,8 @@ public final class CensoredWeapon implements EgoWeapon {
             macabreSfx(body, ticks);
             if (ticks % BONE_EVERY == 0) flingBones(body, BONE_BURST);
             if (ticks < HEAL_WINDOW_TICKS && ticks % HEAL_EVERY == 0) heal(owner, HEAL_CHUNK);
-            if (ticks % 20 == 0) hideGear(owner);        // keep new viewers from seeing the wielder's gear
+            // Re-hide for new viewers only while still vanished — once the stealth is spent, stop re-blanking.
+            if (ticks % 20 == 0 && feastGear.containsKey(ownerId)) hideGear(owner);
             if (ticks > 0 && ticks % CRANK_PERIOD == 0) crank(); // the torture-machine beat
             ticks++;
         }
@@ -900,24 +926,38 @@ public final class CensoredWeapon implements EgoWeapon {
         }
     }
 
-    /** Per-tick gruesome show: a thick pour of blood off the corpse, dripping and pooling. */
+    /**
+     * Per-tick gruesome show: a MUSHED CORPSE. Not a tidy pool but a wide, flattened gore splat spread low
+     * across the ground — viscera-dark red motes, flesh-red block-crack laid flat, wet chunks flicked off it,
+     * and a thin mist hanging over the mush. Reads like a mob crushed into a spreading smear.
+     */
     private void gruesomeVfx(Location body) {
         World world = body.getWorld();
-        Location core = body.clone().add(0, 1.0, 0);
-        world.spawnParticle(Particle.DUST, core, 26, 0.45, 0.55, 0.45, 0, BLOOD_DUST);
-        world.spawnParticle(Particle.FALLING_DUST, core, 14, 0.55, 0.35, 0.55, 0, BLOOD_BLOCK);
-        world.spawnParticle(Particle.DUST, body.clone().add(0, 0.1, 0), 10, 0.6, 0.02, 0.6, 0, BLOOD_DUST); // the pool
-        world.spawnParticle(Particle.BLOCK, core, 6, 0.4, 0.4, 0.4, 0, BLOOD_BLOCK);
-        if (ThreadLocalRandom.current().nextInt(2) == 0) {
-            world.spawnParticle(Particle.DUST, core, 10, 0.65, 0.5, 0.65, 0, CENSOR_DUST);
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        Location ground = body.clone().add(0, 0.08, 0);
+        // The splat: wide and FLAT (tiny Y spread), viscera over blood, with flesh-red crack laid across it.
+        world.spawnParticle(Particle.DUST, ground, 22, 1.6, 0.04, 1.6, 0, VISCERA_DUST);
+        world.spawnParticle(Particle.DUST, ground, 14, 1.4, 0.03, 1.4, 0, BLOOD_DUST);
+        world.spawnParticle(Particle.BLOCK, ground, 10, 1.3, 0.05, 1.3, 0, SPLAT_BLOCK);
+        // wet gobbets flicked up off the mush
+        if (rng.nextInt(2) == 0) {
+            world.spawnParticle(Particle.FALLING_DUST, body.clone().add(0, 0.5, 0), 8, 1.0, 0.2, 1.0, 0, SPLAT_BLOCK);
+            world.spawnParticle(Particle.ITEM, ground, 3, 0.9, 0.05, 0.9, 0.02, BONE_ITEM);
         }
+        // a low mist hanging over the smear, thinning upward
+        world.spawnParticle(Particle.DUST, body.clone().add(0, 0.3, 0), 8, 0.7, 0.25, 0.7, 0, BLOOD_DUST);
+        if (rng.nextInt(3) == 0) world.spawnParticle(Particle.DUST, ground, 8, 1.2, 0.04, 1.2, 0, CENSOR_DUST);
     }
 
-    /** The sound of the feed: layered, low, squelching and muffled, staggered so it never reads as one loop. */
+    /** The sound of the feed: WET and squelching, violently uncomfortable — slime/mud squish over an eat and a
+     * heartbeat bed, all staggered on coprime periods so it never reads as one loop. */
     private void macabreSfx(Location at, int t) {
         World world = at.getWorld();
-        if (t % 5 == 0)  world.playSound(at, Sound.ENTITY_GENERIC_EAT, 1.0f, 0.5f);
-        if (t % 7 == 0)  world.playSound(at, Sound.BLOCK_HONEY_BLOCK_BREAK, 0.9f, 0.4f);
+        if (t % 3 == 0)  world.playSound(at, Sound.ENTITY_SLIME_SQUISH, 0.9f, 0.5f);       // the squelch
+        if (t % 4 == 0)  world.playSound(at, Sound.BLOCK_HONEY_BLOCK_BREAK, 0.9f, 0.4f);   // a wet tear
+        if (t % 5 == 0)  world.playSound(at, Sound.ENTITY_GENERIC_EAT, 1.0f, 0.5f);        // the feed
+        if (t % 6 == 0)  world.playSound(at, Sound.BLOCK_MUD_BREAK, 1.0f, 0.5f);           // a thick muddy squish
+        if (t % 8 == 0)  world.playSound(at, Sound.ENTITY_SLIME_SQUISH_SMALL, 0.8f, 0.4f); // a smaller squelch
         if (t % 11 == 0) world.playSound(at, Sound.ENTITY_ZOMBIE_VILLAGER_CONVERTED, 0.6f, 0.4f);
         if (t % 13 == 0) world.playSound(at, Sound.ENTITY_WARDEN_HEARTBEAT, 0.7f, 0.5f);
         if (t % 17 == 0) world.playSound(at, Sound.ENTITY_GHAST_HURT, 0.4f, 0.4f);
@@ -962,9 +1002,10 @@ public final class CensoredWeapon implements EgoWeapon {
     }
 
     /**
-     * The PIERCE: a fast dark spearhead that lances from {@code origin} along {@code dir} out to {@code reach}
-     * over {@code travelTicks}, trailing a thick red-and-black lance behind it. On arrival it can hand off to a
-     * {@link JawSnap} at the tip — the MAW half of the beat. Captured origin/aim; over in a handful of ticks.
+     * The PIERCE: a fast forward thrust drawn entirely in THICK red-and-black particles (no block geometry) —
+     * a fat lance from {@code origin} along {@code dir} out to {@code reach} over {@code travelTicks}, with a
+     * dense gore knot at its leading point. On arrival it can hand off to a {@link JawSnap} at the tip, the MAW
+     * half of the beat. Captured origin/aim; over in a handful of ticks.
      */
     private final class Pierce extends BukkitRunnable {
         private final Location origin;
@@ -973,7 +1014,6 @@ public final class CensoredWeapon implements EgoWeapon {
         private final int travelTicks;
         private final float thick;
         private final boolean snapAtTip;
-        private final BlockDisplay head;
         private int ticks = 0;
 
         Pierce(Location origin, Vector dir, double reach, int travelTicks, float thick, boolean snapAtTip) {
@@ -983,18 +1023,6 @@ public final class CensoredWeapon implements EgoWeapon {
             this.travelTicks = Math.max(1, travelTicks);
             this.thick = thick;
             this.snapAtTip = snapAtTip;
-            float s = thick * 1.6f;
-            this.head = origin.getWorld().spawn(origin, BlockDisplay.class, d -> {
-                d.setBlock(JAW_BLOCK);
-                d.setTransformation(new Transformation(
-                        new Vector3f(-s / 2, -s / 2, -s / 2), new Quaternionf(),
-                        new Vector3f(s, s, s), new Quaternionf()));
-                d.setBrightness(new Display.Brightness(1, 4));
-                d.setInterpolationDuration(1);
-                d.setInterpolationDelay(0);
-                d.setPersistent(false);
-                d.addScoreboardTag(CENSORED_TAG);
-            });
         }
 
         @Override
@@ -1002,102 +1030,92 @@ public final class CensoredWeapon implements EgoWeapon {
             if (ticks > travelTicks) { arrive(); return; }
             double frac = (double) ticks / travelTicks;
             double cur = 0.6 + frac * (reach - 0.6);
-            if (head.isValid()) head.teleport(origin.clone().add(dir.clone().multiply(cur)));
             lance(cur);
+            knot(origin.clone().add(dir.clone().multiply(cur))); // the fat point of the thrust
             ticks++;
         }
 
         /** The thick red-and-black lance drawn from the wielder to the current tip. */
         private void lance(double cur) {
             World world = origin.getWorld();
-            for (double t = 0.4; t <= cur; t += 0.35) {
+            for (double t = 0.4; t <= cur; t += 0.3) {
                 Location p = origin.clone().add(dir.clone().multiply(t));
-                world.spawnParticle(Particle.DUST, p, 1, thick * 0.5, thick * 0.5, thick * 0.5, 0, VOID_DUST);
-                if (((int) (t * 3)) % 2 == 0) {
-                    world.spawnParticle(Particle.DUST, p, 1, thick * 0.6, thick * 0.6, thick * 0.6, 0, CENSOR_DUST);
-                }
+                world.spawnParticle(Particle.DUST, p, 2, thick * 0.6, thick * 0.6, thick * 0.6, 0, MAW_VOID_DUST);
+                world.spawnParticle(Particle.DUST, p, 2, thick * 0.7, thick * 0.7, thick * 0.7, 0, MAW_RED_DUST);
             }
         }
 
+        /** A dense thick knot of red and black at the lance's leading point. */
+        private void knot(Location p) {
+            World world = p.getWorld();
+            world.spawnParticle(Particle.DUST, p, 8, 0.18, 0.18, 0.18, 0, MAW_VOID_DUST);
+            world.spawnParticle(Particle.DUST, p, 8, 0.15, 0.15, 0.15, 0, MAW_RED_DUST);
+        }
+
         private void arrive() {
-            Location tip = head.isValid() ? head.getLocation() : origin.clone().add(dir.clone().multiply(reach));
-            if (head.isValid()) head.remove();
-            if (snapAtTip) track(new JawSnap(tip, dir, 0)).runTaskTimer(plugin, 0L, 1L);
+            if (snapAtTip) {
+                track(new JawSnap(origin.clone().add(dir.clone().multiply(reach)), dir, 0)).runTaskTimer(plugin, 0L, 1L);
+            }
             activeTasks.remove(this);
             cancel();
         }
     }
 
     /**
-     * The MAW: two black jaws that hold open at a point, then snap shut in a red-and-black burst — the bite.
-     * Vertical, so it reads from any angle. {@code openHold} keeps the jaws yawning open until a pierce reaches
-     * them (used down the grapple line), then they close. Cosmetic; reaps its own displays.
+     * The MAW: two jaws drawn in THICK red-and-black particles (no block geometry) that yawn open at a point
+     * and sweep shut in a gore burst — the bite. The jaws spread across the axis perpendicular to the bite and
+     * curve like crescents, so it reads from any angle. {@code openHold} keeps them open until a pierce reaches
+     * them (used down the grapple line), then they close. Purely cosmetic.
      */
     private final class JawSnap extends BukkitRunnable {
-        private static final double OPEN_GAP  = 0.95;
-        private static final double CLOSE_GAP = 0.06;
-
         private final Location at;
+        private final Vector wide;   // horizontal axis across which each jaw spreads (perpendicular to the bite)
         private final int openHoldTicks;
-        private final BlockDisplay upper;
-        private final BlockDisplay lower;
         private int ticks = 0;
 
         JawSnap(Location at, Vector dir, int openHold) {
             this.at = at.clone();
+            Vector d = dir.lengthSquared() < 1.0e-6 ? new Vector(1, 0, 0) : dir.clone().normalize();
+            Vector w = d.crossProduct(new Vector(0, 1, 0));
+            this.wide = w.lengthSquared() < 1.0e-6 ? new Vector(1, 0, 0) : w.normalize();
             this.openHoldTicks = Math.max(0, openHold);
-            this.upper = spawnJaw();
-            this.lower = spawnJaw();
-            setJaw(upper, OPEN_GAP);
-            setJaw(lower, -OPEN_GAP);
         }
 
         @Override
         public void run() {
-            if (!upper.isValid() || !lower.isValid()) { reap(); return; }
-            if (ticks < openHoldTicks) { ticks++; return; }   // yawning open, waiting for the pierce
+            if (ticks < openHoldTicks) { jaws(MAW_SPAN); ticks++; return; } // yawning open, awaiting the pierce
             int c = ticks - openHoldTicks;
             if (c >= JAW_CLOSE_TICKS) { snap(); return; }
             double f = (double) c / JAW_CLOSE_TICKS;
-            double gap = OPEN_GAP + (CLOSE_GAP - OPEN_GAP) * f;
-            setJaw(upper, gap);
-            setJaw(lower, -gap);
+            jaws(MAW_SPAN * (1.0 - f) + 0.05 * f); // sweeps shut
             ticks++;
         }
 
-        private BlockDisplay spawnJaw() {
-            return at.getWorld().spawn(at, BlockDisplay.class, d -> {
-                d.setBlock(JAW_BLOCK);
-                d.setBrightness(new Display.Brightness(1, 4));
-                d.setInterpolationDuration(1);
-                d.setInterpolationDelay(0);
-                d.setPersistent(false);
-                d.addScoreboardTag(CENSORED_TAG);
-            });
+        /** Draw the upper and lower jaws at the given half-gap. */
+        private void jaws(double gap) {
+            drawJaw(gap);
+            drawJaw(-gap);
         }
 
-        /** Centre a jaw plate at {@code at + (0, yOff, 0)}: wide and deep, a thin biting plate. */
-        private void setJaw(BlockDisplay d, double yOff) {
-            float jw = (float) (MAW_JAW_SCALE * 1.7);
-            float jh = (float) (MAW_JAW_SCALE * 0.42);
-            float jd = (float) (MAW_JAW_SCALE * 1.7);
-            d.setTransformation(new Transformation(
-                    new Vector3f(-jw / 2, (float) yOff - jh / 2, -jd / 2), new Quaternionf(),
-                    new Vector3f(jw, jh, jd), new Quaternionf()));
+        /** One jaw: a thick red-and-black crescent above (or below) the bite point, tips dipping inward. */
+        private void drawJaw(double yOff) {
+            World world = at.getWorld();
+            int n = 7;
+            for (int i = 0; i <= n; i++) {
+                double s = (i / (double) n - 0.5) * 2.0;               // -1..1 across the jaw's width
+                double curve = -yOff * 0.5 * (1.0 - s * s);            // a shallow crescent toward the centre
+                Location p = at.clone().add(wide.clone().multiply(s * MAW_SPAN)).add(0, yOff + curve, 0);
+                world.spawnParticle(Particle.DUST, p, 1, 0.04, 0.04, 0.04, 0, MAW_VOID_DUST);
+                if ((i & 1) == 0) world.spawnParticle(Particle.DUST, p, 1, 0.05, 0.05, 0.05, 0, MAW_RED_DUST);
+            }
         }
 
         private void snap() {
             World world = at.getWorld();
-            world.spawnParticle(Particle.DUST, at, 20, 0.3, 0.3, 0.3, 0, VOID_DUST);
-            world.spawnParticle(Particle.DUST, at, 16, 0.25, 0.25, 0.25, 0, CENSOR_DUST);
-            world.spawnParticle(Particle.BLOCK, at, 8, 0.2, 0.2, 0.2, 0, BLOOD_BLOCK);
+            world.spawnParticle(Particle.DUST, at, 24, 0.3, 0.3, 0.3, 0, MAW_VOID_DUST);
+            world.spawnParticle(Particle.DUST, at, 20, 0.25, 0.25, 0.25, 0, MAW_RED_DUST);
+            world.spawnParticle(Particle.BLOCK, at, 10, 0.25, 0.25, 0.25, 0, BLOOD_BLOCK);
             world.playSound(at, Sound.ENTITY_RAVAGER_ATTACK, 0.8f, 0.5f);
-            reap();
-        }
-
-        private void reap() {
-            if (upper.isValid()) upper.remove();
-            if (lower.isValid()) lower.remove();
             activeTasks.remove(this);
             cancel();
         }
@@ -1156,6 +1174,7 @@ public final class CensoredWeapon implements EgoWeapon {
                     armReadyAt.put(ownerId, System.currentTimeMillis() + ARM_COOLDOWN_MS); // caught — pay the real CD
                     plugin.weapons().pierceDamage(target, ARM_GRAB_DAMAGE, PIERCE_FRACTION, owner);
                     starve(target);
+                    breakVanish(owner); // seizing a body spends the Feast stealth
                     target.getWorld().playSound(centreOf(target), Sound.ENTITY_RAVAGER_ATTACK, 0.9f, 0.5f);
                 } else {
                     wither(tip);
@@ -1414,12 +1433,19 @@ public final class CensoredWeapon implements EgoWeapon {
     private static final Color BLOOD_RGB   = Color.fromRGB(0x8A, 0x03, 0x03); // pouring blood
     private static final Color CENSOR_RGB  = Color.fromRGB(0xCC, 0x00, 0x22); // the red square / redaction
     private static final Color VOID_RGB    = Color.fromRGB(0x0E, 0x08, 0x12); // the maw's dark tendril / grapple wall
+    private static final Color VISCERA_RGB = Color.fromRGB(0x5A, 0x0A, 0x08); // dark, browner red — the mushed corpse
     private static final Particle.DustOptions BLOOD_DUST    = new Particle.DustOptions(BLOOD_RGB, 1.1f);
     private static final Particle.DustOptions CENSOR_DUST   = new Particle.DustOptions(CENSOR_RGB, 1.3f);
     private static final Particle.DustOptions VOID_DUST     = new Particle.DustOptions(VOID_RGB, 1.2f);
-    /** Blocks for the displays and crack particles: red for the square/shards, near-black for the maw jaw. */
+    private static final Particle.DustOptions VISCERA_DUST  = new Particle.DustOptions(VISCERA_RGB, 1.4f);
+    /** The THICK red and black motes the pierce-maw is drawn in now (particles, not block jaws). */
+    private static final Particle.DustOptions MAW_RED_DUST  = new Particle.DustOptions(CENSOR_RGB, MAW_DUST_SIZE);
+    private static final Particle.DustOptions MAW_VOID_DUST = new Particle.DustOptions(VOID_RGB, MAW_VOID_SIZE);
+    /** Blocks for crack particles and the remaining displays: red for the box/shards, flesh-red for the splat,
+     *  near-black for the grasping hand and the body bars. */
     private static final BlockData BLOOD_BLOCK  = Material.REDSTONE_BLOCK.createBlockData();
     private static final BlockData SQUARE_BLOCK = Material.RED_CONCRETE.createBlockData();
+    private static final BlockData SPLAT_BLOCK  = Material.RED_TERRACOTTA.createBlockData(); // the mushed corpse's flesh
     private static final BlockData JAW_BLOCK    = Material.BLACK_CONCRETE.createBlockData();
     private static final ItemStack BONE_ITEM = new ItemStack(Material.BONE);
     /** The blank the Feast sends to viewers for each of the wielder's equipment slots, hiding the gear. */
