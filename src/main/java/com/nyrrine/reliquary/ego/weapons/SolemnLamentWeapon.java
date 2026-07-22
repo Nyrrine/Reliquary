@@ -4,6 +4,7 @@ import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -28,6 +29,8 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Transformation;
@@ -132,6 +135,13 @@ public final class SolemnLamentWeapon implements EgoWeapon {
     // after the last swing, giving a real hold-to-mag-dump without depending on swing repeats.
     private static final long   HOLD_WINDOW_MS  = 300L;  // spray sustains ~300ms past the last swing
     private static final long   RELOAD_MS       = 1500L; // automatic dry reload (both mags empty)
+
+    // Mourner's Stride (ego-enchant) — a NON-damage handling perk. Each shot refreshes a brief Speed I so the
+    // wielder keeps pace while spraying/dumping; levels only make that momentum LINGER longer past the last
+    // shot, never a faster tier. Touches movement alone — no mag, pellet, spread, range, cadence or damage.
+    private static final int    STRIDE_MAX_LVL     = 3;
+    private static final int    STRIDE_BASE_TICKS  = 12; // ~0.6s of Speed I refreshed on each shot
+    private static final int    STRIDE_LEVEL_TICKS = 8;  // +0.4s of lingering momentum per level
 
     // Palette — funereal white and black. The body text and the epithet used to have their own entries
     // here (bone white, and a dimmer grey); EgoLore owns both of those colours now, so they are gone.
@@ -254,6 +264,7 @@ public final class SolemnLamentWeapon implements EgoWeapon {
         else      mag.right = Math.max(0, mag.right - 1);
         mag.nextLeft = !left;                        // alternate for the next shot
         EgoDurability.wearMainHand(player);          // mild — one point per shot
+        applyMournersStride(player);                 // keep pace while firing (ego-enchant, movement only)
 
         // Safety fallback: if both mags are now empty, auto-reload so it is never a dead gun.
         if (mag.right <= 0 && mag.left <= 0) beginReload(player, mag);
@@ -499,6 +510,20 @@ public final class SolemnLamentWeapon implements EgoWeapon {
             end = eye.clone().add(dir.clone().multiply(maxDist));
         }
         drawTracer(world, muzzle, end, black);
+    }
+
+    /**
+     * Mourner's Stride (ego-enchant): a handling perk, not a damage one. Each shot refreshes a brief Speed I so
+     * the wielder keeps pace while spraying and mag-dumping; higher levels only make that momentum LINGER longer
+     * past the last shot, never a faster tier. Strictly non-damage — it touches movement alone, so it cannot lift
+     * this weapon's already-tuned effective damage.
+     */
+    private void applyMournersStride(Player player) {
+        int lvl = Math.min(EgoEnchants.level(player.getInventory().getItemInMainHand(), "mourners_stride"),
+                STRIDE_MAX_LVL);
+        if (lvl <= 0) return;
+        int ticks = STRIDE_BASE_TICKS + STRIDE_LEVEL_TICKS * lvl;
+        player.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, ticks, 0, false, false, true)); // Speed I only
     }
 
     // ---- reload --------------------------------------------------------------------
