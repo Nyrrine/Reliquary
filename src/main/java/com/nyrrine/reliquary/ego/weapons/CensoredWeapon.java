@@ -175,7 +175,10 @@ public final class CensoredWeapon implements EgoWeapon {
     private static final double ARM_DRAG_STRENGTH  = 0.65;  // velocity toward the wielder per drag tick
     /** A single bite as the hand closes on the seized body: pierced and left starving, like every CENSORED hit. */
     private static final double ARM_GRAB_DAMAGE    = 3.0;
+    /** The real cooldown, armed ONLY on a successful catch. A whiff never pays it (Nyrrine's call). */
     private static final long   ARM_COOLDOWN_MS    = 8_000L;
+    /** A tiny anti-spam lockout committed on every cast so an empty grope can't be scan-spammed. */
+    private static final long   ARM_WHIFF_LOCKOUT_MS = 1_000L;
     /** The root's VFX: motes per grown segment, and the black jaw-hand scale at the tip. */
     private static final double ARM_SEG_STEP       = 0.45;  // a mote every this-many blocks along the limb
     private static final float  ARM_HAND_SCALE     = 0.7f;
@@ -384,17 +387,18 @@ public final class CensoredWeapon implements EgoWeapon {
     // ---- [Shift+Right Click]: the big grapple / [Right Click]: feast-or-arm -------
 
     /**
-     * Shift+Right is always the line grapple. Plain Right is TWO-MODE, chosen by whether a fresh corpse is
-     * waiting: if the wielder has a kill inside its post-kill grace, Right begins the Feast on that body; with
-     * no corpse to feed on, Right instead grows the grasping arm to haul the nearest body in. There is no
-     * prime step — the Feast is pressed after the kill, not before.
+     * Shift+Right is always the line grapple. Plain Right is TWO-MODE and always does something: if a fresh
+     * corpse is waiting AND the Feast is off cooldown, Right feeds on that body; otherwise (no corpse, OR a
+     * corpse but the Feast is still on its silence) it falls through to the grasping arm to haul the nearest
+     * body in. There is no prime step, and R-click never dead-ends on a cooldown message.
      */
     @Override
     public void onInteract(Player player, boolean sneaking) {
         if (sneaking) { castGrapple(player, false); return; }
 
-        Location corpse = freshCorpse(player.getUniqueId());
-        if (corpse != null) beginFeastFromInput(player, corpse);
+        UUID id = player.getUniqueId();
+        Location corpse = freshCorpse(id);
+        if (corpse != null && feastReady(id)) beginFeastFromInput(player, corpse);
         else graspingArm(player);
     }
 
@@ -501,8 +505,9 @@ public final class CensoredWeapon implements EgoWeapon {
 
     /**
      * The no-corpse branch of Right-click: a grotesque black-and-red limb stems out like a root forcing itself
-     * to grow toward the nearest body, then hauls it in. Its own cooldown, committed on cast so it cannot be
-     * spammed even on a whiff. Reach and drag feel are PLACEHOLDER — flagged for Nyrrine.
+     * to grow toward the nearest body, then hauls it in. Casting commits only a short anti-spam lockout
+     * ({@link #ARM_WHIFF_LOCKOUT_MS}); the real {@link #ARM_COOLDOWN_MS} is armed ONLY on a successful catch, in
+     * {@link GraspingArm}, so a whiff costs almost nothing. Reach and drag feel are PLACEHOLDER.
      */
     private void graspingArm(Player player) {
         UUID id = player.getUniqueId();
@@ -513,7 +518,7 @@ public final class CensoredWeapon implements EgoWeapon {
             player.playSound(player.getLocation(), Sound.BLOCK_SCULK_SPREAD, 0.25f, 0.5f);
             return;
         }
-        armReadyAt.put(id, now + ARM_COOLDOWN_MS);
+        armReadyAt.put(id, now + ARM_WHIFF_LOCKOUT_MS); // tiny lockout now; a catch upgrades it to the full CD
         player.playSound(player.getLocation(), Sound.BLOCK_SCULK_CATALYST_BLOOM, 0.7f, 0.5f);
         player.playSound(player.getLocation(), Sound.ENTITY_WARDEN_TENDRIL_CLICKS, 0.6f, 0.6f);
         track(new GraspingArm(player)).runTaskTimer(plugin, 1L, 1L);
@@ -561,22 +566,22 @@ public final class CensoredWeapon implements EgoWeapon {
 
     // ---- the Feast: the signature stealth sequence --------------------------------
 
+    /** True if the Feast is off its silence for this wielder — the gate {@link #onInteract} routes on. */
+    private boolean feastReady(UUID id) {
+        Long ready = feastReadyAt.get(id);
+        return ready == null || System.currentTimeMillis() >= ready;
+    }
+
     /**
-     * R-click on a fresh corpse: honour the silence, consume the corpse, and begin the show. No teleport — the
-     * wielder is already on the kill, and the point of the Feast is to slip away invisible while it plays.
+     * R-click on a fresh corpse with the Feast ready (the caller has already checked {@link #feastReady}):
+     * consume the corpse, start the silence, and begin the show. No teleport — the wielder is already on the
+     * kill, and the point of the Feast is to slip away invisible while it plays.
      */
     private void beginFeastFromInput(Player wielder, Location corpse) {
         UUID id = wielder.getUniqueId();
-        long now = System.currentTimeMillis();
-        Long ready = feastReadyAt.get(id);
-        if (ready != null && now < ready) {
-            wielder.sendActionBar(EgoHud.cooldown("CENSORED", ready - now, CENSOR_RED));
-            wielder.playSound(wielder.getLocation(), Sound.BLOCK_SCULK_SPREAD, 0.25f, 0.5f);
-            return;
-        }
         corpseUntil.remove(id);
         corpseLoc.remove(id);
-        feastReadyAt.put(id, now + FEAST_COOLDOWN_MS); // the silence
+        feastReadyAt.put(id, System.currentTimeMillis() + FEAST_COOLDOWN_MS); // the silence
         beginFeast(wielder, corpse);
     }
 
@@ -761,10 +766,14 @@ public final class CensoredWeapon implements EgoWeapon {
     // (The Feast no longer grants i-frames — its protection is stealth, not invulnerability — so there is no
     // onIncomingDamage hook here anymore. See beginFeast / vanish.)
 
-    /** Each engaged tick, sicken anyone who has held their gaze on the wielder too long. */
+    /**
+     * Each engaged tick, sicken anyone who has held their gaze on the wielder too long — UNLESS the wielder is
+     * mid-Feast and vanished, in which case the gaze aura is suppressed for the duration (it would otherwise
+     * telegraph the stealth by sickening onlookers around an invisible body). It comes back with unvanish.
+     */
     @Override
     public boolean onTick(Player player, long tick) {
-        lookScan(player);
+        if (!feastGear.containsKey(player.getUniqueId())) lookScan(player);
         return true;
     }
 
@@ -1144,6 +1153,7 @@ public final class CensoredWeapon implements EgoWeapon {
                 // Reach complete: seize a still-valid, still-close body, else the limb gropes and withers.
                 if (target != null && tip.distance(centreOf(target)) <= ARM_GRAB_DIST + 1.5) {
                     grabbed = true;
+                    armReadyAt.put(ownerId, System.currentTimeMillis() + ARM_COOLDOWN_MS); // caught — pay the real CD
                     plugin.weapons().pierceDamage(target, ARM_GRAB_DAMAGE, PIERCE_FRACTION, owner);
                     starve(target);
                     target.getWorld().playSound(centreOf(target), Sound.ENTITY_RAVAGER_ATTACK, 0.9f, 0.5f);
