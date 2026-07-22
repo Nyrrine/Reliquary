@@ -38,9 +38,7 @@ public final class RawCogito {
         ItemMeta meta = item.getItemMeta();
         meta.displayName(Component.text("Raw Cogito").color(NAME).decoration(TextDecoration.ITALIC, false));
         meta.lore(List.of(
-                Component.text("Unprocessed emotional matter, drawn from the Font.", FAINT)
-                        .decoration(TextDecoration.ITALIC, true),
-                Component.text("Refine it at the Alembic (with Enkephalin) into a vial.", FAINT)
+                Component.text("Unprocessed emotional matter.", FAINT)
                         .decoration(TextDecoration.ITALIC, true)));
         meta.setEnchantmentGlintOverride(true);
         meta.getPersistentDataContainer().set(MARK, PersistentDataType.BYTE, (byte) 1);

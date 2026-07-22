@@ -154,13 +154,9 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         tracker.start();
 
         this.extraction = new ExtractionCommand(this);
-        new com.nyrrine.reliquary.extraction.CogitoTicker(this).start();
         this.stations = new com.nyrrine.reliquary.extraction.Stations(this);
         stations.load();
-        stations.registerRecipes();
-        com.nyrrine.reliquary.extraction.SinConcentrate.registerRecipes(this);
-        com.nyrrine.reliquary.extraction.RefinedReagent.registerRecipes(this);
-        com.nyrrine.reliquary.extraction.CureItem.registerRecipes(this);
+        stations.registerRecipes(); // registers the Pocket Well's craft recipe (the only station left)
         getServer().getPluginManager().registerEvents(
                 new com.nyrrine.reliquary.extraction.StationListener(extraction, stations), this);
 
@@ -230,8 +226,8 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
                              @NotNull String label, @NotNull String[] args) {
-        // No blanket gate — /cogito's open lookups (recipes/track/…) and /reliquary list/help are for everyone;
-        // the give/brew/admin operations are gated individually below and in ExtractionCommand.handle.
+        // No blanket gate — /reliquary list/help are for everyone; the give/ticket/admin operations are gated
+        // individually below and in ExtractionCommand.handle.
 
         // /cogito (aliases /ext /co): args ARE the extraction sub-args directly.
         if (command.getName().equalsIgnoreCase("cogito")) {
@@ -587,7 +583,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         help(sender, "/reliquary admin <id> [player]", "give an admin/debug variant (e.g. Worthy Lævateinn)");
         help(sender, "/reliquary track", "list every relic and who holds it");
         help(sender, "/reliquary purge <player>", "remove all relics from a player");
-        help(sender, "/reliquary ext ...", "the Cogito extraction testbed (brew, add, distill, pour)");
+        help(sender, "/reliquary ext ...", "the Cogito extraction command (ticket, give, giveall)");
     }
 
     private void help(CommandSender sender, String cmd, String desc) {

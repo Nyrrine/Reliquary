@@ -30,7 +30,6 @@ public final class Enkephalin {
     private static final Material MATERIAL = Material.EXPERIENCE_BOTTLE; // an (unthrowable) bottle of essence
     private static final TextColor NAME = TextColor.color(0x88DD66); // Lobotomy green
     private static final TextColor BODY = TextColor.color(0xB8B8C0);
-    private static final TextColor FAINT = TextColor.color(0x7A7A84);
 
     /** Whether an item is Enkephalin fuel. */
     public static boolean matches(ItemStack item) {
@@ -61,10 +60,7 @@ public final class Enkephalin {
     public static ItemStack create() { return create(1); }
 
     private static final List<Component> LORE = List.of(
-            line("Distilled mental energy — the fuel", BODY),
-            line("that drives every extraction.", BODY),
-            Component.empty(),
-            line("Spent at the Centrifuge and the Well.", FAINT, true));
+            line("Distilled mental energy.", BODY));
 
     private static Component line(String text, TextColor color) { return line(text, color, false); }
 

@@ -10,10 +10,11 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 
 /**
- * The lab stations (§35) as crafted, placed custom blocks. Placing a station item registers that block's
- * location as a station ({@link Stations}); breaking it gives the station item back and de-registers it.
- * Right-clicking a <i>registered</i> station block runs its pipeline step (the same logic as the matching
- * {@code /cogito} command). Ordinary blocks of the same type are untouched.
+ * The Pocket Well as a crafted, placed custom block. Placing a Well item registers that block's location as a
+ * Well ({@link Stations}); breaking it gives the item back and de-registers it. Right-clicking a registered
+ * Well runs the ticket pull. Ordinary conduits are untouched. (The other lab stations were deleted with the
+ * chemistry.) This listener also guards the plugin's cosmetic items against being eaten by vanilla crafts or
+ * a right-click use of their base material.
  */
 public final class StationListener implements Listener {
 
@@ -36,8 +37,6 @@ public final class StationListener implements Listener {
         StationType type = stations.typeAt(event.getBlock());
         if (type == null) return;
         stations.unregister(event.getBlock());
-        if (type == StationType.FONT) extraction.clearFont(event.getBlock().getLocation()); // reset compost fill
-        if (type == StationType.CENSER) extraction.censerReturnOnBreak(event.getBlock().getLocation()); // return seated vial
         event.setDropItems(false); // don't drop the plain vanilla block
         if (event.getPlayer().getGameMode() != GameMode.CREATIVE) {
             event.getBlock().getWorld().dropItemNaturally(event.getBlock().getLocation().add(0.5, 0.5, 0.5),
@@ -55,23 +54,21 @@ public final class StationListener implements Listener {
         if (Enkephalin.matches(event.getItem())) event.setCancelled(true);
     }
 
-    /** A Cogito is a volatile emotional distillate, not a drink — cancel the swallow so the vial isn't lost. */
+    /** A Cogito is a lore vial, not a drink — cancel the swallow so the vial isn't lost. */
     @EventHandler
     public void onConsume(org.bukkit.event.player.PlayerItemConsumeEvent event) {
         if (Cogito.matches(event.getItem())) {
             event.setCancelled(true);
             event.getPlayer().sendActionBar(net.kyori.adventure.text.Component
-                    .text("A Cogito vial isn't for drinking — pour it at the Well.")
+                    .text("A Cogito vial isn't for drinking.")
                     .color(net.kyori.adventure.text.format.NamedTextColor.RED));
         }
     }
 
     /**
-     * Plugin items (refined reagents, concentrates, catalysts, Cogito/Raw Cogito/Enkephalin, tickets) share
-     * vanilla Materials (dyes, lapis block, copper ingot, slime ball, nether star…), and vanilla crafting
-     * matches by Material ignoring PDC — so a vanilla recipe would silently destroy/convert them (e.g. a
-     * Blinding Pride = Lapis Block uncrafted into 9 lapis). Block any vanilla craft that consumes one; our own
-     * {@code reliquary:} refining recipes are allowed through.
+     * The plugin's cosmetic items share vanilla Materials (dyes, nether star, slime ball, fire charge…), and
+     * vanilla crafting matches by Material ignoring PDC — so a vanilla recipe would silently destroy/convert
+     * one. Block any vanilla craft that consumes one; our own {@code reliquary:} recipes are allowed through.
      */
     @EventHandler
     public void onCraft(org.bukkit.event.inventory.PrepareItemCraftEvent event) {
@@ -79,33 +76,29 @@ public final class StationListener implements Listener {
         if (recipe instanceof org.bukkit.Keyed keyed && keyed.getKey().getNamespace().equals("reliquary")) return;
         for (org.bukkit.inventory.ItemStack it : event.getInventory().getMatrix()) {
             if (it == null) continue;
-            if (Catalyst.matches(it) || RefinedReagent.idOf(it) != null || SinConcentrate.sinOf(it) != null
-                    || Cogito.matches(it) || RawCogito.matches(it) || Enkephalin.matches(it)
-                    || ExtractionTicket.matches(it) || CureItem.idOf(it) != null) {
+            if (Catalyst.matches(it) || SinConcentrate.matches(it) || Cogito.matches(it)
+                    || RawCogito.matches(it) || Enkephalin.matches(it) || ExtractionTicket.matches(it)
+                    || Cosmetics.isEmberDistillate(it)) {
                 event.getInventory().setResult(null);
                 return;
             }
         }
     }
 
-    // Stations removed by anything other than a player break (explosion, piston) still need their state cleaned
-    // up — otherwise a seated Censer vial + its floating display leak and a rebuild at the spot desyncs.
+    // A Well removed by anything other than a player break (explosion, piston) still needs de-registering,
+    // else a rebuild at the spot desyncs against the stale registry entry.
     @EventHandler
-    public void onBlockExplode(org.bukkit.event.block.BlockExplodeEvent event) { cleanupStations(event.blockList()); }
+    public void onBlockExplode(org.bukkit.event.block.BlockExplodeEvent event) { cleanup(event.blockList()); }
     @EventHandler
-    public void onEntityExplode(org.bukkit.event.entity.EntityExplodeEvent event) { cleanupStations(event.blockList()); }
+    public void onEntityExplode(org.bukkit.event.entity.EntityExplodeEvent event) { cleanup(event.blockList()); }
     @EventHandler
-    public void onPistonExtend(org.bukkit.event.block.BlockPistonExtendEvent event) { cleanupStations(event.getBlocks()); }
+    public void onPistonExtend(org.bukkit.event.block.BlockPistonExtendEvent event) { cleanup(event.getBlocks()); }
     @EventHandler
-    public void onPistonRetract(org.bukkit.event.block.BlockPistonRetractEvent event) { cleanupStations(event.getBlocks()); }
+    public void onPistonRetract(org.bukkit.event.block.BlockPistonRetractEvent event) { cleanup(event.getBlocks()); }
 
-    private void cleanupStations(java.util.List<org.bukkit.block.Block> blocks) {
+    private void cleanup(java.util.List<org.bukkit.block.Block> blocks) {
         for (org.bukkit.block.Block b : blocks) {
-            StationType t = stations.typeAt(b);
-            if (t == null) continue;
-            stations.unregister(b);
-            if (t == StationType.FONT) extraction.clearFont(b.getLocation());
-            if (t == StationType.CENSER) extraction.censerReturnOnBreak(b.getLocation());
+            if (stations.typeAt(b) != null) stations.unregister(b);
         }
     }
 
@@ -116,25 +109,10 @@ public final class StationListener implements Listener {
         if (event.getClickedBlock() == null) return;
 
         StationType type = stations.typeAt(event.getClickedBlock());
-        if (type == null) return; // an ordinary block — leave it vanilla
+        if (type != StationType.WELL) return; // an ordinary block — leave it vanilla
 
-        event.setCancelled(true); // it's a station — suppress the vanilla GUI and run the step
+        event.setCancelled(true); // it's a Well — suppress the vanilla GUI and run the pull
         var player = event.getPlayer();
-        var held = player.getInventory().getItemInMainHand();
-        switch (type) {
-            case LECTERN    -> {
-                if (held == null || held.getType().isAir()) extraction.assayOverview(player); // empty hand → chat assay
-                else extraction.describeItem(player, held);        // holding → identify it (weapon/catalyst → track)
-            }
-            case FONT       -> extraction.stationFont(player, event.getClickedBlock().getLocation(), held);
-            case ALEMBIC    -> extraction.stationAlembic(player, player.isSneaking());
-            case CENSER     -> extraction.stationCenser(player, held,
-                    event.getClickedBlock().getLocation(), player.isSneaking());
-            case CENTRIFUGE -> extraction.stationCentrifuge(player);
-            case MANIFOLD   -> extraction.stationManifold(player);
-            case CRUCIBLE   -> extraction.stationCrucible(player, player.isSneaking());
-            case WELL       -> extraction.stationWell(player,
-                    event.getClickedBlock().getLocation(), player.isSneaking());
-        }
+        extraction.stationWell(player, event.getClickedBlock().getLocation(), player.isSneaking());
     }
 }
