@@ -142,6 +142,7 @@ public final class LampWeapon implements EgoWeapon {
     private static final double FLAME_SPEED        = 0.55;  // blocks/tick as it homes
     private static final int    FLAME_MAX_TICKS    = 70;    // it always gives up and fades by here
     private static final double FLAME_HIT_RADIUS   = 1.0;   // contact reach on the mark
+    private static final double FLAME_RING_RADIUS  = 1.75;  // flames bloom on a ring this far out around her (placeholder; tune)
 
     // ---- gaze cooldown ---------------------------------------------------------------
     /** Fixing a fresh eye rests this long — a proper cooldown, so the mark cannot be re-fixed every tick. */
@@ -548,8 +549,15 @@ public final class LampWeapon implements EgoWeapon {
         Location muzzle = player.getEyeLocation();
         player.getWorld().playSound(muzzle, Sound.ITEM_FIRECHARGE_USE, 0.6f, 1.2f);
         player.getWorld().playSound(muzzle, Sound.BLOCK_FIRE_AMBIENT, 0.5f, 0.9f);
+        // Bloom the flames on a small ring around her (like Twilight's Brilliant Eyes) rather than at the muzzle;
+        // the i*2L stagger still opens them one by one, now walking around the circle before they chase.
+        Location center = player.getLocation().add(0, 1.0, 0); // roughly chest height
+        double base = Math.toRadians(player.getLocation().getYaw()); // start behind/around her facing so the ring reads
         for (int i = 0; i < FLAME_COUNT; i++) {
-            new FlameChaser(player.getUniqueId(), muzzle.clone(), mark).runTaskTimer(plugin, i * 2L, 1L);
+            double angle = base + (2.0 * Math.PI * i / FLAME_COUNT);
+            Location spawn = center.clone().add(
+                    Math.cos(angle) * FLAME_RING_RADIUS, 0, Math.sin(angle) * FLAME_RING_RADIUS);
+            new FlameChaser(player.getUniqueId(), spawn, mark).runTaskTimer(plugin, i * 2L, 1L);
         }
         renderBar(player);
     }
