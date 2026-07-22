@@ -2,6 +2,7 @@ package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -18,6 +19,7 @@ import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.data.BlockData;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
@@ -143,6 +145,15 @@ public final class CensoredWeapon implements EgoWeapon {
     private static final double LOOK_THRESHOLD     = 0.6;
     /** Nausea handed to a too-long looker, refreshed while they keep watching. */
     private static final int    NAUSEA_TICKS       = 100;  // 5s, refreshed
+
+    // ---- enchants (conservative: reach + onset only, never damage) -----------------
+    /** Custom [C] "Unblinking" (weaponId "censored"): -0.5s to the sicken onset per level, floored at 1.5s. */
+    private static final int    UNBLINKING_MAX        = 2;
+    private static final long   UNBLINKING_ONSET_CUT_MS = 500L;
+    private static final long   LOOK_SICKEN_FLOOR_MS  = 1_500L;
+    /** Vanilla-read (Sweeping Edge, otherwise dead here): +0.35 block of maw reach per level, capped at 3. */
+    private static final int    SWEEP_REACH_CAP       = 3;
+    private static final double SWEEP_REACH_PER_LEVEL = 0.35;
 
     // ---- M1 maw tuning ------------------------------------------------------------
     /** How far the maw lunges, and how wide its raytrace bites. */
@@ -325,11 +336,12 @@ public final class CensoredWeapon implements EgoWeapon {
 
         Location eye = player.getEyeLocation();
         Vector dir = eye.getDirection().normalize();
+        double reach = mawReach(player); // base, plus a little per Sweeping Edge (a reach enchant, no damage)
         // Two beats, smooth: a fast dark PIERCE lances out along the aim, then the black MAW snaps shut at its
         // tip. Thick red and black throughout. Cosmetic — the bites below land synchronously as they always did.
-        track(new Pierce(eye, dir, MAW_REACH, PIERCE_TICKS, PIERCE_THICK, true)).runTaskTimer(plugin, 0L, 1L);
+        track(new Pierce(eye, dir, reach, PIERCE_TICKS, PIERCE_THICK, true)).runTaskTimer(plugin, 0L, 1L);
 
-        LivingEntity target = mawTarget(player, eye, dir);
+        LivingEntity target = mawTarget(player, eye, dir, reach);
         if (target != null) {
             biteTwice(player, target, dir);
         }
@@ -340,11 +352,23 @@ public final class CensoredWeapon implements EgoWeapon {
         }
     }
 
-    /** The first living body the maw's line reaches within {@link #MAW_REACH}, or null on a whiff. */
-    private LivingEntity mawTarget(Player player, Location eye, Vector dir) {
-        RayTraceResult rt = player.getWorld().rayTraceEntities(eye, dir, MAW_REACH, MAW_RADIUS,
+    /** The first living body the maw's line reaches within {@code reach}, or null on a whiff. */
+    private LivingEntity mawTarget(Player player, Location eye, Vector dir, double reach) {
+        RayTraceResult rt = player.getWorld().rayTraceEntities(eye, dir, reach, MAW_RADIUS,
                 e -> e instanceof LivingEntity && !e.equals(player) && !e.isDead());
         return rt != null && rt.getHitEntity() instanceof LivingEntity le ? le : null;
+    }
+
+    /**
+     * ENCHANT (vanilla-read, Sweeping Edge): the maw's reach. Base {@link #MAW_REACH}, plus a small, capped
+     * bump per Sweeping Edge level. Sweeping Edge is otherwise DEAD on CENSORED (the vanilla blow is zeroed in
+     * {@link #onHit}), so this gives a would-be-useless sword enchant an honest reinterpretation — reach only,
+     * never damage. The tooltip reads it as "Sweeping Edge"; the reinterpretation lives here and in the wiki.
+     */
+    private double mawReach(Player player) {
+        int se = Math.min(SWEEP_REACH_CAP,
+                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.SWEEPING_EDGE));
+        return MAW_REACH + se * SWEEP_REACH_PER_LEVEL;
     }
 
     /**
@@ -820,12 +844,13 @@ public final class CensoredWeapon implements EgoWeapon {
     }
 
     /**
-     * Anyone within {@link #LOOK_RANGE} facing the wielder head-on accrues look-time; hold it past {@link
-     * #LOOK_SICKEN_MS} and they are sickened with Nausea, refreshed while they keep watching. Looking away
-     * clears the clock at once.
+     * Anyone within {@link #LOOK_RANGE} facing the wielder head-on accrues look-time; hold it past the sicken
+     * onset and they are sickened with Nausea, refreshed while they keep watching. Looking away clears the
+     * clock at once. The onset is {@link #LOOK_SICKEN_MS} by default, cut by the Unblinking enchant.
      */
     private void lookScan(Player wielder) {
         long now = System.currentTimeMillis();
+        long onset = sickenOnset(wielder);
         Set<UUID> stillLooking = new HashSet<>();
         for (Entity e : wielder.getNearbyEntities(LOOK_RANGE, LOOK_RANGE, LOOK_RANGE)) {
             if (!(e instanceof LivingEntity looker) || looker.isDead() || looker.equals(wielder)) continue;
@@ -833,12 +858,23 @@ public final class CensoredWeapon implements EgoWeapon {
             UUID lid = looker.getUniqueId();
             stillLooking.add(lid);
             long since = lookingSince.computeIfAbsent(lid, k -> now);
-            if (now - since >= LOOK_SICKEN_MS) {
+            if (now - since >= onset) {
                 looker.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, NAUSEA_TICKS, 0, false, true, true));
             }
         }
         // Prune anyone who looked away, died, or left range this scan — the leak the review caught.
         lookingSince.keySet().retainAll(stillLooking);
+    }
+
+    /**
+     * ENCHANT (custom [C], Unblinking): the sicken onset. Base {@link #LOOK_SICKEN_MS}, cut by
+     * {@link #UNBLINKING_ONSET_CUT_MS} per level (watchers sicken sooner), floored at {@link #LOOK_SICKEN_FLOOR_MS}
+     * so it never becomes instant. Duration/utility only, no damage.
+     */
+    private long sickenOnset(Player wielder) {
+        int lvl = Math.min(UNBLINKING_MAX,
+                EgoEnchants.level(wielder.getInventory().getItemInMainHand(), "unblinking"));
+        return Math.max(LOOK_SICKEN_FLOOR_MS, LOOK_SICKEN_MS - (long) lvl * UNBLINKING_ONSET_CUT_MS);
     }
 
     /** True if {@code looker} is facing {@code wielder} head-on past {@link #LOOK_THRESHOLD}. */
