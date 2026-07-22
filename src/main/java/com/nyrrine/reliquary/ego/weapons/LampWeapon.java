@@ -3,6 +3,7 @@ package com.nyrrine.reliquary.ego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
 import com.nyrrine.reliquary.core.Weapon;
+import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
@@ -147,6 +148,14 @@ public final class LampWeapon implements EgoWeapon {
     // ---- gaze cooldown ---------------------------------------------------------------
     /** Fixing a fresh eye rests this long — a proper cooldown, so the mark cannot be re-fixed every tick. */
     private static final long   GAZE_COOLDOWN_MS   = 5_000L;
+
+    // ---- enchant tuning (custom [C] enchants; ids catalogued in EgoEnchant) ------------
+    /** Radiant Glow: the protective aura reaches this much farther per level (support/reach, never damage). */
+    private static final int    GLOW_MAX_LVL       = 3;
+    private static final double GLOW_RADIUS_PER    = 0.5;   // +0.5 block/level (5.0 -> up to 6.5)
+    /** Lingering Eye: the fixed eye keeps pouring the wielder's debuffs onto the mark this much longer per level. */
+    private static final int    EYE_MAX_LVL        = 3;
+    private static final long   EYE_WINDOW_PER_MS  = 1_000L; // +1s/level (8s -> up to 11s)
 
     /** Harmful potion effects the Gaze copies from the wielder onto the marked body. */
     private static final Set<PotionEffectType> HARMFUL = Set.of(
@@ -297,15 +306,37 @@ public final class LampWeapon implements EgoWeapon {
                 || matches(player.getInventory().getItemInOffHand());
     }
 
+    /** The Lamp this player is carrying (main hand preferred, then off-hand), or null if neither holds it. */
+    private ItemStack heldLamp(Player player) {
+        ItemStack main = player.getInventory().getItemInMainHand();
+        if (matches(main)) return main;
+        ItemStack off = player.getInventory().getItemInOffHand();
+        return matches(off) ? off : null;
+    }
+
+    /** The aura radius for this wielder, widened by any Radiant Glow on the held lantern (base {@value #AURA_RADIUS}). */
+    private double auraRadius(Player wielder) {
+        int lvl = Math.min(EgoEnchants.level(heldLamp(wielder), "radiant_glow"), GLOW_MAX_LVL);
+        return AURA_RADIUS + GLOW_RADIUS_PER * lvl;
+    }
+
+    /** The debuff-transfer window for this wielder, lengthened by any Lingering Eye on the held lantern. */
+    private long transferWindowMs(Player wielder) {
+        int lvl = Math.min(EgoEnchants.level(heldLamp(wielder), "lingering_eye"), EYE_MAX_LVL);
+        return TRANSFER_WINDOW_MS + EYE_WINDOW_PER_MS * lvl;
+    }
+
     /** Bathe the wielder and every nearby ally (players + tamed pets) in Resistance and warm light. */
     private void applyAura(Player wielder) {
         Set<UUID> marked = markedTargets();
 
+        double radius = auraRadius(wielder); // widened by Radiant Glow, if enchanted
+
         grant(wielder);
         glow(wielder);
-        lanternRing(wielder);
+        lanternRing(wielder, radius);
 
-        for (Entity e : wielder.getNearbyEntities(AURA_RADIUS, AURA_RADIUS, AURA_RADIUS)) {
+        for (Entity e : wielder.getNearbyEntities(radius, radius, radius)) {
             if (marked.contains(e.getUniqueId())) continue;           // a marked foe earns no glow yet
             boolean ally = e instanceof Player || (e instanceof Tameable t && t.isTamed());
             if (!ally || !(e instanceof LivingEntity le) || le.isDead()) continue;
@@ -405,7 +436,7 @@ public final class LampWeapon implements EgoWeapon {
             return; // a whiff costs no cooldown
         }
 
-        gazes.put(player.getUniqueId(), new Gaze(target.getUniqueId(), now + TRANSFER_WINDOW_MS, now));
+        gazes.put(player.getUniqueId(), new Gaze(target.getUniqueId(), now + transferWindowMs(player), now));
         gazeCd.put(player.getUniqueId(), now + GAZE_COOLDOWN_MS);
         transferDebuffs(player, target); // snapshot on the cast
 
@@ -674,13 +705,13 @@ public final class LampWeapon implements EgoWeapon {
     }
 
     /** A warm lantern-ring of light circling the wielder's feet each aura pulse — low count, drawn once. */
-    private void lanternRing(Player wielder) {
+    private void lanternRing(Player wielder, double radius) {
         World world = wielder.getWorld();
         Location feet = wielder.getLocation().add(0, 0.15, 0);
         final int points = 10;
         for (int i = 0; i < points; i++) {
             double a = (Math.PI * 2 * i) / points;
-            Location p = feet.clone().add(Math.cos(a) * AURA_RADIUS, 0.0, Math.sin(a) * AURA_RADIUS);
+            Location p = feet.clone().add(Math.cos(a) * radius, 0.0, Math.sin(a) * radius);
             world.spawnParticle(Particle.DUST, p, 1, 0.04, 0.02, 0.04, 0.0, RING);
         }
     }
