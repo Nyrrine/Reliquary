@@ -351,6 +351,14 @@ public final class FaintAromaWeapon implements EgoWeapon {
     /** Shot heading vs. a blocker's look: below this, they count as roughly facing the incoming arrow. */
     private static final double BLOCK_FACING_DOT = 0.2;
 
+    // Gentle aim assist (PLACEHOLDER magnitudes) — soft help, never a lock-on. At launch a bolt acquires the
+    // living body nearest the wielder's crosshair inside a modest cone + range; each tick it turns toward that
+    // body by at most a capped angle, so it curves in rather than snapping. No body in the cone -> it flies
+    // dead straight, exactly as before.
+    private static final double AIM_ASSIST_CONE_DEG = 18.0; // half-angle from the crosshair a body may sit in to be acquired
+    private static final double AIM_ASSIST_RANGE    = 24.0; // how far out a body can be acquired, in blocks
+    private static final double AIM_ASSIST_TURN_DEG = 9.0;  // max heading turn per tick — the softness of the curve
+
     /** Beyond ~32 blocks the client culls unforced particles, and these arrows outrange that easily. */
     private static final boolean FORCE_PARTICLES = true;
 
@@ -719,7 +727,8 @@ public final class FaintAromaWeapon implements EgoWeapon {
         private final World world;
         private final Shot shot;
         private final Location point;      // the arrow's live position
-        private final Vector dir;          // heading (unit)
+        private Vector dir;                // heading (unit) — curved a touch each tick by the aim assist
+        private final UUID assistId;       // the body this bolt gently homes toward, or null (fly straight)
         private final double multiplier;   // the petals this shot was bought with
         private int ticks = 0;
         private boolean done = false;
@@ -731,6 +740,7 @@ public final class FaintAromaWeapon implements EgoWeapon {
             this.multiplier = multiplier;
             this.dir = caster.getEyeLocation().getDirection().normalize();
             this.point = caster.getEyeLocation().add(this.dir.clone().multiply(0.7)); // clear of the face
+            this.assistId = acquireAssist(caster.getEyeLocation(), this.dir);         // gentle aim assist target, or null
         }
 
         @Override
@@ -738,6 +748,8 @@ public final class FaintAromaWeapon implements EgoWeapon {
             Player caster = plugin.getServer().getPlayer(casterId);
             if (caster == null || !caster.isOnline()) { stop(); return; }
             if (++ticks > shot.lifeTicks) { fizzle(); stop(); return; }
+
+            homeToward(); // curve the heading a capped amount toward the acquired body, if any
 
             // ONE broad-phase query per tick, then every sub-step tests against this snapshot. Querying
             // inside the sub-step loop would multiply the cost of the whole flight by the sub-step count.
@@ -785,6 +797,48 @@ public final class FaintAromaWeapon implements EgoWeapon {
                 if (d <= HIT_RADIUS * HIT_RADIUS && d < bestDist) { bestDist = d; best = le; }
             }
             return best;
+        }
+
+        /**
+         * At launch, pick the aim-assist target: the living body sitting nearest the wielder's crosshair inside
+         * a {@link #AIM_ASSIST_CONE_DEG} cone and {@link #AIM_ASSIST_RANGE} blocks — "nearest" measured by the
+         * tightest angle to the aim line (largest dot). No body qualifies -> null, and the bolt homes toward
+         * nothing (flies straight). This is a soft assist: it only ever curves the shot toward a body the wielder
+         * was already roughly aiming at.
+         */
+        private UUID acquireAssist(Location eye, Vector aim) {
+            double bestDot = Math.cos(Math.toRadians(AIM_ASSIST_CONE_DEG)); // must beat the cone to be acquired
+            LivingEntity best = null;
+            for (Entity e : world.getNearbyEntities(eye, AIM_ASSIST_RANGE, AIM_ASSIST_RANGE, AIM_ASSIST_RANGE)) {
+                if (e.getUniqueId().equals(casterId)) continue;                  // never the wielder
+                if (!(e instanceof LivingEntity le) || le.isDead() || !le.isValid()) continue;
+                Vector to = centre(le).subtract(eye.toVector());
+                double dist = to.length();
+                if (dist < 1.0e-3 || dist > AIM_ASSIST_RANGE) continue;
+                double dot = aim.dot(to.multiply(1.0 / dist));                   // cos of the angle off the crosshair
+                if (dot > bestDot) { bestDot = dot; best = le; }                 // tightest to the crosshair wins
+            }
+            return best == null ? null : best.getUniqueId();
+        }
+
+        /** Turn the heading toward the acquired body by at most {@link #AIM_ASSIST_TURN_DEG} — the gentle curve. */
+        private void homeToward() {
+            if (assistId == null) return;
+            Entity e = plugin.getServer().getEntity(assistId);
+            if (!(e instanceof LivingEntity le) || le.isDead() || !le.isValid() || !le.getWorld().equals(world)) {
+                return; // the target is gone — stop homing, keep the current heading (fly on straight)
+            }
+            Vector desired = centre(le).subtract(point.toVector());
+            double dist = desired.length();
+            if (dist < 1.0e-3) return;
+            desired.multiply(1.0 / dist);
+            double dot = Math.max(-1.0, Math.min(1.0, dir.dot(desired)));
+            double ang = Math.acos(dot);
+            double maxTurn = Math.toRadians(AIM_ASSIST_TURN_DEG);
+            if (ang <= maxTurn || ang < 1.0e-6) { dir = desired; return; }       // within a step — settle on it
+            Vector axis = dir.getCrossProduct(desired);
+            if (axis.lengthSquared() < 1.0e-9) return;                            // exactly opposed — don't spin
+            dir = dir.rotateAroundAxis(axis.normalize(), maxTurn).normalize();
         }
 
         /**
