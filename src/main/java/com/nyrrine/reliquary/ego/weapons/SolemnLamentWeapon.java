@@ -59,7 +59,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * <ul>
  *   <li><b>Left-click (swing)</b> — fire one pistol, alternating sides each click. The firing gun throws
  *       {@value #PELLETS_PER_GUN} hitscan pellets in a spread cone (range {@value #RANGE}). Each pellet
- *       that finds a living body deals {@value #PELLET_DAMAGE} with <b>zero knockback</b> — the victim's
+ *       that finds a living body deals {@value #SINGLE_SHOT_DAMAGE} with <b>zero knockback</b> — the victim's
  *       velocity is captured and restored around the hit. Each shot spends one from that gun's magazine.</li>
  *   <li><b>Right-click</b> — fast mag dump: unloads both pistols as fast as the trigger cycles, one shot
  *       per tick, alternating side to side until BOTH magazines run dry.</li>
@@ -117,11 +117,14 @@ public final class SolemnLamentWeapon implements EgoWeapon {
     private static final int    MAG             = 12;    // shots per pistol
     private static final int    PELLETS_PER_GUN = 2;     // shotgun pellets each gun throws per trigger
     private static final double RANGE           = 16.0;  // "not too far" — a close-range reach
-    private static final double PELLET_DAMAGE   = 0.55;  // per pellet at a near-empty mag; scaled down while full (see pelletDamage). Halved from 1.1 — the mag dump still hit like a truck.
-    // A full mag dump was landing ~70 on a golem. The gun is now weakest with a full magazine and only bites
-    // near its full pellet value as it empties, so a fresh two-mag dump is much softer than the tail of one.
-    // Damage per pellet = PELLET_DAMAGE * (MIN_MAG_FACTOR .. 1.0), interpolated by how EMPTY the magazine is.
-    private static final double MIN_MAG_FACTOR  = 0.40;  // a brimming pair of pistols hits at 40% of the pellet value
+    // Two per-pellet damage models, to REWARD aimed single/held left-click fire over the panic mag dump:
+    //  - a single or held LEFT-click shot deals the flat SINGLE_SHOT_DAMAGE (no fullness penalty) — a real, aimed shot.
+    //  - the RIGHT-click mag DUMP keeps the fullness scaling: DUMP_PELLET_DAMAGE * (MIN_MAG_FACTOR .. 1.0) by how
+    //    EMPTY the mags are, so a fresh two-mag dump opens soft and only sharpens at its tail. The 24-shot dump
+    //    stays bounded while single shots hit several times harder per pellet — the incentive points at left-click.
+    private static final double SINGLE_SHOT_DAMAGE = 1.3;  // per pellet, single/held left-click — the rewarded shot (PLACEHOLDER)
+    private static final double DUMP_PELLET_DAMAGE  = 0.65; // per pellet at a near-empty mag on a DUMP; scaled down while full (PLACEHOLDER, +0.10 from the nerf)
+    private static final double MIN_MAG_FACTOR  = 0.40;  // a brimming pair of pistols dumps at 40% of the dump-pellet value
     private static final double CONE            = 0.10;  // shotgun spread (radians-ish scatter) — tightened so more pellets connect
     private static final double RAY_SIZE        = 0.5;   // entity ray fatness (forgiving aim)
     private static final double HAND_OFFSET     = 0.32;  // how far the muzzles sit off the aim line
@@ -259,7 +262,9 @@ public final class SolemnLamentWeapon implements EgoWeapon {
         if (left && mag.left <= 0 && mag.right > 0) left = false;        // don't dry-fire a spent side
         else if (!left && mag.right <= 0 && mag.left > 0) left = true;
 
-        fireShot(player, left);                      // one pistol, its cone, its flock, its ding
+        // A dump shot pays the fullness-scaled dump damage; a single/held left-click shot gets the flat reward.
+        double damage = mag.dumping ? dumpPelletDamage(player) : SINGLE_SHOT_DAMAGE;
+        fireShot(player, left, damage);              // one pistol, its cone, its flock, its ding
         if (left) mag.left  = Math.max(0, mag.left - 1);
         else      mag.right = Math.max(0, mag.right - 1);
         mag.nextLeft = !left;                        // alternate for the next shot
@@ -318,20 +323,20 @@ public final class SolemnLamentWeapon implements EgoWeapon {
         }.runTaskTimer(plugin, 0L, 1L);
     }
 
-    /** A single shot: one pistol fires its shotgun cone, streams a flock down-range, and dings. */
     /**
-     * The per-pellet damage for the shot being fired now: weakest with a full pair of magazines, climbing to
-     * the full {@link #PELLET_DAMAGE} as they empty. So a mag dump opens soft and only sharpens at its tail,
-     * and — since the mags auto-reload to full — sustained fire never sits at full damage.
+     * The DUMP's per-pellet damage: weakest with a full pair of magazines, climbing to the full
+     * {@link #DUMP_PELLET_DAMAGE} as they empty. So a mag dump opens soft and only sharpens at its tail,
+     * and — since the mags auto-reload to full — sustained dumping never sits at full damage. Single/held
+     * left-click shots do NOT use this — they deal the flat, rewarded {@link #SINGLE_SHOT_DAMAGE} instead.
      */
-    private double pelletDamage(Player player) {
+    private double dumpPelletDamage(Player player) {
         Mag mag = mags.get(player.getUniqueId());
         int total = mag == null ? 0 : mag.right + mag.left;
         double emptiness = 1.0 - Math.min(1.0, total / (double) (2 * MAG)); // 0 = brimming, 1 = dry
-        return PELLET_DAMAGE * (MIN_MAG_FACTOR + (1.0 - MIN_MAG_FACTOR) * emptiness);
+        return DUMP_PELLET_DAMAGE * (MIN_MAG_FACTOR + (1.0 - MIN_MAG_FACTOR) * emptiness);
     }
 
-    private void fireShot(Player player, boolean left) {
+    private void fireShot(Player player, boolean left, double damage) {
         World world = player.getWorld();
         Location eye = player.getEyeLocation();
         Vector dir = eye.getDirection().normalize();
@@ -340,7 +345,7 @@ public final class SolemnLamentWeapon implements EgoWeapon {
         rightV.normalize();
         ThreadLocalRandom rng = ThreadLocalRandom.current();
 
-        fireGun(player, world, eye, dir, rightV, rng, left, pelletDamage(player));
+        fireGun(player, world, eye, dir, rightV, rng, left, damage);
         shotDing(world, eye, rng);
 
         // Every shot ALSO throws flying billboarded images down the aim line. Which images depends on the
