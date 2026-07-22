@@ -332,8 +332,8 @@ public final class TwilightWeapon implements Weapon, Listener {
         }
         // The final strike lands heavier — a bright flare and a deeper toll.
         if (index == COMBO_DAMAGE.length - 1) {
-            world.playSound(eye, Sound.ITEM_TOTEM_USE, 0.5f, 0.9f);
-            world.spawnParticle(Particle.FLASH, eye.add(look.multiply(1.5)), 1);
+            world.playSound(eye, Sound.BLOCK_BELL_RESONATE, 0.6f, 1.4f);
+            world.spawnParticle(Particle.FLASH, eye.add(look.multiply(1.5)), 1, 0, 0, 0, 0, WHITE_DUST);
         }
     }
 
@@ -529,7 +529,7 @@ public final class TwilightWeapon implements Weapon, Listener {
             World world = pos.getWorld();
             if (dist <= 1.1) {
                 dealRuin(owner, target, EYES_DAMAGE);
-                world.spawnParticle(Particle.FLASH, aim, 1);
+                world.spawnParticle(Particle.FLASH, aim, 1, 0, 0, 0, 0, GOLD_DUST);
                 world.spawnParticle(Particle.DUST, aim, 12, 0.25, 0.25, 0.25, 0, new Particle.DustOptions(GOLD_DUST, 1.3f));
                 world.playSound(aim, Sound.ENTITY_BLAZE_HURT, 0.5f, 1.6f);
                 remove();
@@ -667,7 +667,7 @@ public final class TwilightWeapon implements Weapon, Listener {
     /** A real expanding ring: glowing BlockDisplays grow outward across the ground from the slam, over a crack. */
     private void shockwaveVfx(Location c, boolean empowered) {
         World world = c.getWorld();
-        world.spawnParticle(Particle.FLASH, c.clone().add(0, 1, 0), empowered ? 2 : 1);
+        world.spawnParticle(Particle.FLASH, c.clone().add(0, 1, 0), empowered ? 2 : 1, 0, 0, 0, 0, empowered ? WHITE_DUST : GOLD_DUST);
         world.spawnParticle(Particle.EXPLOSION_EMITTER, c, 1);
         final var groundData = c.getBlock().getRelative(0, -1, 0).getBlockData();
         final var blockData = (empowered ? Material.AMETHYST_BLOCK : Material.GLOWSTONE).createBlockData();
