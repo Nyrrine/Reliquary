@@ -93,9 +93,14 @@ public final class TwilightWeapon implements Weapon, Listener {
     private static final long   COMBO_RECOVER   = 10L;  // ticks rooted after the finale — the greatsword's weight
 
     private static final long   PEACE_CD_MS    = 14_000L;
-    private static final int    PEACE_WINDUP   = 18;   // ticks of wind-up before the slam
     private static final double PEACE_RADIUS   = 6.5;
     private static final double PEACE_DAMAGE   = 14.0;
+    private static final double PEACE_LEAP_UP    = 1.05; // the leap's upward impulse — the Bird takes to the air
+    private static final double PEACE_LEAP_FWD   = 0.22; // a touch of forward travel on the leap
+    private static final double PEACE_DIVE_SPEED = 0.90; // how hard it bites downward once descending
+    private static final int    PEACE_WATCH_TICKS = 45;  // safety cap on the arc — never hang mid-air
+    private static final double PEACE_FALL_BONUS_PER_BLOCK = 0.5; // the slam hits harder the further it falls
+    private static final double PEACE_FALL_BONUS_CAP        = 6.0;
 
     private static final long   EYES_CD_MS     = 16_000L;
     private static final int    EYES_COUNT     = 10;
@@ -108,10 +113,10 @@ public final class TwilightWeapon implements Weapon, Listener {
     private static final double EYE_TURN_DEG   = 10.0; // max steer per tick — a smooth curving homing arc
 
     private static final long   PUNISH_CD_MS   = 12_000L;
-    private static final double PUNISH_POWER   = 1.7;   // dash impulse
+    private static final double PUNISH_POWER   = 2.6;   // dash impulse — a longer lunge (was 1.7)
     private static final double PUNISH_DAMAGE  = 8.0;
-    private static final double PUNISH_REACH   = 3.0;
-    private static final int    PUNISH_TICKS   = 8;     // how long the lunge is watched for a wall
+    private static final double PUNISH_REACH   = 3.6;   // wider strike sweep to match the longer reach
+    private static final int    PUNISH_TICKS   = 12;    // watched longer so the extended lunge still catches a wall
 
     // ---- palette ------------------------------------------------------------------
     private static final TextColor C_GOLD  = TextColor.color(0xFFD54A);
@@ -352,7 +357,7 @@ public final class TwilightWeapon implements Weapon, Listener {
         }
     }
 
-    // ---- ability: [Right Click] Peace For All — wind up, then a shockwave ------------
+    // ---- ability: [Right Click] Peace For All — leap up, then a ground-slam on the descent ------------
 
     private void peaceForAll(Player player) {
         UUID id = player.getUniqueId();
@@ -363,39 +368,58 @@ public final class TwilightWeapon implements Weapon, Listener {
         }
         boolean empowered = sinFull(id);
         peaceReadyAt.put(id, now + PEACE_CD_MS);
-        setBusy(id, PEACE_WINDUP + 4);
+        setBusy(id, PEACE_WATCH_TICKS + 6);   // no other ability through the whole arc
+        fallGraceUntil.put(id, now + 4_000L); // no fall damage through the leap + descent
         World world = player.getWorld();
+        final double startY = player.getY();
+        // The Bird takes to the air: leap up (a touch forward), then bring peace down on the way back.
+        Vector look = player.getEyeLocation().getDirection().setY(0);
+        Vector leap = (look.lengthSquared() < 1.0e-6 ? new Vector(0, 0, 0) : look.normalize().multiply(PEACE_LEAP_FWD))
+                .setY(PEACE_LEAP_UP);
+        player.setVelocity(leap);
+        player.setFallDistance(0f);
         world.playSound(player.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, 1.2f, 0.6f);
         world.playSound(player.getLocation(), Sound.ITEM_TRIDENT_RIPTIDE_3, 0.8f, 0.7f);
 
         new BukkitRunnable() {
             int t = 0;
+            boolean descending = false;
             @Override public void run() {
                 Player p = plugin.getServer().getPlayer(id);
                 if (p == null || !p.isOnline()) { cancel(); return; }
-                if (t < PEACE_WINDUP) {
-                    windupVfx(p, (double) t / PEACE_WINDUP); // the blade gathers light overhead
-                    t++;
+                windupVfx(p, Math.min(1.0, t / 12.0)); // the blade gathers light overhead through the arc
+                if (t > 3 && p.getVelocity().getY() < 0) descending = true;
+                // Land the slam on real ground contact past the apex (or if the arc times out) — never mid-air.
+                if ((descending && p.isOnGround() && t > 4) || t >= PEACE_WATCH_TICKS) {
+                    peaceSlam(p, empowered, startY);
+                    cancel();
                     return;
                 }
-                peaceSlam(p, empowered);
-                cancel();
+                // Once past the apex, bite hard downward so the descent reads as a dive, not a float.
+                if (descending) {
+                    Vector v = p.getVelocity();
+                    if (v.getY() > -PEACE_DIVE_SPEED) { v.setY(-PEACE_DIVE_SPEED); p.setVelocity(v); p.setFallDistance(0f); }
+                }
+                t++;
             }
-        }.runTaskTimer(plugin, 0L, 1L);
+        }.runTaskTimer(plugin, 1L, 1L);
     }
 
-    /** The slam itself: a shockwave outward, heavy ruin all around, and — at full sin — a crippling launch. */
-    private void peaceSlam(Player player, boolean empowered) {
+    /** The slam itself: a shockwave outward, heavy ruin all around (scaled by the drop), and — at full sin — a crippling launch. */
+    private void peaceSlam(Player player, boolean empowered, double startY) {
         UUID id = player.getUniqueId();
         World world = player.getWorld();
         Location c = player.getLocation();
+        double fall = Math.max(0.0, startY - c.getY());
+        double damage = PEACE_DAMAGE + Math.min(fall * PEACE_FALL_BONUS_PER_BLOCK, PEACE_FALL_BONUS_CAP);
         world.playSound(c, Sound.ITEM_MACE_SMASH_GROUND_HEAVY, 1.4f, 0.7f);
         world.playSound(c, Sound.ENTITY_GENERIC_EXPLODE, 1.0f, 0.6f);
         world.playSound(c, Sound.BLOCK_CONDUIT_DEACTIVATE, 1.0f, 0.5f);
         shockwaveVfx(c, empowered);
+        player.setVelocity(new Vector(0, 0.14, 0)); // a small rebound reads as the shockwave throwing the wielder up
         for (Entity e : player.getNearbyEntities(PEACE_RADIUS, PEACE_RADIUS, PEACE_RADIUS)) {
             if (!(e instanceof LivingEntity le) || e.equals(player)) continue;
-            dealRuin(player, le, PEACE_DAMAGE);
+            dealRuin(player, le, damage);
             if (empowered) {
                 le.setVelocity(le.getLocation().toVector().subtract(c.toVector()).setY(0.9)
                         .normalize().multiply(1.1).setY(0.9)); // catch and launch
@@ -439,11 +463,11 @@ public final class TwilightWeapon implements Weapon, Listener {
         if (twice) spendSin(id);
     }
 
-    /** A spawn point around the wielder's upper body — the eyes wake spread across the torso, shoulders and head. */
+    /** A spawn point in a ring AROUND the wielder — well clear of the body, spread across shoulder-to-head height. */
     private Location eyeSpawn(Player player, int i, int count) {
         double a = (Math.PI * 2 * i) / Math.max(1, count) + (i % 2) * 0.6;
-        double r = 0.5 + (i % 3) * 0.18;
-        double y = 0.6 + (i % 4) * 0.28; // staggered heights up the body
+        double r = 1.3 + (i % 3) * 0.22; // 1.3-1.7 blocks out — the eyes open around them, never inside them
+        double y = 0.9 + (i % 4) * 0.28; // staggered heights up the body
         return player.getLocation().add(Math.cos(a) * r, y, Math.sin(a) * r);
     }
 
@@ -697,11 +721,9 @@ public final class TwilightWeapon implements Weapon, Listener {
             case 1 -> SlashVfx.slash(plugin, origin, aim).tilt(52).arcSpan(155).reach(4.3)
                     .colours(GOLD_DUST, WHITE_DUST).thickness(1.4f).duration(6).play();
             case 2 -> SlashVfx.slash(plugin, origin, aim).tilt(2).arcSpan(180).reach(4.8)
-                    .colours(AMBER_DUST, GOLD_DUST).thickness(1.6f).duration(7)
-                    .blade(Material.NETHERITE_SWORD).bladeScale(2.0).play();
+                    .colours(AMBER_DUST, GOLD_DUST).thickness(1.6f).duration(7).play();
             default -> SlashVfx.slash(plugin, origin, aim).tilt(90).arcSpan(190).reach(5.6)
-                    .colours(WHITE_DUST, GOLD_DUST).thickness(1.9f).duration(8)
-                    .blade(Material.NETHERITE_SWORD).bladeScale(2.6).play();
+                    .colours(WHITE_DUST, GOLD_DUST).thickness(1.9f).duration(8).play();
         }
     }
 
@@ -775,7 +797,9 @@ public final class TwilightWeapon implements Weapon, Listener {
         World world = player.getWorld();
         Location c = player.getLocation();
         world.playSound(c, Sound.BLOCK_BELL_USE, 1.0f, 0.7f);
-        world.playSound(c, Sound.ITEM_GOAT_HORN_SOUND_2, 0.7f, 1.0f); // the third trumpet sounds — a horn, not a totem
+        // The third trumpet sounds low and far off — a muffled roar, kept quiet, not a raid horn.
+        world.playSound(c, Sound.ENTITY_RAVAGER_ROAR, 0.3f, 0.5f);
+        world.playSound(c, Sound.ENTITY_ENDER_DRAGON_GROWL, 0.2f, 0.6f);
         for (int i = 0; i < 40; i++) {
             double a = ThreadLocalRandom.current().nextDouble(0, Math.PI * 2);
             double r = ThreadLocalRandom.current().nextDouble(0, 1.6);
@@ -822,8 +846,9 @@ public final class TwilightWeapon implements Weapon, Listener {
                             "A four-hit greatsword combo — one",
                             "strike for each kind of ruin."),
                     new EgoLore.Ability("[Right Click] Peace For All",
-                            "Wind up, then a shockwave that ruins",
-                            "everything around you. 14s cooldown."),
+                            "Leap skyward, then slam down a shockwave",
+                            "that ruins everything around where you",
+                            "land. 14s cooldown."),
                     new EgoLore.Ability("[Shift + Right] Brilliant Eyes",
                             "Open the golden eyes: ten homing lights",
                             "seek your foes. 16s cooldown."),
@@ -845,7 +870,6 @@ public final class TwilightWeapon implements Weapon, Listener {
         lore.add(SPECIAL_MARK);
         meta.lore(lore);
         meta.setUnbreakable(true);
-        meta.setEnchantmentGlintOverride(true); // the flagship glimmers
         meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
         EgoModels.stampWeapon(meta, EgoModels.TWILIGHT);
         item.setItemMeta(meta);
