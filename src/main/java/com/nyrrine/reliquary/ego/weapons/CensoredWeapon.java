@@ -23,7 +23,6 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
-import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -62,16 +61,20 @@ import java.util.concurrent.ThreadLocalRandom;
  *       starving (a Hunger/exhaustion drain, the "saturation damage"). And anyone who looks at the wielder
  *       for more than {@link #LOOK_SICKEN_MS} continuous milliseconds is sickened with Nausea, "a horrendous
  *       sight."</li>
- *   <li><b>[Left Click]</b> — the maw: a slow, long-reaching strike that bites twice, on a {@link
- *       #MAW_COOLDOWN_MS} cadence so it stays heavy. Each swing has a {@link #FREE_GRAPPLE_CHANCE} chance to
- *       fire the Shift+Right-click grapple for free, ignoring both its cooldown and attack speed.</li>
- *   <li><b>[Shift + Right Click]</b> — the big grapple: a brief charge, then a tear along an extended line
- *       that hits every foe in it {@link #GRAPPLE_HITS} times. {@link #GRAPPLE_COOLDOWN_MS}, skipped when the
- *       passive procs it.</li>
- *   <li><b>[Right Click]</b> — prime. The wielder's next kill within {@link #PRIME_WINDOW_MS} is the
- *       signature Feast: teleport to the body, i-frames while you heal, a gruesome macabre show, then a red
- *       censored square bursts over the corpse to heal you and leave a lingering cognition-filter that bleeds
- *       everything near it. {@link #FEAST_COOLDOWN_MS} of silence afterward.</li>
+ *   <li><b>[Left Click]</b> — the maw: a slow, long-reaching strike that reads as a PIERCE (a fast dark
+ *       thrust) then a MAW (black jaws snapping shut) and bites twice, on a {@link #MAW_COOLDOWN_MS} cadence
+ *       so it stays heavy. Each swing has a {@link #FREE_GRAPPLE_CHANCE} chance to fire the Shift+Right-click
+ *       grapple for free, ignoring both its cooldown and attack speed.</li>
+ *   <li><b>[Shift + Right Click]</b> — the big grapple: a brief charge, then a pierce-then-maw tear along an
+ *       extended line that hits every foe in it {@link #GRAPPLE_HITS} times. {@link #GRAPPLE_COOLDOWN_MS},
+ *       skipped when the passive procs it.</li>
+ *   <li><b>[Right Click]</b> — TWO-MODE, chosen by whether a fresh corpse is waiting (there is no prime step):
+ *       on a fresh kill it is the signature Feast — the wielder VANISHES (invisibility + every equipment slot
+ *       hidden from viewers, NO i-frames) and is free to slip away while a 30s torture show plays on the
+ *       corpse, ending in a red censored RECTANGLE that bursts and leaves a lingering cognition-filter
+ *       ({@link #FEAST_COOLDOWN_MS} of silence afterward); with no corpse it is the grasping arm — a
+ *       black-and-red root that stems out to the nearest body and drags it to the wielder
+ *       ({@link #ARM_COOLDOWN_MS}).</li>
  * </ul>
  *
  * <p>All VFX are particles and all state is per-wielder maps and self-cancelling tasks, so nothing is left in
@@ -96,16 +99,34 @@ public final class CensoredWeapon implements EgoWeapon {
     private final Map<UUID, Long> grappleReadyAt = new HashMap<>();
     /** Wielders mid-charge, so a second cast (or a free proc) can't stack a charge on top of one running. */
     private final Set<UUID> charging = new HashSet<>();
-    /** Wielder -> epoch-ms their prime lapses; their next kill before this fires the Feast. */
-    private final Map<UUID, Long> primedUntil = new HashMap<>();
-    /** Wielder -> epoch-ms the Feast (Right-click) is off silence. */
+    /**
+     * Wielder -> epoch-ms a fresh corpse's post-kill grace lapses, and the corpse's location. Set by a kill
+     * ({@link #recordCorpse}); an R-click while the grace is live begins the Feast on that spot and consumes
+     * both. There is no prime anymore: you press AFTER the kill, not before.
+     */
+    private final Map<UUID, Long>     corpseUntil = new HashMap<>();
+    private final Map<UUID, Location> corpseLoc   = new HashMap<>();
+    /** Wielder -> epoch-ms the Feast (Right-click on a corpse) is off silence. */
     private final Map<UUID, Long> feastReadyAt = new HashMap<>();
-    /** Wielder -> epoch-ms their Feast i-frames end; zeroed incoming damage until then. */
-    private final Map<UUID, Long> immuneUntil = new HashMap<>();
+    /** Wielder -> epoch-ms the grasping arm (Right-click with no corpse) is ready again. */
+    private final Map<UUID, Long> armReadyAt = new HashMap<>();
+    /**
+     * Wielders mid-Feast -> a snapshot of the real equipment we hid from viewers, so it can be restored the
+     * moment the show ends (or they quit, or the plugin disables). Presence in this map == currently feasting.
+     * The 30s Feast is a STEALTH window (invisibility + hidden gear), not an i-frame window.
+     */
+    private final Map<UUID, ItemStack[]> feastGear = new HashMap<>();
     /** Looker -> epoch-ms they began looking at a wielder; cleared the moment they look away. */
     private final Map<UUID, Long> lookingSince = new HashMap<>();
     /** Every live task (grapple charges, feasts, cognition filters), reaped on disable. */
     private final Set<BukkitRunnable> activeTasks = new HashSet<>();
+
+    /** The equipment slots the Feast hides so an invisible wielder is truly unseen — body, armour, and hands. */
+    private static final org.bukkit.inventory.EquipmentSlot[] HIDDEN_SLOTS = {
+            org.bukkit.inventory.EquipmentSlot.HEAD, org.bukkit.inventory.EquipmentSlot.CHEST,
+            org.bukkit.inventory.EquipmentSlot.LEGS, org.bukkit.inventory.EquipmentSlot.FEET,
+            org.bukkit.inventory.EquipmentSlot.HAND, org.bukkit.inventory.EquipmentSlot.OFF_HAND,
+    };
 
     // ---- passive tuning -----------------------------------------------------------
     /** Fraction of armour every CENSORED blow ignores (via the framework's pierce). */
@@ -141,26 +162,79 @@ public final class CensoredWeapon implements EgoWeapon {
     private static final double GRAPPLE_DAMAGE       = 4.0;   // per hit
     private static final long   GRAPPLE_COOLDOWN_MS  = 12_000L;
 
+    // ---- grasping arm (Right-click with no corpse) tuning -------------------------
+    // A black+red limb that stems out like a root forcing itself to grow toward the nearest body, then drags
+    // it to the wielder. All magnitudes PLACEHOLDER — flagged for Nyrrine's feel pass on reach/drag.
+    /** How far the arm gropes for a body to seize. Slightly under the grapple's line so the two read apart. */
+    private static final double ARM_REACH          = 10.0;
+    /** The root stems out this slowly — deliberately laboured, "forcing itself to grow." */
+    private static final int    ARM_GROW_TICKS     = 22;    // ~1.1s of creeping growth
+    /** Once seized, the body is hauled in for up to this long, or until within {@link #ARM_GRAB_DIST}. */
+    private static final int    ARM_DRAG_TICKS     = 12;
+    private static final double ARM_GRAB_DIST      = 2.2;   // close enough — the haul is done
+    private static final double ARM_DRAG_STRENGTH  = 0.65;  // velocity toward the wielder per drag tick
+    /** A single bite as the hand closes on the seized body: pierced and left starving, like every CENSORED hit. */
+    private static final double ARM_GRAB_DAMAGE    = 3.0;
+    private static final long   ARM_COOLDOWN_MS    = 8_000L;
+    /** The root's VFX: motes per grown segment, and the black jaw-hand scale at the tip. */
+    private static final double ARM_SEG_STEP       = 0.45;  // a mote every this-many blocks along the limb
+    private static final float  ARM_HAND_SCALE     = 0.7f;
+
     // ---- feast (Right-click) tuning -----------------------------------------------
     private static final long   PRIME_WINDOW_MS    = 6_000L;
     private static final long   FEAST_COOLDOWN_MS  = 20_000L;
-    private static final int    SHOW_TICKS         = 40;      // ~2s gruesome show
-    private static final long   SHOW_MS            = 2_200L;  // i-frame window covering the show (+buffer)
-    private static final int    HEAL_EVERY         = 8;       // heal a chunk this often during the show
+
+    /**
+     * How long the Feast <b>animation</b> runs: 30 seconds of sustained, choreographed torture. This is a
+     * PURELY COSMETIC clock — it drives {@link CensoredFeast} and nothing else. It is NOT the i-frame window
+     * and NOT the heal window; those are {@link #FEAST_PROTECT_MS} and {@link #HEAL_WINDOW_TICKS} below, and
+     * both are kept deliberately short and INDEPENDENT of this number so the show can be long without handing
+     * out 30 seconds of invulnerability or 30 seconds of healing. Do not re-couple them.
+     */
+    private static final int    SHOW_SECONDS       = 30;
+    private static final int    SHOW_TICKS         = SHOW_SECONDS * 20;   // 600 ticks, the animation length only
+
+    /**
+     * <b>⚠ THE PvP-RELEVANT NUMBER — FLAGGED FOR NYRRINE.</b> The Feast grants the wielder i-frames (incoming
+     * damage zeroed by {@link #onIncomingDamage}) for THIS long after the kill, to cover the teleport-in and
+     * the first beat of the show. It is deliberately SHORT and is <b>decoupled from {@link #SHOW_TICKS}</b>:
+     * the show is 30s, the invulnerability is ~2.5s. Never derive this from the show length. Default 2500ms.
+     */
+    private static final long   FEAST_PROTECT_MS   = 2_500L;
+
+    /**
+     * The wielder heals only during this SHORT opening window of the show, never across the full 30s. Kept as
+     * its own tunable (separate from {@link #FEAST_PROTECT_MS} per Nyrrine's rule) even though the default
+     * matches the protect window. At {@value #HEAL_EVERY}-tick cadence this is ~6 chunks of
+     * {@value #HEAL_CHUNK}, ~6 HP, plus {@value #BURST_FINAL_HEAL} at the finale — a bounded ~9 HP, not 75.
+     */
+    private static final int    HEAL_WINDOW_TICKS  = 50;      // ~2.5s of healing, then the machine just hurts
+    private static final int    HEAL_EVERY         = 8;       // heal a chunk this often during the heal window
     private static final double HEAL_CHUNK         = 1.0;
-    private static final double BURST_FINAL_HEAL   = 3.0;     // the square-burst payoff heal
+    private static final double BURST_FINAL_HEAL   = 3.0;     // the red-bar-burst payoff heal, once, at the end
+
+    /** The torture-machine beat: every this-many ticks the show cranks — a heavier crush, bones, a bar-slam. */
+    private static final int    CRANK_PERIOD       = 60;      // a crush every 3s across the 30s
+
     /** The lingering cognition filter left by the burst. */
     private static final double COGNITION_RADIUS   = 5.0;
     private static final double COGNITION_DAMAGE   = 2.0;
     private static final int    COGNITION_PERIOD   = 10;      // a pulse every 0.5s
     private static final int    COGNITION_TICKS    = 60;      // for ~3s
 
-    // ---- VFX tuning (the show) ----------------------------------------------------
-    /** The maw's lunge: ticks for the display jaw to shoot out to full reach before it snaps. */
-    private static final int    MAW_LUNGE_TICKS = 5;
-    private static final double MAW_JAW_SCALE   = 0.75;
+    // ---- VFX tuning: the pierce-then-maw (M1 + grapple) ---------------------------
+    /** M1: the PIERCE — a dark spike lances out along the aim to {@link #MAW_REACH} this fast, then the maw. */
+    private static final int    PIERCE_TICKS    = 3;      // a fast forward thrust
+    private static final float  PIERCE_THICK    = 0.30f;  // the spike's cross-section
+    /** M1: the MAW — two black jaws snap shut over this at the pierce's tip. */
+    private static final int    JAW_CLOSE_TICKS = 4;
+    private static final double MAW_JAW_SCALE   = 0.85;
+    /** Grapple: the PIERCE lances the full {@link #GRAPPLE_RANGE} line this fast before the jaws clamp it. */
+    private static final int    GRAPPLE_LANCE_TICKS = 4;
+    private static final float  GRAPPLE_LANCE_THICK = 0.55f;
+
     /** Feast bones: flung as ItemDisplays this often, this many at a time, tumbling for this long. */
-    private static final int    BONE_EVERY      = 5;
+    private static final int    BONE_EVERY      = 6;
     private static final int    BONE_BURST      = 2;
     private static final int    BONE_LIFE       = 30;
     private static final double BONE_SPEED      = 0.5;
@@ -168,18 +242,32 @@ public final class CensoredWeapon implements EgoWeapon {
     private static final double BONE_GRAVITY    = 0.045;
     private static final float  BONE_SPIN       = 0.5f;
     private static final float  BONE_SCALE      = 0.5f;
-    /** The red CENSORED square (BlockDisplay): scale-up ticks, hold ticks, full width, then shatter. */
-    private static final int    SQUARE_ENGULF   = 8;
-    private static final int    SQUARE_HOLD     = 12;
-    private static final double SQUARE_SIZE     = 3.4;
+
+    /**
+     * The red CENSORED redaction as a BlockDisplay. Per Nyrrine: a large RECTANGLE with censor-bar
+     * proportions (wide + tall + THIN), NOT the old square/cube. It stands up over the corpse at the finale,
+     * engulfs, holds, then shatters. Long in width, tall in height, wafer-thin in depth — a redaction bar.
+     */
+    private static final int    BAR_ENGULF      = 8;
+    private static final int    BAR_HOLD        = 16;
+    private static final double BAR_W           = 4.6;   // wide
+    private static final double BAR_H           = 1.6;   // tall
+    private static final double BAR_TH          = 0.4;   // thin — a bar, not a slab
     private static final int    SHARD_COUNT     = 16;
     private static final int    SHARD_LIFE      = 26;
     private static final double SHARD_SPEED     = 0.6;
     private static final double SHARD_GRAVITY   = 0.05;
     private static final float  SHARD_SPIN      = 0.6f;
     private static final float  SHARD_SCALE     = 0.35f;
-    /** The grapple tear: ticks the wall of particles sweeps down the line. */
-    private static final int    TEAR_TICKS      = 6;
+
+    /**
+     * The black CENSORED bars that coat BOTH bodies during the Feast (the L-click redaction motif she loves):
+     * a wide, thin, tall black redaction bar clamped over the wielder AND over the corpse for the whole show.
+     */
+    private static final double BODY_BAR_W      = 1.7;   // wide enough to cover the body
+    private static final double BODY_BAR_H      = 0.62;  // a bar's height
+    private static final double BODY_BAR_TH     = 1.7;
+
     /** Scoreboard tag on every display this weapon spawns — the belt-and-braces orphan-reap key. */
     private static final String CENSORED_TAG    = "reliquary_censored_vfx";
 
@@ -243,8 +331,9 @@ public final class CensoredWeapon implements EgoWeapon {
 
         Location eye = player.getEyeLocation();
         Vector dir = eye.getDirection().normalize();
-        // The maw itself: a display jaw that shoots out along the aim and snaps — the lunge, not a puff.
-        track(new MawLunge(eye, dir)).runTaskTimer(plugin, 0L, 1L);
+        // Two beats, smooth: a fast dark PIERCE lances out along the aim, then the black MAW snaps shut at its
+        // tip. Thick red and black throughout. Cosmetic — the bites below land synchronously as they always did.
+        track(new Pierce(eye, dir, MAW_REACH, PIERCE_TICKS, PIERCE_THICK, true)).runTaskTimer(plugin, 0L, 1L);
 
         LivingEntity target = mawTarget(player, eye, dir);
         if (target != null) {
@@ -292,12 +381,21 @@ public final class CensoredWeapon implements EgoWeapon {
         victim.addPotionEffect(new PotionEffect(PotionEffectType.HUNGER, HUNGER_TICKS, HUNGER_AMP, false, true, true));
     }
 
-    // ---- [Shift+Right Click]: the big grapple / [Right Click]: prime --------------
+    // ---- [Shift+Right Click]: the big grapple / [Right Click]: feast-or-arm -------
 
+    /**
+     * Shift+Right is always the line grapple. Plain Right is TWO-MODE, chosen by whether a fresh corpse is
+     * waiting: if the wielder has a kill inside its post-kill grace, Right begins the Feast on that body; with
+     * no corpse to feed on, Right instead grows the grasping arm to haul the nearest body in. There is no
+     * prime step — the Feast is pressed after the kill, not before.
+     */
     @Override
     public void onInteract(Player player, boolean sneaking) {
-        if (sneaking) castGrapple(player, false);
-        else primeFeast(player);
+        if (sneaking) { castGrapple(player, false); return; }
+
+        Location corpse = freshCorpse(player.getUniqueId());
+        if (corpse != null) beginFeastFromInput(player, corpse);
+        else graspingArm(player);
     }
 
     /**
@@ -360,13 +458,20 @@ public final class CensoredWeapon implements EgoWeapon {
         }
     }
 
-    /** Tear along the line: every living body inside it takes {@link #GRAPPLE_HITS} bites and is left starving. */
+    /**
+     * The grapple as a PIERCE then a MAW, thick red and black. A dark spike lances the full line fast (the
+     * pierce); every living body it catches takes {@link #GRAPPLE_HITS} bites and is left starving, and a set
+     * of black jaws clamps over each caught body once the lance has swept past it (the maw). Same damage and
+     * reach as before — only the shape reads differently now.
+     */
     private void strikeGrapple(Player owner) {
         Location eye = owner.getEyeLocation();
         Vector dir = eye.getDirection().normalize();
         World world = owner.getWorld();
 
-        tearBeam(eye, dir); // a wall of dark-and-red that sweeps down the whole line
+        // The pierce: one fast dark-and-red spike down the whole 12-block line.
+        track(new Pierce(eye.clone(), dir.clone(), GRAPPLE_RANGE, GRAPPLE_LANCE_TICKS, GRAPPLE_LANCE_THICK, false))
+                .runTaskTimer(plugin, 0L, 1L);
         world.playSound(eye, Sound.ENTITY_WARDEN_SONIC_BOOM, 0.6f, 0.6f);
         world.playSound(eye, Sound.ENTITY_RAVAGER_ROAR, 0.7f, 0.5f);
 
@@ -383,105 +488,233 @@ public final class CensoredWeapon implements EgoWeapon {
                 plugin.weapons().pierceDamage(le, GRAPPLE_DAMAGE, PIERCE_FRACTION, owner);
             }
             starve(le);
-            shockwave(le.getLocation().add(0, le.getHeight() * 0.5, 0)); // a burst where the tear catches a body
+            // The maw: black jaws hold open at this body until the lance reaches it (openHold scaled by how far
+            // down the line it is), then snap shut. Cosmetic; reaps itself.
+            int hold = (int) Math.round(GRAPPLE_LANCE_TICKS * (t / GRAPPLE_RANGE));
+            Location at = le.getLocation().add(0, le.getHeight() * 0.5, 0);
+            track(new JawSnap(at, dir.clone(), hold)).runTaskTimer(plugin, 0L, 1L);
+            shockwave(at); // a burst where the tear catches a body
         }
     }
 
-    /** Prime the Feast: the wielder's next kill within {@link #PRIME_WINDOW_MS} triggers the signature. */
-    private void primeFeast(Player player) {
+    // ---- [Right Click, no corpse]: the grasping arm ------------------------------
+
+    /**
+     * The no-corpse branch of Right-click: a grotesque black-and-red limb stems out like a root forcing itself
+     * to grow toward the nearest body, then hauls it in. Its own cooldown, committed on cast so it cannot be
+     * spammed even on a whiff. Reach and drag feel are PLACEHOLDER — flagged for Nyrrine.
+     */
+    private void graspingArm(Player player) {
         UUID id = player.getUniqueId();
         long now = System.currentTimeMillis();
-        Long ready = feastReadyAt.get(id);
+        Long ready = armReadyAt.get(id);
         if (ready != null && now < ready) {
             player.sendActionBar(EgoHud.cooldown("CENSORED", ready - now, CENSOR_RED));
             player.playSound(player.getLocation(), Sound.BLOCK_SCULK_SPREAD, 0.25f, 0.5f);
             return;
         }
-        primedUntil.put(id, now + PRIME_WINDOW_MS);
-        player.sendActionBar(EgoHud.status("CENSORED", CENSOR_RED));
-        player.playSound(player.getLocation(), Sound.ENTITY_WARDEN_HEARTBEAT, 0.6f, 0.5f);
+        armReadyAt.put(id, now + ARM_COOLDOWN_MS);
+        player.playSound(player.getLocation(), Sound.BLOCK_SCULK_CATALYST_BLOOM, 0.7f, 0.5f);
+        player.playSound(player.getLocation(), Sound.ENTITY_WARDEN_TENDRIL_CLICKS, 0.6f, 0.6f);
+        track(new GraspingArm(player)).runTaskTimer(plugin, 1L, 1L);
     }
 
-    // ---- the Feast: the signature kill sequence -----------------------------------
+    // ---- corpse bookkeeping: a kill leaves a body to feed on for a short grace ------
 
     /**
-     * A body died. If its killer is a primed CENSORED wielder, the Feast begins: the prime is spent, the
-     * silence starts, and the wielder is dragged to the corpse to feed.
+     * A kill by a CENSORED wielder records the corpse and starts its post-kill grace (the repurposed
+     * {@link #PRIME_WINDOW_MS}). An R-click within the grace begins the Feast on that spot. This is the whole
+     * of the "passive, always-available after the kill" model — there is no prime to press beforehand.
      */
+    private void recordCorpse(Player killer, Location where) {
+        if (!matches(killer.getInventory().getItemInMainHand())) return;
+        UUID id = killer.getUniqueId();
+        corpseUntil.put(id, System.currentTimeMillis() + PRIME_WINDOW_MS);
+        corpseLoc.put(id, where.clone());
+        killer.sendActionBar(EgoHud.status("CENSORED", CENSOR_RED)); // a body waits — press to feed
+        killer.playSound(killer.getLocation(), Sound.ENTITY_WARDEN_HEARTBEAT, 0.5f, 0.5f);
+    }
+
+    /** The corpse still inside its grace for this wielder, or null — lapsed entries are pruned as we look. */
+    private Location freshCorpse(UUID id) {
+        Long until = corpseUntil.get(id);
+        if (until == null || System.currentTimeMillis() > until) {
+            corpseUntil.remove(id);
+            corpseLoc.remove(id);
+            return null;
+        }
+        return corpseLoc.get(id);
+    }
+
     @Override
     public void onEntityDeath(EntityDeathEvent event) {
         Player killer = event.getEntity().getKiller();
-        if (killer == null) return;
-        UUID id = killer.getUniqueId();
-        if (!matches(killer.getInventory().getItemInMainHand())) return;
-
-        long now = System.currentTimeMillis();
-        Long prime = primedUntil.get(id);
-        if (prime == null || now > prime) return;
-
-        primedUntil.remove(id);
-        feastReadyAt.put(id, now + FEAST_COOLDOWN_MS); // the silence
-        beginFeast(killer, event.getEntity().getLocation());
+        if (killer != null) recordCorpse(killer, event.getEntity().getLocation());
     }
 
-    /** Teleport to the body, grant the i-frames, and start the gruesome show. */
-    private void beginFeast(Player wielder, Location body) {
-        Location dest = body.clone();
-        dest.setYaw(wielder.getLocation().getYaw());
-        dest.setPitch(wielder.getLocation().getPitch());
-        wielder.teleport(dest);
+    /** A slain player is a corpse to feed on too — CENSORED does not care what it eats. */
+    @Override
+    public void onPlayerDeath(org.bukkit.event.entity.PlayerDeathEvent event) {
+        Player killer = event.getEntity().getKiller();
+        if (killer != null) recordCorpse(killer, event.getEntity().getLocation());
+    }
 
-        immuneUntil.put(wielder.getUniqueId(), System.currentTimeMillis() + SHOW_MS);
-        wielder.getWorld().playSound(body, Sound.ENTITY_WARDEN_DIG, 1.0f, 0.4f);
-        wielder.getWorld().playSound(body, Sound.ENTITY_RAVAGER_ATTACK, 1.0f, 0.4f);
-        track(new CensoredFeast(wielder.getUniqueId(), body.clone())).runTaskTimer(plugin, 1L, 1L);
+    // ---- the Feast: the signature stealth sequence --------------------------------
+
+    /**
+     * R-click on a fresh corpse: honour the silence, consume the corpse, and begin the show. No teleport — the
+     * wielder is already on the kill, and the point of the Feast is to slip away invisible while it plays.
+     */
+    private void beginFeastFromInput(Player wielder, Location corpse) {
+        UUID id = wielder.getUniqueId();
+        long now = System.currentTimeMillis();
+        Long ready = feastReadyAt.get(id);
+        if (ready != null && now < ready) {
+            wielder.sendActionBar(EgoHud.cooldown("CENSORED", ready - now, CENSOR_RED));
+            wielder.playSound(wielder.getLocation(), Sound.BLOCK_SCULK_SPREAD, 0.25f, 0.5f);
+            return;
+        }
+        corpseUntil.remove(id);
+        corpseLoc.remove(id);
+        feastReadyAt.put(id, now + FEAST_COOLDOWN_MS); // the silence
+        beginFeast(wielder, corpse);
     }
 
     /**
-     * The show: a wall of blood and thrown bone over the corpse for {@link #SHOW_TICKS}, layered macabre
-     * sound left to the imagination, the wielder healing as it runs. At the end the red censored square bursts
-     * and leaves the lingering cognition filter.
+     * Start the 30s Feast. The wielder VANISHES — invisibility plus every equipment slot blanked to viewers —
+     * and walks free while the torture show runs on the corpse. NO i-frames: the payoff is stealth and
+     * surprise, not invulnerability (this is what resolves the old PvP balance flag). A black censor bar slams
+     * over both bodies on the opening beat; then only the corpse keeps its bar so a bar never trails the
+     * now-invisible wielder.
+     */
+    private void beginFeast(Player wielder, Location body) {
+        vanish(wielder); // invisibility + hidden gear for the show; undone in CensoredFeast.stop()
+
+        World world = body.getWorld();
+        world.playSound(body, Sound.ENTITY_WARDEN_DIG, 1.0f, 0.4f);
+        world.playSound(body, Sound.ENTITY_RAVAGER_ATTACK, 1.0f, 0.4f);
+        track(new CensoredFeast(wielder.getUniqueId(), body.clone(), wielder.getLocation().clone()))
+                .runTaskTimer(plugin, 1L, 1L);
+    }
+
+    // ---- vanish: the Feast's stealth (replaces the old i-frames) ------------------
+
+    /** Vanish the wielder for the Feast: invisibility, and every equipment slot blanked to nearby viewers. */
+    private void vanish(Player wielder) {
+        UUID id = wielder.getUniqueId();
+        org.bukkit.inventory.PlayerInventory inv = wielder.getInventory();
+        feastGear.put(id, new ItemStack[]{ // snapshot the real gear so it comes back exactly as it was
+                inv.getHelmet(), inv.getChestplate(), inv.getLeggings(), inv.getBoots(),
+                inv.getItemInMainHand(), inv.getItemInOffHand() });
+        // Invisibility a hair longer than the show, then explicitly removed on stop() so nothing lingers.
+        wielder.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, SHOW_TICKS + 20, 0, false, false, false));
+        hideGear(wielder);
+    }
+
+    /** Blank every hidden slot to the players who can currently see the wielder — the "hide the armour" packet. */
+    private void hideGear(Player wielder) {
+        for (Player viewer : nearbyViewers(wielder)) {
+            for (org.bukkit.inventory.EquipmentSlot slot : HIDDEN_SLOTS) {
+                viewer.sendEquipmentChange(wielder, slot, AIR);
+            }
+        }
+    }
+
+    /** End the vanish: hand the real gear back to nearby viewers and drop the invisibility. Safe if never set. */
+    private void unvanish(UUID id) {
+        ItemStack[] gear = feastGear.remove(id);
+        Player wielder = plugin.getServer().getPlayer(id);
+        if (wielder == null) return; // gone — nothing client-side to correct; a re-track resends real gear anyway
+        wielder.removePotionEffect(PotionEffectType.INVISIBILITY);
+        if (gear == null) return;
+        for (Player viewer : nearbyViewers(wielder)) {
+            for (int i = 0; i < HIDDEN_SLOTS.length; i++) {
+                viewer.sendEquipmentChange(wielder, HIDDEN_SLOTS[i], gear[i] == null ? AIR : gear[i]);
+            }
+        }
+    }
+
+    /** Players in the same world within a comfortable tracking range of the wielder. */
+    private List<Player> nearbyViewers(Player wielder) {
+        List<Player> out = new ArrayList<>();
+        for (Player p : wielder.getWorld().getPlayers()) {
+            if (p.equals(wielder)) continue;
+            if (p.getLocation().distanceSquared(wielder.getLocation()) <= 64.0 * 64.0) out.add(p);
+        }
+        return out;
+    }
+
+    /**
+     * The 30s show: a sustained, choreographed torture over the corpse. A steady pour of blood and dread runs
+     * throughout; every {@link #CRANK_PERIOD} the machine CRANKS — a heavier crush, a fling of bone, a
+     * redaction-bar slam — so it reads as a rhythm, never one burst stretched thin. The wielder heals only in
+     * the opening {@link #HEAL_WINDOW_TICKS} window, then it just hurts. A black censor bar rides the corpse
+     * the whole time (the wielder's opening bar lasts only the first beat). At the end the red RECTANGLE
+     * engulfs and bursts, paying off a final heal and leaving the lingering cognition filter.
      */
     private final class CensoredFeast extends BukkitRunnable {
         private final UUID ownerId;
         private final Location body;
         private int ticks = 0;
+        private BlockDisplay corpseBar;   // the black redaction over the corpse, held for the whole show
+        private BlockDisplay wielderBar;  // the opening-beat bar over the killer; removed after OPENING_BAR
 
-        CensoredFeast(UUID ownerId, Location body) {
+        private static final int OPENING_BAR_TICKS = 12; // the "coat both bodies" beat, then stealth takes over
+
+        CensoredFeast(UUID ownerId, Location body, Location wielderAt) {
             this.ownerId = ownerId;
             this.body = body;
+            this.corpseBar  = spawnCensorBar(body.clone().add(0, 1.0, 0));
+            this.wielderBar = spawnCensorBar(wielderAt.clone().add(0, 1.1, 0)); // both bodies, the kill moment
         }
 
         @Override
         public void run() {
             Player owner = plugin.getServer().getPlayer(ownerId);
-            if (owner == null || !owner.isValid()) { stop(); return; }
+            if (owner == null || !owner.isValid()) { stop(); return; } // logged off — reap + un-vanish
 
-            if (ticks >= SHOW_TICKS) {
-                burst(owner);
-                stop();
-                return;
+            if (ticks == OPENING_BAR_TICKS && wielderBar != null) { // the opening redaction is over
+                if (wielderBar.isValid()) wielderBar.remove();
+                wielderBar = null;
             }
 
+            if (ticks >= SHOW_TICKS) { finale(owner); stop(); return; }
+
             gruesomeVfx(body);
-            if (ticks % BONE_EVERY == 0) flingBones(body, BONE_BURST); // real bones tumbling out of the corpse
             macabreSfx(body, ticks);
-            if (ticks % HEAL_EVERY == 0) heal(owner, HEAL_CHUNK);
+            if (ticks % BONE_EVERY == 0) flingBones(body, BONE_BURST);
+            if (ticks < HEAL_WINDOW_TICKS && ticks % HEAL_EVERY == 0) heal(owner, HEAL_CHUNK);
+            if (ticks % 20 == 0) hideGear(owner);        // keep new viewers from seeing the wielder's gear
+            if (ticks > 0 && ticks % CRANK_PERIOD == 0) crank(); // the torture-machine beat
             ticks++;
         }
 
-        /** The red censored square engulfs the corpse, holds, then bursts: the payoff heal, and the filter. */
-        private void burst(Player owner) {
+        /** A crush beat: a wrench of extra blood and bone, a bar-slam over the corpse, a heavy machine sound. */
+        private void crank() {
             World world = body.getWorld();
-            // The animated square owns the engulf/hold/shatter now; here we punctuate it and pay it off.
-            track(new CensoredSquare(body.clone())).runTaskTimer(plugin, 0L, 1L);
+            Location core = body.clone().add(0, 1.0, 0);
+            world.spawnParticle(Particle.DUST, core, 40, 0.6, 0.7, 0.6, 0, BLOOD_DUST);
+            world.spawnParticle(Particle.BLOCK, core, 24, 0.5, 0.5, 0.5, 0, BLOOD_BLOCK);
+            flingBones(body, BONE_BURST + 2);
+            world.playSound(body, Sound.ENTITY_WITHER_BREAK_BLOCK, 0.8f, 0.4f);
+            world.playSound(body, Sound.BLOCK_ANVIL_LAND, 0.5f, 0.4f);
+            if (corpseBar != null && corpseBar.isValid()) barSlam(corpseBar);
+        }
+
+        /** The finale: the red RECTANGLE engulfs and bursts over the corpse, then the filter is left behind. */
+        private void finale(Player owner) {
+            World world = body.getWorld();
+            track(new CensoredBar(body.clone())).runTaskTimer(plugin, 0L, 1L); // the red redaction, wide + thin
             world.playSound(body, Sound.ENTITY_WITHER_SPAWN, 0.7f, 0.4f);
             world.playSound(body, Sound.ENTITY_ENDERMAN_SCREAM, 0.8f, 0.4f);
-            heal(owner, BURST_FINAL_HEAL);
+            heal(owner, BURST_FINAL_HEAL); // one payoff heal, once, at the very end
             track(new CognitionFilter(ownerId, body.clone())).runTaskTimer(plugin, 1L, 1L);
         }
 
         private void stop() {
+            if (corpseBar  != null && corpseBar.isValid())  corpseBar.remove();
+            if (wielderBar != null && wielderBar.isValid()) wielderBar.remove();
+            unvanish(ownerId); // the wielder reappears the instant the show ends
             activeTasks.remove(this);
             cancel();
         }
@@ -524,14 +757,9 @@ public final class CensoredWeapon implements EgoWeapon {
         }
     }
 
-    // ---- passive: the i-frames, and the sickening gaze ----------------------------
-
-    /** During the Feast show the wielder is untouchable — zeroed, not cancelled, so nothing else is misled. */
-    @Override
-    public void onIncomingDamage(Player wielder, EntityDamageEvent event) {
-        Long until = immuneUntil.get(wielder.getUniqueId());
-        if (until != null && System.currentTimeMillis() < until) event.setDamage(0.0);
-    }
+    // ---- passive: the sickening gaze ----------------------------------------------
+    // (The Feast no longer grants i-frames — its protection is stealth, not invulnerability — so there is no
+    // onIncomingDamage hook here anymore. See beginFeast / vanish.)
 
     /** Each engaged tick, sicken anyone who has held their gaze on the wielder too long. */
     @Override
@@ -584,6 +812,33 @@ public final class CensoredWeapon implements EgoWeapon {
         return task;
     }
 
+    /** A point out in front of the wielder's chest, where the grasping arm tears free. */
+    private Location handOf(Player p) {
+        return p.getLocation().add(0, 1.0, 0).add(p.getLocation().getDirection().normalize().multiply(0.6));
+    }
+
+    /** The nearest living body to the wielder within {@link #ARM_REACH}, or null — what the arm reaches for. */
+    private LivingEntity nearestBody(Player owner) {
+        LivingEntity best = null;
+        double bestSq = ARM_REACH * ARM_REACH;
+        for (Entity e : owner.getNearbyEntities(ARM_REACH, ARM_REACH, ARM_REACH)) {
+            if (e.equals(owner) || !(e instanceof LivingEntity le) || le.isDead() || !le.isValid()) continue;
+            double sq = le.getLocation().distanceSquared(owner.getLocation());
+            if (sq < bestSq) { bestSq = sq; best = le; }
+        }
+        return best;
+    }
+
+    private Location centreOf(LivingEntity le) {
+        return le.getLocation().add(0, le.getHeight() * 0.5, 0);
+    }
+
+    /** The live entity for {@code id}, or null if it is gone, dead, or invalid. */
+    private LivingEntity living(UUID id) {
+        Entity e = plugin.getServer().getEntity(id);
+        return e instanceof LivingEntity le && !le.isDead() && le.isValid() ? le : null;
+    }
+
     // ---- presentation -------------------------------------------------------------
 
     /**
@@ -595,8 +850,8 @@ public final class CensoredWeapon implements EgoWeapon {
         SlashVfx.slash(plugin, centre, dir)
                 .arcSpan(140)
                 .reach(2.6)
-                .colours(BLOOD_RGB, EDGE_RGB)
-                .thickness(1.3f)
+                .colours(VOID_RGB, CENSOR_RGB) // thick red + black: a near-black trail into a hard red edge
+                .thickness(1.7f)
                 .duration(4)
                 .tilt(20)
                 .sparks(true)
@@ -614,11 +869,6 @@ public final class CensoredWeapon implements EgoWeapon {
             world.spawnParticle(Particle.DUST, p, 1, 0, 0, 0, 0, CENSOR_DUST);
         }
         world.playSound(owner.getLocation(), Sound.BLOCK_SCULK_CHARGE, 0.4f, 0.5f);
-    }
-
-    /** Kick off the grapple's tear: a wall of dark-and-red that sweeps down the whole line over a few ticks. */
-    private void tearBeam(Location eye, Vector dir) {
-        track(new GrappleTear(eye.clone(), dir.clone())).runTaskTimer(plugin, 0L, 1L);
     }
 
     /** A burst where the tear catches a body: an explosion flash, a sweep glyph, and a low boom. */
@@ -678,28 +928,59 @@ public final class CensoredWeapon implements EgoWeapon {
 
     // ---- display-entity choreography ----------------------------------------------
 
-    /**
-     * The maw's lunge as real geometry: a dark BlockDisplay "jaw" that shoots out along the aim, yawning
-     * wider as it flies and trailing a chain of void-dark motes behind it, then snaps shut in a burst at full
-     * reach. Captured origin/aim — a lunge is over in a handful of ticks, so it need not follow the wielder.
-     */
-    private final class MawLunge extends BukkitRunnable {
-        private final Location eye;
-        private final Vector dir;
-        private final BlockDisplay jaw;
-        private int ticks = 0;
-        private float angle = 0f;
+    /** A black CENSORED redaction bar (a wide, thin, tall black slab, {@link #JAW_BLOCK}) hung over a point. */
+    private BlockDisplay spawnCensorBar(Location at) {
+        float w = (float) BODY_BAR_W, h = (float) BODY_BAR_H, th = (float) BODY_BAR_TH;
+        return at.getWorld().spawn(at, BlockDisplay.class, d -> {
+            d.setBlock(JAW_BLOCK);                          // BLACK_CONCRETE — the redaction
+            d.setTransformation(new Transformation(
+                    new Vector3f(-w / 2, -h / 2, -th / 2), new Quaternionf(),
+                    new Vector3f(w, h, th), new Quaternionf()));
+            d.setBrightness(new Display.Brightness(0, 0));  // fully dark: a true black bar
+            d.setInterpolationDuration(2);
+            d.setInterpolationDelay(0);
+            d.setPersistent(false);
+            d.addScoreboardTag(CENSORED_TAG);
+        });
+    }
 
-        MawLunge(Location eye, Vector dir) {
-            this.eye = eye.clone();
-            this.dir = dir.clone();
-            float s = (float) MAW_JAW_SCALE;
-            this.jaw = eye.getWorld().spawn(eye, BlockDisplay.class, d -> {
+    /** A crank-beat accent on the standing corpse bar: a hard scatter of red around the black redaction. */
+    private void barSlam(BlockDisplay bar) {
+        Location at = bar.getLocation();
+        World world = at.getWorld();
+        world.spawnParticle(Particle.DUST, at, 20, BODY_BAR_W * 0.5, BODY_BAR_H, BODY_BAR_TH * 0.5, 0, CENSOR_DUST);
+        world.spawnParticle(Particle.BLOCK, at, 12, BODY_BAR_W * 0.4, BODY_BAR_H, BODY_BAR_TH * 0.4, 0, SQUARE_BLOCK);
+    }
+
+    /**
+     * The PIERCE: a fast dark spearhead that lances from {@code origin} along {@code dir} out to {@code reach}
+     * over {@code travelTicks}, trailing a thick red-and-black lance behind it. On arrival it can hand off to a
+     * {@link JawSnap} at the tip — the MAW half of the beat. Captured origin/aim; over in a handful of ticks.
+     */
+    private final class Pierce extends BukkitRunnable {
+        private final Location origin;
+        private final Vector dir;
+        private final double reach;
+        private final int travelTicks;
+        private final float thick;
+        private final boolean snapAtTip;
+        private final BlockDisplay head;
+        private int ticks = 0;
+
+        Pierce(Location origin, Vector dir, double reach, int travelTicks, float thick, boolean snapAtTip) {
+            this.origin = origin.clone();
+            this.dir = dir.clone().normalize();
+            this.reach = reach;
+            this.travelTicks = Math.max(1, travelTicks);
+            this.thick = thick;
+            this.snapAtTip = snapAtTip;
+            float s = thick * 1.6f;
+            this.head = origin.getWorld().spawn(origin, BlockDisplay.class, d -> {
                 d.setBlock(JAW_BLOCK);
                 d.setTransformation(new Transformation(
                         new Vector3f(-s / 2, -s / 2, -s / 2), new Quaternionf(),
-                        new Vector3f(s, s * 1.6f, s), new Quaternionf()));
-                d.setBrightness(new Display.Brightness(3, 7));
+                        new Vector3f(s, s, s), new Quaternionf()));
+                d.setBrightness(new Display.Brightness(1, 4));
                 d.setInterpolationDuration(1);
                 d.setInterpolationDelay(0);
                 d.setPersistent(false);
@@ -709,36 +990,212 @@ public final class CensoredWeapon implements EgoWeapon {
 
         @Override
         public void run() {
-            if (!jaw.isValid() || ticks > MAW_LUNGE_TICKS) { snap(); return; }
-            double frac = (double) ticks / MAW_LUNGE_TICKS;
-            double reach = 0.6 + frac * (MAW_REACH - 0.6);
-            Location p = eye.clone().add(dir.clone().multiply(reach));
-            jaw.teleport(p);
-
-            World world = eye.getWorld();
-            for (double t = 0.4; t <= reach; t += 0.5) { // the dark tendril trailing from the wielder
-                world.spawnParticle(Particle.DUST, eye.clone().add(dir.clone().multiply(t)),
-                        1, 0.06, 0.06, 0.06, 0, VOID_DUST);
-            }
-
-            angle += 0.25f;
-            float open = 1.6f + (float) frac * 1.3f;       // the jaw yawns wider as it flies
-            float s = (float) MAW_JAW_SCALE;
-            jaw.setTransformation(new Transformation(
-                    new Vector3f(-s / 2, -s / 2, -s / 2), new Quaternionf().rotateXYZ(0, angle, 0),
-                    new Vector3f(s, s * open, s), new Quaternionf()));
+            if (ticks > travelTicks) { arrive(); return; }
+            double frac = (double) ticks / travelTicks;
+            double cur = 0.6 + frac * (reach - 0.6);
+            if (head.isValid()) head.teleport(origin.clone().add(dir.clone().multiply(cur)));
+            lance(cur);
             ticks++;
         }
 
-        private void snap() {
-            if (jaw.isValid()) {
-                Location at = jaw.getLocation();
-                World world = at.getWorld();
-                world.spawnParticle(Particle.DUST, at, 18, 0.3, 0.3, 0.3, 0, VOID_DUST);
-                world.spawnParticle(Particle.DUST, at, 12, 0.25, 0.25, 0.25, 0, CENSOR_DUST);
-                world.playSound(at, Sound.ENTITY_RAVAGER_ATTACK, 0.8f, 0.5f);
-                jaw.remove();
+        /** The thick red-and-black lance drawn from the wielder to the current tip. */
+        private void lance(double cur) {
+            World world = origin.getWorld();
+            for (double t = 0.4; t <= cur; t += 0.35) {
+                Location p = origin.clone().add(dir.clone().multiply(t));
+                world.spawnParticle(Particle.DUST, p, 1, thick * 0.5, thick * 0.5, thick * 0.5, 0, VOID_DUST);
+                if (((int) (t * 3)) % 2 == 0) {
+                    world.spawnParticle(Particle.DUST, p, 1, thick * 0.6, thick * 0.6, thick * 0.6, 0, CENSOR_DUST);
+                }
             }
+        }
+
+        private void arrive() {
+            Location tip = head.isValid() ? head.getLocation() : origin.clone().add(dir.clone().multiply(reach));
+            if (head.isValid()) head.remove();
+            if (snapAtTip) track(new JawSnap(tip, dir, 0)).runTaskTimer(plugin, 0L, 1L);
+            activeTasks.remove(this);
+            cancel();
+        }
+    }
+
+    /**
+     * The MAW: two black jaws that hold open at a point, then snap shut in a red-and-black burst — the bite.
+     * Vertical, so it reads from any angle. {@code openHold} keeps the jaws yawning open until a pierce reaches
+     * them (used down the grapple line), then they close. Cosmetic; reaps its own displays.
+     */
+    private final class JawSnap extends BukkitRunnable {
+        private static final double OPEN_GAP  = 0.95;
+        private static final double CLOSE_GAP = 0.06;
+
+        private final Location at;
+        private final int openHoldTicks;
+        private final BlockDisplay upper;
+        private final BlockDisplay lower;
+        private int ticks = 0;
+
+        JawSnap(Location at, Vector dir, int openHold) {
+            this.at = at.clone();
+            this.openHoldTicks = Math.max(0, openHold);
+            this.upper = spawnJaw();
+            this.lower = spawnJaw();
+            setJaw(upper, OPEN_GAP);
+            setJaw(lower, -OPEN_GAP);
+        }
+
+        @Override
+        public void run() {
+            if (!upper.isValid() || !lower.isValid()) { reap(); return; }
+            if (ticks < openHoldTicks) { ticks++; return; }   // yawning open, waiting for the pierce
+            int c = ticks - openHoldTicks;
+            if (c >= JAW_CLOSE_TICKS) { snap(); return; }
+            double f = (double) c / JAW_CLOSE_TICKS;
+            double gap = OPEN_GAP + (CLOSE_GAP - OPEN_GAP) * f;
+            setJaw(upper, gap);
+            setJaw(lower, -gap);
+            ticks++;
+        }
+
+        private BlockDisplay spawnJaw() {
+            return at.getWorld().spawn(at, BlockDisplay.class, d -> {
+                d.setBlock(JAW_BLOCK);
+                d.setBrightness(new Display.Brightness(1, 4));
+                d.setInterpolationDuration(1);
+                d.setInterpolationDelay(0);
+                d.setPersistent(false);
+                d.addScoreboardTag(CENSORED_TAG);
+            });
+        }
+
+        /** Centre a jaw plate at {@code at + (0, yOff, 0)}: wide and deep, a thin biting plate. */
+        private void setJaw(BlockDisplay d, double yOff) {
+            float jw = (float) (MAW_JAW_SCALE * 1.7);
+            float jh = (float) (MAW_JAW_SCALE * 0.42);
+            float jd = (float) (MAW_JAW_SCALE * 1.7);
+            d.setTransformation(new Transformation(
+                    new Vector3f(-jw / 2, (float) yOff - jh / 2, -jd / 2), new Quaternionf(),
+                    new Vector3f(jw, jh, jd), new Quaternionf()));
+        }
+
+        private void snap() {
+            World world = at.getWorld();
+            world.spawnParticle(Particle.DUST, at, 20, 0.3, 0.3, 0.3, 0, VOID_DUST);
+            world.spawnParticle(Particle.DUST, at, 16, 0.25, 0.25, 0.25, 0, CENSOR_DUST);
+            world.spawnParticle(Particle.BLOCK, at, 8, 0.2, 0.2, 0.2, 0, BLOOD_BLOCK);
+            world.playSound(at, Sound.ENTITY_RAVAGER_ATTACK, 0.8f, 0.5f);
+            reap();
+        }
+
+        private void reap() {
+            if (upper.isValid()) upper.remove();
+            if (lower.isValid()) lower.remove();
+            activeTasks.remove(this);
+            cancel();
+        }
+    }
+
+    /**
+     * The grasping arm: a black-and-red root that forces itself out of the wielder toward the nearest body,
+     * seizes it, and hauls it in. Re-reads the (living) wielder and target each tick so both may move. The one
+     * grab bite goes through the framework pierce like every CENSORED hit; all geometry is tagged and reaped.
+     */
+    private final class GraspingArm extends BukkitRunnable {
+        private final UUID ownerId;
+        private final UUID targetId;   // acquired once, at cast — the nearest body then
+        private final BlockDisplay hand;
+        private int ticks = 0;
+        private boolean grabbed = false;
+        private int dragTicks = 0;
+
+        GraspingArm(Player owner) {
+            this.ownerId = owner.getUniqueId();
+            LivingEntity t = nearestBody(owner);
+            this.targetId = t != null ? t.getUniqueId() : null;
+            Location from = handOf(owner);
+            float s = ARM_HAND_SCALE;
+            this.hand = from.getWorld().spawn(from, BlockDisplay.class, d -> {
+                d.setBlock(JAW_BLOCK);
+                d.setTransformation(new Transformation(
+                        new Vector3f(-s / 2, -s / 2, -s / 2), new Quaternionf(),
+                        new Vector3f(s, s, s), new Quaternionf()));
+                d.setBrightness(new Display.Brightness(1, 4));
+                d.setInterpolationDuration(1);
+                d.setInterpolationDelay(0);
+                d.setPersistent(false);
+                d.addScoreboardTag(CENSORED_TAG);
+            });
+        }
+
+        @Override
+        public void run() {
+            Player owner = plugin.getServer().getPlayer(ownerId);
+            if (owner == null || !owner.isValid() || !matches(owner.getInventory().getItemInMainHand())) { reap(); return; }
+            Location from = handOf(owner);
+            LivingEntity target = targetId != null ? living(targetId) : null;
+            if (target != null && target.getWorld() != owner.getWorld()) target = null; // fled the world — let go
+
+            if (!grabbed) {
+                double frac = Math.min(1.0, (double) ticks / ARM_GROW_TICKS);
+                Location tip = growTip(owner, from, target, frac);
+                if (hand.isValid()) hand.teleport(tip);
+                root(from, tip);
+                if (ticks++ < ARM_GROW_TICKS) return;
+
+                // Reach complete: seize a still-valid, still-close body, else the limb gropes and withers.
+                if (target != null && tip.distance(centreOf(target)) <= ARM_GRAB_DIST + 1.5) {
+                    grabbed = true;
+                    plugin.weapons().pierceDamage(target, ARM_GRAB_DAMAGE, PIERCE_FRACTION, owner);
+                    starve(target);
+                    target.getWorld().playSound(centreOf(target), Sound.ENTITY_RAVAGER_ATTACK, 0.9f, 0.5f);
+                } else {
+                    wither(tip);
+                    reap();
+                }
+                return;
+            }
+
+            // Drag: haul the seized body in until it is close, or the pull times out.
+            if (target == null || dragTicks++ >= ARM_DRAG_TICKS) { reap(); return; }
+            Location tc = centreOf(target);
+            if (from.distance(tc) <= ARM_GRAB_DIST) { reap(); return; }
+            Vector pull = from.toVector().subtract(tc.toVector()).normalize().multiply(ARM_DRAG_STRENGTH);
+            target.setVelocity(target.getVelocity().multiply(0.4).add(pull));
+            if (hand.isValid()) hand.teleport(tc);
+            root(from, tc);
+        }
+
+        /** The tip's target this tick: the seized/aimed body's centre, or straight out the aim if none. */
+        private Location growTip(Player owner, Location from, LivingEntity target, double frac) {
+            Vector toward = target != null
+                    ? centreOf(target).toVector().subtract(from.toVector())
+                    : owner.getEyeLocation().getDirection().normalize().multiply(ARM_REACH);
+            return from.clone().add(toward.multiply(frac));
+        }
+
+        /** The root drawn from the wielder to the tip, jittering as it forces its way out: black cored red. */
+        private void root(Location from, Location tip) {
+            World world = from.getWorld();
+            Vector step = tip.toVector().subtract(from.toVector());
+            double len = step.length();
+            if (len < 1.0e-3) return;
+            step.normalize();
+            ThreadLocalRandom rng = ThreadLocalRandom.current();
+            for (double t = 0.2; t <= len; t += ARM_SEG_STEP) {
+                Location p = from.clone().add(step.clone().multiply(t)).add(
+                        (rng.nextDouble() - 0.5) * 0.25, (rng.nextDouble() - 0.5) * 0.25, (rng.nextDouble() - 0.5) * 0.25);
+                world.spawnParticle(Particle.DUST, p, 1, 0.03, 0.03, 0.03, 0, VOID_DUST);
+                if (rng.nextBoolean()) world.spawnParticle(Particle.DUST, p, 1, 0.05, 0.05, 0.05, 0, CENSOR_DUST);
+            }
+        }
+
+        private void wither(Location tip) {
+            World world = tip.getWorld();
+            world.spawnParticle(Particle.DUST, tip, 12, 0.2, 0.2, 0.2, 0, VOID_DUST);
+            world.playSound(tip, Sound.BLOCK_SCULK_SPREAD, 0.5f, 0.4f);
+        }
+
+        private void reap() {
+            if (hand.isValid()) hand.remove();
             activeTasks.remove(this);
             cancel();
         }
@@ -789,50 +1246,51 @@ public final class CensoredWeapon implements EgoWeapon {
     }
 
     /**
-     * The big red CENSORED square as a BlockDisplay: it engulfs the corpse (scaling up from nothing via the
-     * display's own interpolation), holds while the feed reads, then BURSTS into flung shards and a cloud of
-     * red block-crack. Real geometry, not a particle quad.
+     * The red CENSORED redaction as a BlockDisplay: a large RECTANGLE with censor-bar proportions (wide, tall,
+     * wafer-thin — NOT the old square/cube). It stands up over the corpse, engulfs it via the display's own
+     * interpolation, holds while the redaction reads, then BURSTS into flung shards and a cloud of red
+     * block-crack. Real geometry, not a particle quad.
      */
-    private final class CensoredSquare extends BukkitRunnable {
+    private final class CensoredBar extends BukkitRunnable {
         private final Location centre;
-        private final BlockDisplay square;
+        private final BlockDisplay bar;
         private int ticks = 0;
 
-        CensoredSquare(Location centre) {
+        CensoredBar(Location centre) {
             this.centre = centre.clone().add(0, 1.0, 0);
-            float f = (float) SQUARE_SIZE;
-            this.square = this.centre.getWorld().spawn(this.centre, BlockDisplay.class, d -> {
-                d.setBlock(SQUARE_BLOCK);
-                d.setTransformation(new Transformation(          // start as a point...
-                        new Vector3f(-f / 2, -0.1f, -f / 2), new Quaternionf(),
-                        new Vector3f(0.01f, 0.01f, 0.01f), new Quaternionf()));
+            float w = (float) BAR_W, h = (float) BAR_H, th = (float) BAR_TH;
+            this.bar = this.centre.getWorld().spawn(this.centre, BlockDisplay.class, d -> {
+                d.setBlock(SQUARE_BLOCK);                       // RED_CONCRETE — the redaction
+                d.setTransformation(new Transformation(        // start as a sliver...
+                        new Vector3f(-w / 2, -h / 2, -th / 2), new Quaternionf(),
+                        new Vector3f(0.02f, 0.02f, 0.02f), new Quaternionf()));
                 d.setBrightness(new Display.Brightness(13, 15));
-                d.setInterpolationDuration(SQUARE_ENGULF);
+                d.setInterpolationDuration(BAR_ENGULF);
                 d.setInterpolationDelay(0);
                 d.setPersistent(false);
                 d.addScoreboardTag(CENSORED_TAG);
             });
-            // ...then let the display interpolate up to the full flat slab: the engulf.
-            square.setTransformation(new Transformation(
-                    new Vector3f(-f / 2, -0.1f, -f / 2), new Quaternionf(),
-                    new Vector3f(f, 0.28f, f), new Quaternionf()));
+            // ...then let the display interpolate up to the full wide, tall, thin bar: the engulf.
+            bar.setTransformation(new Transformation(
+                    new Vector3f(-w / 2, -h / 2, -th / 2), new Quaternionf(),
+                    new Vector3f(w, h, th), new Quaternionf()));
         }
 
         @Override
         public void run() {
-            if (!square.isValid()) { activeTasks.remove(this); cancel(); return; }
+            if (!bar.isValid()) { activeTasks.remove(this); cancel(); return; }
             ticks++;
-            if (ticks >= SQUARE_ENGULF + SQUARE_HOLD) { burstSquare(); return; }
-            if (ticks > SQUARE_ENGULF && ticks % 3 == 0) { // a held pulse at the edges
+            if (ticks >= BAR_ENGULF + BAR_HOLD) { burstBar(); return; }
+            if (ticks > BAR_ENGULF && ticks % 3 == 0) { // a held pulse along the bar's broad face
                 centre.getWorld().spawnParticle(Particle.DUST, centre,
-                        10, SQUARE_SIZE * 0.5, 0.12, SQUARE_SIZE * 0.5, 0, CENSOR_DUST);
+                        10, BAR_W * 0.5, BAR_H * 0.5, BAR_TH * 0.5 + 0.1, 0, CENSOR_DUST);
             }
         }
 
-        private void burstSquare() {
+        private void burstBar() {
             World world = centre.getWorld();
-            world.spawnParticle(Particle.DUST, centre, 90, SQUARE_SIZE * 0.5, 0.6, SQUARE_SIZE * 0.5, 0, CENSOR_DUST);
-            world.spawnParticle(Particle.BLOCK, centre, 70, SQUARE_SIZE * 0.5, 0.4, SQUARE_SIZE * 0.5, 0, SQUARE_BLOCK);
+            world.spawnParticle(Particle.DUST, centre, 90, BAR_W * 0.5, BAR_H * 0.5, BAR_TH * 0.5, 0, CENSOR_DUST);
+            world.spawnParticle(Particle.BLOCK, centre, 70, BAR_W * 0.5, BAR_H * 0.5, BAR_TH * 0.5, 0, SQUARE_BLOCK);
             world.playSound(centre, Sound.ENTITY_WITHER_BREAK_BLOCK, 0.8f, 0.5f);
             for (int i = 0; i < SHARD_COUNT; i++) {
                 double a = (Math.PI * 2 * i) / SHARD_COUNT;
@@ -840,13 +1298,13 @@ public final class CensoredWeapon implements EgoWeapon {
                         0.3 + ThreadLocalRandom.current().nextDouble() * 0.3, Math.sin(a) * SHARD_SPEED);
                 track(new FlungShard(centre.clone(), v)).runTaskTimer(plugin, 1L, 1L);
             }
-            if (square.isValid()) square.remove();
+            if (bar.isValid()) bar.remove();
             activeTasks.remove(this);
             cancel();
         }
     }
 
-    /** A shard of the shattered square: a small red BlockDisplay flung on a gravity arc, reaped on land/timeout. */
+    /** A shard of the shattered bar: a small red BlockDisplay flung on a gravity arc, reaped on land/timeout. */
     private final class FlungShard extends BukkitRunnable {
         private final BlockDisplay shard;
         private final Vector vel;
@@ -890,38 +1348,6 @@ public final class CensoredWeapon implements EgoWeapon {
         }
     }
 
-    /** The grapple tear: a wall of dark-and-red motes that sweeps down the line one segment a tick. */
-    private final class GrappleTear extends BukkitRunnable {
-        private final Location eye;
-        private final Vector dir;
-        private final Vector right;
-        private int ticks = 0;
-
-        GrappleTear(Location eye, Vector dir) {
-            this.eye = eye;
-            this.dir = dir;
-            Vector r = dir.clone().crossProduct(new Vector(0, 1, 0));
-            this.right = r.lengthSquared() < 1.0e-6 ? new Vector(1, 0, 0) : r.normalize();
-        }
-
-        @Override
-        public void run() {
-            if (ticks >= TEAR_TICKS) { activeTasks.remove(this); cancel(); return; }
-            World world = eye.getWorld();
-            double from = (double) ticks / TEAR_TICKS * GRAPPLE_RANGE;
-            double to = (double) (ticks + 1) / TEAR_TICKS * GRAPPLE_RANGE;
-            for (double d = from; d < to; d += 0.4) {
-                Location c = eye.clone().add(dir.clone().multiply(d));
-                for (double w = -GRAPPLE_RADIUS; w <= GRAPPLE_RADIUS; w += 0.5) {
-                    Location p = c.clone().add(right.clone().multiply(w));
-                    world.spawnParticle(Particle.DUST, p, 1, 0.05, 0.35, 0.05, 0,
-                            ThreadLocalRandom.current().nextBoolean() ? CENSOR_DUST : VOID_DUST);
-                }
-            }
-            ticks++;
-        }
-    }
-
     /** Belt-and-braces: reap any display carrying the CENSORED tag across all loaded worlds. */
     private void sweepOrphans() {
         for (World w : plugin.getServer().getWorlds()) {
@@ -941,14 +1367,19 @@ public final class CensoredWeapon implements EgoWeapon {
         lastMaw.remove(id);
         grappleReadyAt.remove(id);
         charging.remove(id);
-        primedUntil.remove(id);
+        corpseUntil.remove(id);
+        corpseLoc.remove(id);
         feastReadyAt.remove(id);
-        immuneUntil.remove(id);
+        armReadyAt.remove(id);
+        feastGear.remove(id); // logged off mid-feast; the invisibility potion lapses on its own timer
         lookingSince.remove(id);
     }
 
     @Override
     public void onDisable() {
+        // Hand every mid-feast wielder their gear and visibility back before the tasks are torn down.
+        for (UUID id : new ArrayList<>(feastGear.keySet())) unvanish(id);
+        feastGear.clear();
         // Cancelling a flight task does not remove its display, so sweep every tagged display afterwards.
         for (BukkitRunnable t : new ArrayList<>(activeTasks)) t.cancel();
         activeTasks.clear();
@@ -956,9 +1387,10 @@ public final class CensoredWeapon implements EgoWeapon {
         lastMaw.clear();
         grappleReadyAt.clear();
         charging.clear();
-        primedUntil.clear();
+        corpseUntil.clear();
+        corpseLoc.clear();
         feastReadyAt.clear();
-        immuneUntil.clear();
+        armReadyAt.clear();
         lookingSince.clear();
     }
 
@@ -972,7 +1404,6 @@ public final class CensoredWeapon implements EgoWeapon {
     private static final Color BLOOD_RGB   = Color.fromRGB(0x8A, 0x03, 0x03); // pouring blood
     private static final Color CENSOR_RGB  = Color.fromRGB(0xCC, 0x00, 0x22); // the red square / redaction
     private static final Color VOID_RGB    = Color.fromRGB(0x0E, 0x08, 0x12); // the maw's dark tendril / grapple wall
-    private static final Color EDGE_RGB    = Color.fromRGB(0xFF, 0x3A, 0x5A); // the slash's bright leading edge
     private static final Particle.DustOptions BLOOD_DUST    = new Particle.DustOptions(BLOOD_RGB, 1.1f);
     private static final Particle.DustOptions CENSOR_DUST   = new Particle.DustOptions(CENSOR_RGB, 1.3f);
     private static final Particle.DustOptions VOID_DUST     = new Particle.DustOptions(VOID_RGB, 1.2f);
@@ -981,6 +1412,8 @@ public final class CensoredWeapon implements EgoWeapon {
     private static final BlockData SQUARE_BLOCK = Material.RED_CONCRETE.createBlockData();
     private static final BlockData JAW_BLOCK    = Material.BLACK_CONCRETE.createBlockData();
     private static final ItemStack BONE_ITEM = new ItemStack(Material.BONE);
+    /** The blank the Feast sends to viewers for each of the wielder's equipment slots, hiding the gear. */
+    private static final ItemStack AIR = new ItemStack(Material.AIR);
 
     // ---- lore ---------------------------------------------------------------------
 
@@ -1012,9 +1445,9 @@ public final class CensoredWeapon implements EgoWeapon {
                             "striking every foe caught in it three",
                             "times over."),
                     new EgoLore.Ability("[Right Click] CENSORED",
-                            "Mark yourself. Your next kill within 6s",
-                            "is (CENSORED): you are dragged to the",
-                            "body to feed, healing as it (CENSORED)",
-                            "everything left near it.")
+                            "Over a fresh kill, feed on the body and",
+                            "(CENSORED) from sight while it feeds.",
+                            "With no corpse near, an arm (CENSORED)",
+                            "out and drags the nearest one to you.")
             ));
 }
