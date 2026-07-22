@@ -91,6 +91,13 @@ public record EgoEnchant(String id, String displayName, int maxLevel, String wea
             "Justitia: +0.3s to the parry window per level (defensive cadence, not immunity).");
     public static final EgoEnchant HEARTS_REACH = reg("hearts_reach", "Heart's Reach", 2, "love_and_hate",
             "Love & Hate: +4 blocks to the Reverse Arcana beam per level.");
+    // ---- gap-closing pass: the three weapons that had no enchant ----
+    public static final EgoEnchant RADIANT_GLOW = reg("radiant_glow", "Radiant Glow", 3, "lamp",
+            "Lamp: +0.5 blocks to the protective aura radius per level.");
+    public static final EgoEnchant LINGERING_EYE = reg("lingering_eye", "Lingering Eye", 3, "lamp",
+            "Lamp: +1s to the fixed eye's debuff-transfer window per level.");
+    public static final EgoEnchant MOURNERS_STRIDE = reg("mourners_stride", "Mourner's Stride", 3, "solemn_lament",
+            "Solemn Lament: keep Speed I while firing; the momentum lingers longer past the last shot per level.");
 
     /** The enchant with this id, or {@code null} if no such enchant is catalogued. */
     public static EgoEnchant get(String id) {
