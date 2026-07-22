@@ -81,6 +81,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
     private RelicTracker tracker;
     private ExtractionCommand extraction;
     private com.nyrrine.reliquary.extraction.Stations stations;
+    private com.nyrrine.reliquary.extraction.CarmenBrainVfx brainVfx;
     private YamlPlayerStore store;
     private com.nyrrine.reliquary.distortion.Distortion distortion;
 
@@ -156,9 +157,11 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         this.extraction = new ExtractionCommand(this);
         this.stations = new com.nyrrine.reliquary.extraction.Stations(this);
         stations.load();
-        stations.registerRecipes(); // registers the Pocket Well's craft recipe (the only station left)
+        stations.registerRecipes(); // registers Carmen's Brain craft recipe (the only station left)
+        this.brainVfx = new com.nyrrine.reliquary.extraction.CarmenBrainVfx(this, stations);
+        brainVfx.start(); // idle floating-brain show at every placed Carmen's Brain, gated on watchers
         getServer().getPluginManager().registerEvents(
-                new com.nyrrine.reliquary.extraction.StationListener(extraction, stations), this);
+                new com.nyrrine.reliquary.extraction.StationListener(extraction, stations, brainVfx), this);
 
         // The Index (/prescript) wires its own command and listener, and holds no state to disable.
         new com.nyrrine.reliquary.index.PrescriptCommand(this).register();
@@ -199,8 +202,9 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
     public void onDisable() {
         if (weapons != null) weapons.disable();
         if (stations != null) stations.save();
-        if (extraction != null) extraction.disable(); // return seated vials + reap any live Well carousel
-        if (distortion != null) distortion.disable(); // hand back any face the voice is still wearing
+        if (brainVfx != null) brainVfx.disable();      // reap every floating Carmen's Brain show + tag sweep
+        if (extraction != null) extraction.disable();  // reap any live Well carousel
+        if (distortion != null) distortion.disable();  // hand back any face the voice is still wearing
         // Last: anything above may have touched a record on its way out. Blocks until the writes land.
         if (store != null) store.close();
     }

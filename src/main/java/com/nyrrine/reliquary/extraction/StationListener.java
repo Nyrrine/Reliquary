@@ -10,26 +10,28 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 
 /**
- * The Pocket Well as a crafted, placed custom block. Placing a Well item registers that block's location as a
- * Well ({@link Stations}); breaking it gives the item back and de-registers it. Right-clicking a registered
- * Well runs the ticket pull. Ordinary conduits are untouched. (The other lab stations were deleted with the
- * chemistry.) This listener also guards the plugin's cosmetic items against being eaten by vanilla crafts or
- * a right-click use of their base material.
+ * Carmen's Brain as a crafted, placed custom block. Placing a Brain item registers that block's location
+ * ({@link Stations}) and its idle show grows there ({@link CarmenBrainVfx}); breaking it gives the item back,
+ * de-registers it, and reaps the show. Right-clicking a registered Brain runs the ticket pull. Ordinary heads
+ * are untouched. This listener also guards the plugin's cosmetic items against being eaten by vanilla crafts.
  */
 public final class StationListener implements Listener {
 
     private final ExtractionCommand extraction;
     private final Stations stations;
+    private final CarmenBrainVfx brainVfx;
 
-    public StationListener(ExtractionCommand extraction, Stations stations) {
+    public StationListener(ExtractionCommand extraction, Stations stations, CarmenBrainVfx brainVfx) {
         this.extraction = extraction;
         this.stations = stations;
+        this.brainVfx = brainVfx;
     }
 
     @EventHandler
     public void onPlace(BlockPlaceEvent event) {
         StationType type = StationType.fromItem(event.getItemInHand());
         if (type != null) stations.register(event.getBlockPlaced(), type);
+        // The idle VFX manager polls placed Brains and grows the show on its next frame — nothing to spawn here.
     }
 
     @EventHandler
@@ -37,6 +39,7 @@ public final class StationListener implements Listener {
         StationType type = stations.typeAt(event.getBlock());
         if (type == null) return;
         stations.unregister(event.getBlock());
+        brainVfx.onRemoved(event.getBlock().getLocation()); // reap the floating brain/nerves at once
         event.setDropItems(false); // don't drop the plain vanilla block
         if (event.getPlayer().getGameMode() != GameMode.CREATIVE) {
             event.getBlock().getWorld().dropItemNaturally(event.getBlock().getLocation().add(0.5, 0.5, 0.5),
@@ -85,8 +88,8 @@ public final class StationListener implements Listener {
         }
     }
 
-    // A Well removed by anything other than a player break (explosion, piston) still needs de-registering,
-    // else a rebuild at the spot desyncs against the stale registry entry.
+    // A Brain removed by anything other than a player break (explosion, piston) still needs de-registering and
+    // reaping, else a rebuild at the spot desyncs against the stale registry entry and orphan displays linger.
     @EventHandler
     public void onBlockExplode(org.bukkit.event.block.BlockExplodeEvent event) { cleanup(event.blockList()); }
     @EventHandler
@@ -98,7 +101,10 @@ public final class StationListener implements Listener {
 
     private void cleanup(java.util.List<org.bukkit.block.Block> blocks) {
         for (org.bukkit.block.Block b : blocks) {
-            if (stations.typeAt(b) != null) stations.unregister(b);
+            if (stations.typeAt(b) != null) {
+                stations.unregister(b);
+                brainVfx.onRemoved(b.getLocation());
+            }
         }
     }
 
@@ -111,7 +117,7 @@ public final class StationListener implements Listener {
         StationType type = stations.typeAt(event.getClickedBlock());
         if (type != StationType.WELL) return; // an ordinary block — leave it vanilla
 
-        event.setCancelled(true); // it's a Well — suppress the vanilla GUI and run the pull
+        event.setCancelled(true); // it's a Carmen's Brain — suppress vanilla interaction and run the pull
         var player = event.getPlayer();
         extraction.stationWell(player, event.getClickedBlock().getLocation(), player.isSneaking());
     }

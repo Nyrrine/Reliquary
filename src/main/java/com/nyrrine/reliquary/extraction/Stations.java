@@ -38,8 +38,30 @@ public final class Stations {
         StationType t = placed.get(key(block.getLocation()));
         // Guard against a registry that outlived its block (explosion, piston, WorldEdit, fluid): if the
         // block no longer matches the station's base material, it isn't a station — don't honor a ghost.
-        if (t != null && block.getType() != t.base()) return null;
+        if (t != null && !isBase(block.getType(), t.base())) return null;
         return t;
+    }
+
+    /** True if {@code actual} is the station's base — treating a floor head and its wall variant as the same. */
+    private static boolean isBase(Material actual, Material base) {
+        if (actual == base) return true;
+        return base == Material.PLAYER_HEAD && actual == Material.PLAYER_WALL_HEAD;
+    }
+
+    /** The world-locations of every placed Carmen's Brain (a placed WELL), for the idle VFX manager. */
+    public java.util.List<Location> wells() {
+        java.util.List<Location> out = new java.util.ArrayList<>();
+        for (Map.Entry<String, StationType> e : placed.entrySet()) {
+            if (e.getValue() != StationType.WELL) continue;
+            String[] p = e.getKey().split(",");
+            if (p.length != 4) continue;
+            org.bukkit.World w = plugin.getServer().getWorld(p[0]);
+            if (w == null) continue;
+            try {
+                out.add(new Location(w, Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3])));
+            } catch (NumberFormatException ignored) { /* malformed key */ }
+        }
+        return out;
     }
 
     public void register(Block block, StationType type) {

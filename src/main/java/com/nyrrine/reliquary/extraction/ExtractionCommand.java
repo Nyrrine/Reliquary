@@ -18,9 +18,9 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * The {@code /cogito} command — now just the ticket + gacha Well and a cosmetic dispenser. The brewing
+ * The {@code /cogito} command — now just the ticket + gacha Carmen's Brain and a cosmetic dispenser. The brewing
  * minigame (Font/Alembic/Censer/Centrifuge/Manifold/Crucible chemistry) has been removed; getting an E.G.O
- * weapon is: hold an Extraction Ticket, right-click a placed Pocket Well, sneak-click to pull a random weapon
+ * weapon is: hold an Extraction Ticket, right-click a placed Carmen's Brain, sneak-click to pull a random weapon
  * from the ticket's grade pools. (The actual weapon-give for the testbed stays on {@code /reliquary}.)
  *
  * <p>Reached via {@code /cogito <sub> ...} (aliases {@code /ext}, {@code /co}) or {@code /reliquary ext ...}.
@@ -77,7 +77,7 @@ public final class ExtractionCommand {
         player.sendMessage(msg("Cogito extraction:", GREEN));
         player.sendMessage(msg("• /cogito ticket [grades…] — get an Extraction Ticket; add pools with "
                 + "/cogito ticket add <grade>.", FAINT));
-        player.sendMessage(msg("• Right-click a placed Pocket Well with the ticket to preview, sneak-click to "
+        player.sendMessage(msg("• Right-click a placed Carmen's Brain with the ticket to preview, sneak-click to "
                 + "pull a random weapon.", FAINT));
         player.sendMessage(msg("• /cogito give <item> or /cogito giveall — the cosmetic items.", FAINT));
     }
@@ -109,7 +109,7 @@ public final class ExtractionCommand {
     /** The cosmetic item for a give id, or {@code null} if unknown. */
     private ItemStack cosmetic(String id) {
         return switch (id) {
-            case "well"             -> StationType.WELL.createItem(); // the craftable Pocket Well, for testing
+            case "well"             -> StationType.WELL.createItem(); // the craftable Carmen's Brain, for testing
             case "enkephalin"       -> Enkephalin.create(16);
             case "raw_cogito"       -> RawCogito.create(16);
             case "cogito"           -> Cogito.create();
@@ -166,16 +166,16 @@ public final class ExtractionCommand {
         }
         giveOrDrop(player, t);
         player.sendMessage(msg("Gave an Extraction Ticket. Chain pools with /cogito ticket add <grade>, then "
-                + "right-click the Well to preview (sneak = pull).", GREEN));
+                + "right-click Carmen's Brain to preview (sneak = pull).", GREEN));
     }
 
     // ---- the Well ------------------------------------------------------------------
 
-    /** Right-click a placed Pocket Well: it only takes an Extraction Ticket now. */
+    /** Right-click a placed Carmen's Brain: it only takes an Extraction Ticket now. */
     public void stationWell(Player player, Location wellLoc, boolean sneaking) {
         ItemStack held = player.getInventory().getItemInMainHand();
         if (ExtractionTicket.matches(held)) { ticketWell(player, wellLoc, sneaking, held); return; }
-        player.sendMessage(msg("The Pocket Well takes an Extraction Ticket — hold one and right-click.", GREY));
+        player.sendMessage(msg("The Carmen's Brain takes an Extraction Ticket — hold one and right-click.", GREY));
     }
 
     /** Pour an Extraction Ticket at the Well: spin the carousel over its pools, then extract a random weapon. */
@@ -212,7 +212,7 @@ public final class ExtractionCommand {
         plugin.weapons().engage(weapon, player.getUniqueId());
         ticket.setAmount(ticket.getAmount() - 1);
         player.getInventory().setItemInMainHand(ticket.getAmount() <= 0 ? null : ticket);
-        player.sendMessage(msg("The Well grants " + pick.display() + " (" + pick.grade().display()
+        player.sendMessage(msg("Carmen's Brain grants " + pick.display() + " (" + pick.grade().display()
                 + ") from the ticket.", GREEN));
         player.playSound(player.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, 0.6f, 1.4f);
     }
