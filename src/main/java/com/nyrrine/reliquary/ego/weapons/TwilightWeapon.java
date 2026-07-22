@@ -37,6 +37,7 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
 import org.joml.Quaternionf;
@@ -103,14 +104,16 @@ public final class TwilightWeapon implements Weapon, Listener {
     private static final double PEACE_FALL_BONUS_CAP        = 6.0;
 
     private static final long   EYES_CD_MS     = 16_000L;
-    private static final int    EYES_COUNT     = 10;
     private static final double EYES_DAMAGE    = 4.0;
-    private static final double EYES_RANGE     = 20.0;
-    private static final int    EYE_STAGGER    = 5;    // ticks between each eye waking — they open one by one
-    private static final int    EYE_OPEN_TICKS = 9;    // the golden lid blooming open before it departs the body
-    private static final int    EYE_LIFETIME   = 100;  // max ticks an eye lives once open
-    private static final double EYE_SPEED      = 0.42; // blocks/tick — a slow, deliberate drift (was ~1.1)
-    private static final double EYE_TURN_DEG   = 10.0; // max steer per tick — a smooth curving homing arc
+    private static final double EYES_RANGE     = 20.0;  // how far the wielder's gaze reaches for a mark
+    private static final int    EYES_WINDOW_TICKS = 140; // the eyes stay open for 7 seconds
+    private static final int    EYES_FIRE_CADENCE = 6;   // launch at the current look-target at most this often
+    private static final int    EYES_ORBIT     = 8;      // eyes that hover around the wielder through the window
+    private static final double EYES_PERIMETER = 3.0;    // radius of the ring they open on — well around the body
+    private static final int    EYE_OPEN_TICKS = 4;      // a brief materialize before an eye peels off toward its mark
+    private static final int    EYE_LIFETIME   = 100;    // max ticks a launched eye lives
+    private static final double EYE_SPEED      = 0.42;   // blocks/tick — a slow, deliberate drift
+    private static final double EYE_TURN_DEG   = 10.0;   // max steer per tick — a smooth curving homing arc
 
     private static final long   PUNISH_CD_MS   = 12_000L;
     private static final double PUNISH_POWER   = 2.6;   // dash impulse — a longer lunge (was 1.7)
@@ -433,8 +436,16 @@ public final class TwilightWeapon implements Weapon, Listener {
         }
     }
 
-    // ---- ability: [Shift + Right] Brilliant Eyes — ten (or twenty) homing eyes -------
+    // ---- ability: [Shift + Right] Brilliant Eyes — a 7s gaze window; each look-target is struck -------
 
+    /**
+     * Open the eyes for a 7-second window. They wake one by one and hover in a wide ring around the wielder;
+     * through the window, whoever she looks at is marked and an eye peels off the ring to strike them (one ruin
+     * on contact) — so as she sweeps her view, each foe in her gaze takes an eye. At full sin, two eyes per look.
+     *
+     * <p>The strike-on-look is routed through {@link #tagLookTarget} so the effect is a one-line swap if the
+     * design lands on a mark/debuff instead of a hit.
+     */
     private void brilliantEyes(Player player) {
         UUID id = player.getUniqueId();
         long now = System.currentTimeMillis();
@@ -442,33 +453,84 @@ public final class TwilightWeapon implements Weapon, Listener {
             player.sendActionBar(hud(id));
             return;
         }
-        boolean twice = sinFull(id);
+        boolean empowered = sinFull(id);
         eyesReadyAt.put(id, now + EYES_CD_MS);
-        int count = twice ? EYES_COUNT * 2 : EYES_COUNT;
-        int stagger = twice ? Math.max(2, EYE_STAGGER / 2) : EYE_STAGGER; // twice as many — wake them a touch faster
+        if (empowered) spendSin(id);
         World world = player.getWorld();
         world.playSound(player.getLocation(), Sound.BLOCK_END_PORTAL_SPAWN, 0.6f, 1.5f);
         world.playSound(player.getLocation(), Sound.ENTITY_ILLUSIONER_CAST_SPELL, 0.8f, 1.3f);
 
-        List<LivingEntity> targets = nearbyEnemies(player, EYES_RANGE);
-        Vector look = player.getEyeLocation().getDirection();
-        for (int i = 0; i < count; i++) {
-            LivingEntity target = targets.isEmpty() ? null : targets.get(i % targets.size());
-            // Each eye wakes at a different spot around the wielder's body and leaves on its own fanned heading,
-            // so the swarm curves outward before it homes — never a straight line.
-            Location origin = eyeSpawn(player, i, count);
-            Vector launch = eyeLaunch(look, i);
-            new BrilliantEye(id, origin, launch, target, i).runTaskTimer(plugin, (long) i * stagger, 1L);
-        }
-        if (twice) spendSin(id);
+        new BukkitRunnable() {
+            int t = 0;
+            int fired = 0;
+            @Override public void run() {
+                Player p = plugin.getServer().getPlayer(id);
+                if (p == null || !p.isOnline() || !matches(p.getInventory().getItemInMainHand())
+                        || t >= EYES_WINDOW_TICKS) {
+                    cancel();
+                    return;
+                }
+                drawOrbit(p, t); // the open eyes wake one by one and hover in the ring around her
+                // On cadence, send an eye at whoever she is looking at right now.
+                if (t % EYES_FIRE_CADENCE == 0) {
+                    LivingEntity mark = lookTarget(p, EYES_RANGE);
+                    if (mark != null) {
+                        int shots = empowered ? 2 : 1;
+                        for (int k = 0; k < shots; k++) fired = tagLookTarget(p, mark, fired);
+                        p.getWorld().playSound(p.getLocation(), Sound.ENTITY_BLAZE_SHOOT, 0.4f, 1.7f);
+                    }
+                }
+                t++;
+            }
+        }.runTaskTimer(plugin, 0L, 1L);
     }
 
-    /** A spawn point in a ring AROUND the wielder — well clear of the body, spread across shoulder-to-head height. */
+    /**
+     * Act on a looked-at mark: peel one eye off the ring and send it curving in to strike (ruin on contact).
+     * The whole effect lives here — swap the launched {@link BrilliantEye} for a mark/debuff to change what a
+     * "tag" means without touching the gaze loop. Returns the next eye index.
+     */
+    private int tagLookTarget(Player player, LivingEntity mark, int index) {
+        Location origin = eyeSpawn(player, index, EYES_ORBIT);
+        Vector launch = eyeLaunch(player.getEyeLocation().getDirection(), index);
+        new BrilliantEye(player.getUniqueId(), origin, launch, mark, index).runTaskTimer(plugin, 0L, 1L);
+        return index + 1;
+    }
+
+    /** The living entity in the wielder's crosshair within {@code range}, or null — a small ray size aids aim. */
+    private LivingEntity lookTarget(Player player, double range) {
+        Location eye = player.getEyeLocation();
+        RayTraceResult hit = player.getWorld().rayTraceEntities(eye, eye.getDirection(), range, 0.6,
+                e -> e instanceof LivingEntity le && !e.equals(player) && !le.isDead());
+        return hit != null && hit.getHitEntity() instanceof LivingEntity le ? le : null;
+    }
+
+    /** A ring position AROUND the wielder — a ~3-block perimeter, spread across shoulder-to-head height. */
     private Location eyeSpawn(Player player, int i, int count) {
         double a = (Math.PI * 2 * i) / Math.max(1, count) + (i % 2) * 0.6;
-        double r = 1.3 + (i % 3) * 0.22; // 1.3-1.7 blocks out — the eyes open around them, never inside them
+        double r = EYES_PERIMETER + (i % 3) * 0.25; // ~3 blocks out — the eyes open around her, never inside her
         double y = 0.9 + (i % 4) * 0.28; // staggered heights up the body
         return player.getLocation().add(Math.cos(a) * r, y, Math.sin(a) * r);
+    }
+
+    /** The open eyes hovering in the ring: they appear one by one across the window and drift slowly around her. */
+    private void drawOrbit(Player player, int t) {
+        World world = player.getWorld();
+        int shown = Math.min(EYES_ORBIT, 1 + (t * EYES_ORBIT) / EYES_WINDOW_TICKS); // wake one by one over the 7s
+        int openEvery = Math.max(1, EYES_WINDOW_TICKS / EYES_ORBIT);
+        double base = (t / 24.0) * Math.PI; // a slow drift around the perimeter
+        for (int i = 0; i < shown; i++) {
+            double a = base + (Math.PI * 2 * i) / EYES_ORBIT;
+            double y = 1.1 + Math.sin(base * 1.3 + i) * 0.18;
+            Location at = player.getLocation().add(Math.cos(a) * EYES_PERIMETER, y, Math.sin(a) * EYES_PERIMETER);
+            int born = i * openEvery;
+            if (t - born < 6) {
+                drawEyeOpening(world, at, Math.min(1.0, (t - born) / 6.0)); // this eye is just now opening
+            } else {
+                world.spawnParticle(Particle.DUST, at, 1, 0.03, 0.03, 0.03, 0, EYE_GOLD);
+                if (i % 2 == 0) world.spawnParticle(Particle.DUST, at, 1, 0, 0, 0, 0, EYE_IRIS);
+            }
+        }
     }
 
     /** The heading an eye leaves on: fanned out to the side and lifted, so steering has to curve it back in. */
@@ -661,14 +723,6 @@ public final class TwilightWeapon implements Weapon, Listener {
 
     // ---- helpers -------------------------------------------------------------------
 
-    private List<LivingEntity> nearbyEnemies(Player player, double range) {
-        List<LivingEntity> out = new ArrayList<>();
-        for (Entity e : player.getNearbyEntities(range, range, range)) {
-            if (e instanceof LivingEntity le && !e.equals(player) && !le.isDead()) out.add(le);
-        }
-        return out;
-    }
-
     private boolean busy(UUID id) {
         Long t = busyUntil.get(id);
         return t != null && System.currentTimeMillis() < t;
@@ -852,8 +906,9 @@ public final class TwilightWeapon implements Weapon, Listener {
                             "that ruins everything around where you",
                             "land. 14s cooldown."),
                     new EgoLore.Ability("[Shift + Right] Brilliant Eyes",
-                            "Open the golden eyes: ten homing lights",
-                            "seek your foes. 16s cooldown."),
+                            "Open the golden eyes for 7 seconds. Each",
+                            "foe you look at is struck by a homing",
+                            "light. 16s cooldown."),
                     new EgoLore.Ability("[Shift + Left] Punishment",
                             "A dashing strike that launches foes. Hit a",
                             "wall mid-lunge and you are flung skyward.",
