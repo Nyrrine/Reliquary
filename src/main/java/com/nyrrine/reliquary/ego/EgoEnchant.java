@@ -98,6 +98,8 @@ public record EgoEnchant(String id, String displayName, int maxLevel, String wea
             "Lamp: +1s to the fixed eye's debuff-transfer window per level.");
     public static final EgoEnchant MOURNERS_STRIDE = reg("mourners_stride", "Mourner's Stride", 3, "solemn_lament",
             "Solemn Lament: keep Speed I while firing; the momentum lingers longer past the last shot per level.");
+    public static final EgoEnchant UNBLINKING = reg("unblinking", "Unblinking", 2, "censored",
+            "CENSORED: -0.5s to the gaze-sicken onset per level (floor 1.5s).");
 
     /** The enchant with this id, or {@code null} if no such enchant is catalogued. */
     public static EgoEnchant get(String id) {
