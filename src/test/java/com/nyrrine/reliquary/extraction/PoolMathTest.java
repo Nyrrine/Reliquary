@@ -157,30 +157,30 @@ class PoolMathTest {
                 "a grade-gated ALEPH must not extract even with its catalyst — got " + hist);
     }
 
-    /** Below 600 titer, an ALEPH is not in the bucket — even at Certified purity, even with its catalyst. */
+    /** Below 400 titer, an ALEPH is not in the bucket — even at Certified purity, even with its catalyst. */
     @Test
-    void alephIsVolumeGatedBelowSixHundredTiter() {
-        // 599 titer: past WAW's 300 gate, one titer short of ALEPH's 600.
-        PotState p = onTarget(WeaponSignatures.JUSTITIA, 599, 99.9);
+    void alephIsVolumeGatedBelowFourHundredTiter() {
+        // 399 titer: past WAW's 300 gate, one titer short of ALEPH's 400.
+        PotState p = onTarget(WeaponSignatures.JUSTITIA, 399, 99.9);
 
         assertTrue(WellRoll.pool(p).stream().noneMatch(c -> c.weapon().grade() == EgoGrade.ALEPH),
-                "a pour under 600 titer must never put an ALEPH in the pool");
+                "a pour under 400 titer must never put an ALEPH in the pool");
 
         Map<String, Integer> hist = histogram(p, "justitia", 1000, 4L);
         assertFalse(hist.containsKey("justitia"),
                 "a volume-gated ALEPH must not extract even with its catalyst — got " + hist);
 
-        // And the gate is exactly 600, not "around" 600.
-        assertTrue(WellRoll.pool(onTarget(WeaponSignatures.JUSTITIA, 600, 99.9)).stream()
+        // And the gate is exactly 400, not "around" 400.
+        assertTrue(WellRoll.pool(onTarget(WeaponSignatures.JUSTITIA, 400, 99.9)).stream()
                         .anyMatch(c -> c.weapon().id().equals("justitia")),
-                "exactly 600 titer must clear the ALEPH volume gate");
+                "exactly 400 titer must clear the ALEPH volume gate");
     }
 
     /** The gates are declarative — the enum is the single source of truth the Well reads. */
     @Test
     void alephGatesAreTheApprovedValues() {
         assertSame(Grade.PRIMARY_STANDARD, EgoGrade.ALEPH.minCogito());
-        assertEquals(600.0, EgoGrade.ALEPH.minVolume(), 1.0e-9);
+        assertEquals(400.0, EgoGrade.ALEPH.minVolume(), 1.0e-9);
         assertTrue(EgoGrade.ALEPH.isApex(), "ALEPH must be an apex tier — it mandates its catalyst");
         assertTrue(EgoGrade.WAW.isApex(), "WAW stays apex");
         for (EgoGrade g : List.of(EgoGrade.ZAYIN, EgoGrade.TETH, EgoGrade.HE)) {

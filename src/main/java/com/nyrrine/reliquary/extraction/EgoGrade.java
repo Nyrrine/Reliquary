@@ -12,7 +12,10 @@ public enum EgoGrade {
     TETH ("TETH",  Grade.REAGENT,           60.0),   // ~half a vial of reliable working stock
     HE   ("HE",    Grade.REAGENT,          150.0),   // ~1.3 vials — reagent-grade, a small stockpile
     WAW  ("WAW",   Grade.ANALYTICAL,       300.0),   // ~2.5 vials of tight, analytical-grade cogito
-    ALEPH("ALEPH", Grade.PRIMARY_STANDARD, 600.0);   // ~5 vials at the refining cap — the ceiling of the craft
+    ALEPH("ALEPH", Grade.PRIMARY_STANDARD, 400.0);   // a 4-vial blend at the refining cap — the ceiling of the craft
+    // NB: 400, not 600 — at 600 the volume gate and the 99% purity gate were mutually exclusive (a 5-vial blend
+    // injects +4.0 noise that the distill can only asymptote to ~1.1 = 98.9%, and distilling for 99% loses the
+    // volume back below 600). 400 lets a 4-vial blend clear 99% with headroom. See the Cogito Extraction Review.
 
     private final String display;
     private final Grade minCogito;

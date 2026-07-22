@@ -42,7 +42,7 @@ public final class Engine {
     public static final double DISTILL_DECAY = 0.6;
     /** Volume a distillation pass boils off — concentration costs material. Over-distilling shrinks the batch
      *  below the volume gate, so distilling is a measured decision, not a spam button. */
-    public static final double DISTILL_VOLUME_LOSS = 0.04;
+    public static final double DISTILL_VOLUME_LOSS = 0.03;
     /** How much a flux charge (Honeycomb) dampens opposition drain on the adds it covers. */
     public static final double FLUX_DRAIN_FACTOR = 0.3;
     /** Extra contamination a blend introduces. Kept small so clean stocks blend clean (§11) — a blend of
