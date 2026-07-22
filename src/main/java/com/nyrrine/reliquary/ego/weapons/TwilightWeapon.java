@@ -45,8 +45,10 @@ import org.joml.Vector3f;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -143,7 +145,7 @@ public final class TwilightWeapon implements Weapon, Listener {
     private final Map<UUID, Long> eyesReadyAt      = new HashMap<>();
     private final Map<UUID, Long> punishReadyAt    = new HashMap<>();
     private final Map<UUID, Long> nextRegenAt      = new HashMap<>();
-    private final Map<UUID, Long> busyUntil        = new HashMap<>(); // rooted mid-combo / wind-up
+    private final Map<UUID, Long> busyUntil        = new HashMap<>(); // rooted mid-combo / through the Peace arc
     private final Map<UUID, Long> fallGraceUntil   = new HashMap<>(); // no fall damage while lunging
     private final Map<UUID, Integer> comboStep     = new HashMap<>(); // click-driven combo index
     private final Map<UUID, Long> comboWindowUntil = new HashMap<>(); // the chain lapses if you do not continue in time
@@ -214,12 +216,22 @@ public final class TwilightWeapon implements Weapon, Listener {
     public void onDisable() {
         // Lift the live max-health modifiers off the online wielders...
         for (Player p : plugin.getServer().getOnlinePlayers()) clearBonusHp(p);
-        // ...and sweep any VFX Display (eye body / shockwave block) that outlived its task on a crash/reload.
+        // ...sweep any VFX Display (the shockwave-ring blocks) that outlived its task on a crash/reload...
         for (World w : plugin.getServer().getWorlds()) {
             for (Entity e : w.getEntitiesByClass(Display.class)) {
                 if (e.getScoreboardTags().contains(VFX_TAG)) e.remove();
             }
         }
+        // ...and drop all per-player state — the plugin is going down (or reloading); nothing reads it after.
+        sin.clear();
+        peaceReadyAt.clear();
+        eyesReadyAt.clear();
+        punishReadyAt.clear();
+        nextRegenAt.clear();
+        busyUntil.clear();
+        fallGraceUntil.clear();
+        comboStep.clear();
+        comboWindowUntil.clear();
     }
 
     @Override
@@ -493,7 +505,7 @@ public final class TwilightWeapon implements Weapon, Listener {
     private int tagLookTarget(Player player, LivingEntity mark, int index) {
         Location origin = eyeSpawn(player, index, EYES_ORBIT);
         Vector launch = eyeLaunch(player.getEyeLocation().getDirection(), index);
-        new BrilliantEye(player.getUniqueId(), origin, launch, mark, index).runTaskTimer(plugin, 0L, 1L);
+        new BrilliantEye(player.getUniqueId(), origin, launch, mark).runTaskTimer(plugin, 0L, 1L);
         return index + 1;
     }
 
@@ -562,7 +574,7 @@ public final class TwilightWeapon implements Weapon, Listener {
         new BukkitRunnable() {
             int t = 0;
             boolean launched = false;
-            final java.util.Set<UUID> struck = new java.util.HashSet<>(); // each body takes ONE ruin per dash, not one per tick
+            final Set<UUID> struck = new HashSet<>(); // each body takes ONE ruin per dash, not one per tick
             @Override public void run() {
                 Player p = plugin.getServer().getPlayer(id);
                 if (p == null || !p.isOnline() || t >= PUNISH_TICKS || launched) { cancel(); return; }
@@ -623,9 +635,9 @@ public final class TwilightWeapon implements Weapon, Listener {
     // ---- Brilliant Eye: a golden eye drawn purely in particles, curving into its foe -------
 
     /**
-     * A single Brilliant Eye, drawn in golden particles only — no entity. It opens like an eye at the wielder's
-     * body, lingers a moment as the golden lid blooms, then departs on a smooth curving arc that steers into its
-     * target (League's Ruined King curve): each tick the heading turns toward the foe by a capped angle, so a
+     * A single Brilliant Eye, drawn in golden particles only — no entity. It opens like an eye on the ring around
+     * the wielder, lingers a moment as the golden lid blooms, then departs on a smooth curving arc that steers into
+     * its target (League's Ruined King curve): each tick the heading turns toward the foe by a capped angle, so a
      * fanned-out launch bows back into the hit rather than snapping straight there.
      */
     private final class BrilliantEye extends BukkitRunnable {
@@ -635,7 +647,7 @@ public final class TwilightWeapon implements Weapon, Listener {
         private Vector vel;   // unit heading; the speed is applied via EYE_SPEED
         private int age = 0;
 
-        BrilliantEye(UUID ownerId, Location origin, Vector launch, LivingEntity target, int index) {
+        BrilliantEye(UUID ownerId, Location origin, Vector launch, LivingEntity target) {
             this.ownerId = ownerId;
             this.pos = origin;
             this.vel = launch;
