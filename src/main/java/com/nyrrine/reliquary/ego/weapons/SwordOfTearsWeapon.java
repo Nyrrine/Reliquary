@@ -29,6 +29,7 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
+import org.joml.Matrix3f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
@@ -482,6 +483,7 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
         private static final double FORM_ARC_DEG  = 62.0;   // half-span of the arc; blades wrap toward the flanks
         private static final double FORM_ARC_LIFT = 0.35;   // the outer blades ride higher -> a tall, curved fan
         private static final double FORM_POINT_UP = 0.90;   // how far the blade tips tilt UP off their outward spoke
+        private static final float  FORM_ROLL_DEG = 0.0f;   // extra spin about each blade's own length — dials the guard/flat to face nicely (placeholder, tune live)
 
         // Dart feel (Double Tag + the opening of a sortie). Blocks / blocks-per-tick. SLOW tip-leading
         // glide-in, then a FAST stab — the contrast is the whole read.
@@ -1074,28 +1076,60 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
             w.spawnParticle(Particle.END_ROD, at, 1, 0.02, 0.02, 0.02, 0.006);
         }
 
+        /**
+         * A fully-specified look-rotation that maps the model's tip axis (+Y) onto {@code dir} with a
+         * DETERMINISTIC roll. {@code rotationTo(+Y, dir)} pins only the tip direction and leaves the blade's
+         * spin about its own length arbitrary — JOML picks a different roll axis per direction, so on an
+         * asymmetric rapier each blade in the fan twisted to a different angle (the chaotic, non-symmetric
+         * mess in the screenshot). Here the roll is pinned by a global reference (world up, projected off the
+         * tip), so every blade shares one roll and the fan is mirror-symmetric: blade i mirrors blade n-1-i,
+         * because their {@code dir}s mirror and the reference is the same for both. When the tip runs nearly
+         * parallel to world up (e.g. a straight-down duel pose), the reference falls back to world forward so
+         * the basis never degenerates. {@code rollDeg} adds a final spin about the tip to dial the guard/flat.
+         */
+        private static Quaternionf lookRotation(Vector dir, float rollDeg) {
+            Vector3f y = new Vector3f((float) dir.getX(), (float) dir.getY(), (float) dir.getZ());
+            if (y.lengthSquared() < 1.0e-8f) y.set(0, 1, 0);
+            y.normalize();
+            // Side axis = ref x tip. Use world up as the roll reference; if the tip is ~parallel to it, the
+            // cross would collapse, so pin off world forward (0,0,1) instead.
+            Vector3f ref = Math.abs(y.dot(0, 1, 0)) > 0.999f ? new Vector3f(0, 0, 1) : new Vector3f(0, 1, 0);
+            Vector3f x = new Vector3f(ref).cross(y);
+            if (x.lengthSquared() < 1.0e-8f) x.set(1, 0, 0);
+            x.normalize();
+            Vector3f z = new Vector3f(x).cross(y).normalize(); // completes a right-handed basis (x, y, z)
+            // Columns are where the model's local +X/+Y/+Z land in world space (Matrix3f is column-major).
+            Quaternionf q = new Quaternionf().setFromNormalized(new Matrix3f(
+                    x.x, x.y, x.z,
+                    y.x, y.y, y.z,
+                    z.x, z.y, z.z));
+            if (rollDeg != 0f) q.rotateY((float) Math.toRadians(rollDeg)); // spin about the tip: dial the guard
+            return q;
+        }
+
         /** Rapier hanging tip-down — the spawn pose, before the hover levels it out where the wielder faces. */
         private static Transformation hoverTransform() {
             return new Transformation(new Vector3f(),
-                    new Quaternionf().rotationTo(0, 1, 0, 0, -1, 0),
+                    lookRotation(new Vector(0, -1, 0), FORM_ROLL_DEG),
                     new Vector3f(0.9f, 0.9f, 0.9f), new Quaternionf());
         }
 
         /** Rapier at rest but levelled, tip leading along {@code dir} — the wuxia poise, poised where you face. */
         private static Transformation hoverPointing(Vector dir) {
             return new Transformation(new Vector3f(),
-                    new Quaternionf().rotationTo(0, 1, 0, (float) dir.getX(), (float) dir.getY(), (float) dir.getZ()),
+                    lookRotation(dir, FORM_ROLL_DEG),
                     new Vector3f(0.9f, 0.9f, 0.9f), new Quaternionf());
         }
 
         /**
          * Rapier flattened tip-leading along {@code dir} — a lance/thrust pose (NOT held like a slash), so it
          * visibly points forward at the target during its dart. Stretched a touch along the blade axis to read
-         * as a committed thrust.
+         * as a committed thrust. Shares the deterministic {@link #lookRotation} roll so a lunging blade never
+         * spins to a random angle mid-dart.
          */
         private static Transformation pointing(Vector dir) {
             return new Transformation(new Vector3f(),
-                    new Quaternionf().rotationTo(0, 1, 0, (float) dir.getX(), (float) dir.getY(), (float) dir.getZ()),
+                    lookRotation(dir, FORM_ROLL_DEG),
                     new Vector3f(0.85f, 1.15f, 0.85f), new Quaternionf());
         }
     }
