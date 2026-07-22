@@ -500,13 +500,15 @@ public final class TwilightWeapon implements Weapon, Listener {
         new BukkitRunnable() {
             int t = 0;
             boolean launched = false;
+            final java.util.Set<UUID> struck = new java.util.HashSet<>(); // each body takes ONE ruin per dash, not one per tick
             @Override public void run() {
                 Player p = plugin.getServer().getPlayer(id);
                 if (p == null || !p.isOnline() || t >= PUNISH_TICKS || launched) { cancel(); return; }
                 lungeVfx(p, dir);
-                // Strike anything the lunge passes through.
+                // Strike anything the lunge passes through — once each, or the swept i-frame clear stacks ruin per tick.
                 for (Entity e : p.getNearbyEntities(PUNISH_REACH, PUNISH_REACH, PUNISH_REACH)) {
                     if (!(e instanceof LivingEntity le) || e.equals(p)) continue;
+                    if (!struck.add(le.getUniqueId())) continue; // already caught by this lunge
                     dealRuin(p, le, PUNISH_DAMAGE);
                     le.setVelocity(dir.clone().multiply(1.2).setY(0.45)); // launched back
                 }
