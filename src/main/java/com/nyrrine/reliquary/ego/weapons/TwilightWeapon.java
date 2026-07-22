@@ -22,7 +22,6 @@ import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
-import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -85,11 +84,13 @@ public final class TwilightWeapon implements Weapon, Listener {
     /** Tilted Scale: hits to a full scale, and the stack each ruin adds. */
     private static final int    SIN_MAX        = 5;
 
-    /** Attack Sequence: four strikes, one ruin each, a few ticks apart. Per-strike damage + the reach. */
+    /** Attack Sequence: a click-driven four-hit combo — each swing lands the next ruin, the chain escalating. */
     private static final double[] COMBO_DAMAGE = {6.0, 6.0, 7.0, 9.0};
-    private static final long   COMBO_STEP_TICKS = 4L;
     private static final double COMBO_REACH    = 4.2;
     private static final double COMBO_CONE     = 0.35; // dot threshold for "in front"
+    private static final long   COMBO_WINDOW_MS = 900L; // time after a strike to continue the chain
+    private static final long   COMBO_STEP_LOCK = 5L;   // ticks rooted after a mid-combo strike (one click = one strike)
+    private static final long   COMBO_RECOVER   = 10L;  // ticks rooted after the finale — the greatsword's weight
 
     private static final long   PEACE_CD_MS    = 14_000L;
     private static final int    PEACE_WINDUP   = 18;   // ticks of wind-up before the slam
@@ -100,6 +101,11 @@ public final class TwilightWeapon implements Weapon, Listener {
     private static final int    EYES_COUNT     = 10;
     private static final double EYES_DAMAGE    = 4.0;
     private static final double EYES_RANGE     = 20.0;
+    private static final int    EYE_STAGGER    = 5;    // ticks between each eye waking — they open one by one
+    private static final int    EYE_OPEN_TICKS = 9;    // the golden lid blooming open before it departs the body
+    private static final int    EYE_LIFETIME   = 100;  // max ticks an eye lives once open
+    private static final double EYE_SPEED      = 0.42; // blocks/tick — a slow, deliberate drift (was ~1.1)
+    private static final double EYE_TURN_DEG   = 10.0; // max steer per tick — a smooth curving homing arc
 
     private static final long   PUNISH_CD_MS   = 12_000L;
     private static final double PUNISH_POWER   = 1.7;   // dash impulse
@@ -116,6 +122,10 @@ public final class TwilightWeapon implements Weapon, Listener {
     private static final Color WHITE_DUST = Color.fromRGB(0xFF, 0xF4, 0xD8);
     private static final Color AMBER_DUST = Color.fromRGB(0xE8, 0xA2, 0x3C);
     private static final Color VOID_DUST = Color.fromRGB(0x6A, 0x4C, 0xC0);
+    /** Brilliant Eyes render as pure gold — a bright golden body, a warm amber iris, a faint golden wake. */
+    private static final Particle.DustOptions EYE_GOLD       = new Particle.DustOptions(GOLD_DUST, 1.2f);
+    private static final Particle.DustOptions EYE_IRIS       = new Particle.DustOptions(AMBER_DUST, 0.9f);
+    private static final Particle.DustOptions EYE_GOLD_FAINT = new Particle.DustOptions(Color.fromRGB(0xEA, 0xC2, 0x54), 0.8f);
     /** Tag on every Display this weapon spawns, so a reload can sweep any that outlived their task. */
     private static final String VFX_TAG = "twilight_vfx";
 
@@ -127,6 +137,8 @@ public final class TwilightWeapon implements Weapon, Listener {
     private final Map<UUID, Long> nextRegenAt      = new HashMap<>();
     private final Map<UUID, Long> busyUntil        = new HashMap<>(); // rooted mid-combo / wind-up
     private final Map<UUID, Long> fallGraceUntil   = new HashMap<>(); // no fall damage while lunging
+    private final Map<UUID, Integer> comboStep     = new HashMap<>(); // click-driven combo index
+    private final Map<UUID, Long> comboWindowUntil = new HashMap<>(); // the chain lapses if you do not continue in time
 
     public TwilightWeapon(Reliquary plugin) {
         this.plugin = plugin;
@@ -176,6 +188,8 @@ public final class TwilightWeapon implements Weapon, Listener {
         nextRegenAt.remove(id);
         busyUntil.remove(id);
         fallGraceUntil.remove(id);
+        comboStep.remove(id);
+        comboWindowUntil.remove(id);
         Player p = plugin.getServer().getPlayer(id);
         if (p != null) clearBonusHp(p); // best-effort on quit; onJoin is the real backstop for a dirty exit
     }
@@ -297,22 +311,22 @@ public final class TwilightWeapon implements Weapon, Listener {
 
     private void attackSequence(Player player) {
         UUID id = player.getUniqueId();
-        setBusy(id, COMBO_STEP_TICKS * COMBO_DAMAGE.length + 4);
-        World world = player.getWorld();
-        world.playSound(player.getLocation(), Sound.ENTITY_PLAYER_ATTACK_STRONG, 0.9f, 0.7f);
-        new BukkitRunnable() {
-            int strike = 0;
-            @Override public void run() {
-                Player p = plugin.getServer().getPlayer(id);
-                if (p == null || !p.isOnline() || !matches(p.getInventory().getItemInMainHand())
-                        || strike >= COMBO_DAMAGE.length) {
-                    cancel();
-                    return;
-                }
-                comboStrike(p, strike, COMBO_DAMAGE[strike]);
-                strike++;
-            }
-        }.runTaskTimer(plugin, 0L, COMBO_STEP_TICKS);
+        long now = System.currentTimeMillis();
+        // Click-driven: each swing lands ONE strike and arms the next. The chain only advances if you keep
+        // swinging inside the window — so the wielder sets the cadence instead of being locked into an auto-combo.
+        int step = now <= comboWindowUntil.getOrDefault(id, 0L) ? comboStep.getOrDefault(id, 0) : 0;
+        if (step >= COMBO_DAMAGE.length) step = 0; // wrap after a finished combo
+        comboStrike(player, step, COMBO_DAMAGE[step]);
+        int next = step + 1;
+        if (next >= COMBO_DAMAGE.length) {
+            comboStep.put(id, 0);
+            comboWindowUntil.put(id, 0L);
+            setBusy(id, COMBO_RECOVER); // the finale lands with weight — a short recovery before the next chain
+        } else {
+            comboStep.put(id, next);
+            comboWindowUntil.put(id, now + COMBO_WINDOW_MS);
+            setBusy(id, COMBO_STEP_LOCK); // one click = one strike; the guard stops a single swing double-firing
+        }
     }
 
     /** One strike of the sequence: a wide cone in front takes a ruin, with a slash whose fidelity climbs. */
@@ -322,8 +336,9 @@ public final class TwilightWeapon implements Weapon, Listener {
         Vector look = eye.getDirection().normalize();
         // Each ruin swings on its own plane and colour, building strike to strike — four distinct crescents.
         crescent(player, index);
-        world.playSound(eye, Sound.ITEM_TRIDENT_RETURN, 0.7f, 0.8f + index * 0.18f);
-        world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.8f, 0.6f + index * 0.15f);
+        // A clean rising whoosh per swing (pitch climbs across the chain), with a touch of greatsword weight.
+        world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.85f, 0.7f + index * 0.14f);
+        world.playSound(eye, Sound.ITEM_MACE_SMASH_AIR, 0.5f, 1.0f + index * 0.12f);
         for (Entity e : player.getNearbyEntities(COMBO_REACH, COMBO_REACH, COMBO_REACH)) {
             if (!(e instanceof LivingEntity le) || e.equals(player)) continue;
             Vector to = le.getLocation().toVector().subtract(eye.toVector());
@@ -390,7 +405,7 @@ public final class TwilightWeapon implements Weapon, Listener {
         }
         if (empowered) {
             spendSin(id);
-            world.playSound(c, Sound.ITEM_TOTEM_USE, 0.8f, 0.7f);
+            world.playSound(c, Sound.ITEM_TRIDENT_THUNDER, 0.9f, 0.8f); // the scale tips — a heavy judgment clap
         }
     }
 
@@ -406,18 +421,39 @@ public final class TwilightWeapon implements Weapon, Listener {
         boolean twice = sinFull(id);
         eyesReadyAt.put(id, now + EYES_CD_MS);
         int count = twice ? EYES_COUNT * 2 : EYES_COUNT;
+        int stagger = twice ? Math.max(2, EYE_STAGGER / 2) : EYE_STAGGER; // twice as many — wake them a touch faster
         World world = player.getWorld();
-        world.playSound(player.getLocation(), Sound.BLOCK_END_PORTAL_SPAWN, 0.7f, 1.4f);
-        world.playSound(player.getLocation(), Sound.ENTITY_ILLUSIONER_CAST_SPELL, 0.9f, 1.2f);
-        eyesOpenVfx(player);
+        world.playSound(player.getLocation(), Sound.BLOCK_END_PORTAL_SPAWN, 0.6f, 1.5f);
+        world.playSound(player.getLocation(), Sound.ENTITY_ILLUSIONER_CAST_SPELL, 0.8f, 1.3f);
 
         List<LivingEntity> targets = nearbyEnemies(player, EYES_RANGE);
-        Location origin = player.getEyeLocation().add(0, 0.4, 0);
+        Vector look = player.getEyeLocation().getDirection();
         for (int i = 0; i < count; i++) {
             LivingEntity target = targets.isEmpty() ? null : targets.get(i % targets.size());
-            new BrilliantEye(id, origin.clone(), target, i).runTaskTimer(plugin, (long) (i / 2), 1L);
+            // Each eye wakes at a different spot around the wielder's body and leaves on its own fanned heading,
+            // so the swarm curves outward before it homes — never a straight line.
+            Location origin = eyeSpawn(player, i, count);
+            Vector launch = eyeLaunch(look, i);
+            new BrilliantEye(id, origin, launch, target, i).runTaskTimer(plugin, (long) i * stagger, 1L);
         }
         if (twice) spendSin(id);
+    }
+
+    /** A spawn point around the wielder's upper body — the eyes wake spread across the torso, shoulders and head. */
+    private Location eyeSpawn(Player player, int i, int count) {
+        double a = (Math.PI * 2 * i) / Math.max(1, count) + (i % 2) * 0.6;
+        double r = 0.5 + (i % 3) * 0.18;
+        double y = 0.6 + (i % 4) * 0.28; // staggered heights up the body
+        return player.getLocation().add(Math.cos(a) * r, y, Math.sin(a) * r);
+    }
+
+    /** The heading an eye leaves on: fanned out to the side and lifted, so steering has to curve it back in. */
+    private Vector eyeLaunch(Vector look, int i) {
+        double side = (i % 2 == 0) ? 1 : -1;
+        double yaw = Math.toRadians(side * (28 + (i / 2 % 4) * 16)); // a widening left/right fan
+        Vector v = look.clone().rotateAroundY(yaw);
+        v.setY(v.getY() * 0.3 + 0.55); // lift it off the body first
+        return v.lengthSquared() < 1.0e-6 ? new Vector(0, 1, 0) : v.normalize();
     }
 
     // ---- ability: [Shift + Left] Punishment — a dash-strike, wall → launch up --------
@@ -496,90 +532,105 @@ public final class TwilightWeapon implements Weapon, Listener {
         }.runTaskTimer(plugin, 0L, 1L);
     }
 
-    // ---- Brilliant Eye: a glowing golden eye (ItemDisplay) trailing a ribbon --------
+    // ---- Brilliant Eye: a golden eye drawn purely in particles, curving into its foe -------
 
+    /**
+     * A single Brilliant Eye, drawn in golden particles only — no entity. It opens like an eye at the wielder's
+     * body, lingers a moment as the golden lid blooms, then departs on a smooth curving arc that steers into its
+     * target (League's Ruined King curve): each tick the heading turns toward the foe by a capped angle, so a
+     * fanned-out launch bows back into the hit rather than snapping straight there.
+     */
     private final class BrilliantEye extends BukkitRunnable {
         private final UUID ownerId;
         private final Location pos;
         private final LivingEntity target;
-        private final int index;
-        private ItemDisplay body;
-        private Location prev;
+        private Vector vel;   // unit heading; the speed is applied via EYE_SPEED
         private int age = 0;
 
-        BrilliantEye(UUID ownerId, Location origin, LivingEntity target, int index) {
+        BrilliantEye(UUID ownerId, Location origin, Vector launch, LivingEntity target, int index) {
             this.ownerId = ownerId;
             this.pos = origin;
-            this.prev = origin.clone();
+            this.vel = launch;
             this.target = target;
-            this.index = index;
         }
 
         @Override public void run() {
             Player owner = plugin.getServer().getPlayer(ownerId);
-            if (owner == null || age++ > 60 || target == null || !target.isValid() || target.isDead()
-                    || !target.getWorld().equals(pos.getWorld())) {
-                remove();
-                return;
-            }
-            if (body == null) body = spawnEyeBody(pos); // real geometry: a glowing golden eye
-            Location aim = target.getLocation().add(0, target.getHeight() * 0.55, 0);
-            Vector step = aim.toVector().subtract(pos.toVector());
-            double dist = step.length();
             World world = pos.getWorld();
-            if (dist <= 1.1) {
-                dealRuin(owner, target, EYES_DAMAGE);
-                world.spawnParticle(Particle.FLASH, aim, 1, 0, 0, 0, 0, GOLD_DUST);
-                world.spawnParticle(Particle.DUST, aim, 12, 0.25, 0.25, 0.25, 0, new Particle.DustOptions(GOLD_DUST, 1.3f));
-                world.playSound(aim, Sound.ENTITY_BLAZE_HURT, 0.5f, 1.6f);
-                remove();
+            if (owner == null || world == null || age > EYE_OPEN_TICKS + EYE_LIFETIME) { cancel(); return; }
+
+            // Phase 1 — the eye opens: a golden lid blooming wider each tick before it lifts away from the body.
+            if (age < EYE_OPEN_TICKS) {
+                drawEyeOpening(world, pos, (double) age / EYE_OPEN_TICKS);
+                age++;
                 return;
             }
-            // A slight curve for the first few ticks so the swarm fans out before it homes.
-            Vector head = step.normalize();
-            if (age < 5) head.add(new Vector((index % 3 - 1) * 0.35, 0.12, (index % 2 == 0 ? 0.25 : -0.25))).normalize();
-            prev = pos.clone();
-            pos.add(head.multiply(Math.min(1.1, dist)));
-            if (body.isValid()) {
-                body.teleport(pos);
-                body.setRotation(owner.getLocation().getYaw() + age * 26f, 0f); // the eye turns as it flies
+
+            boolean homing = target != null && target.isValid() && !target.isDead()
+                    && target.getWorld().equals(world);
+            if (homing) {
+                Location aim = target.getLocation().add(0, target.getHeight() * 0.55, 0);
+                Vector desired = aim.toVector().subtract(pos.toVector());
+                double dist = desired.length();
+                if (dist <= 1.0) {
+                    dealRuin(owner, target, EYES_DAMAGE);
+                    drawEyeBurst(world, aim);
+                    world.playSound(aim, Sound.ENTITY_BLAZE_HURT, 0.5f, 1.7f);
+                    cancel();
+                    return;
+                }
+                steer(desired.multiply(1.0 / dist)); // turn the heading toward the foe by a capped angle each tick
+            } else if (age > EYE_OPEN_TICKS + 45) {
+                drawEyeBurst(world, pos); // no target and it has drifted long enough — fade out
+                cancel();
+                return;
             }
-            ribbon(world, prev, pos); // a glowing golden ribbon streaming behind it
+
+            pos.add(vel.clone().multiply(EYE_SPEED));
+            drawEyeBody(world, pos, vel);
+            age++;
         }
 
-        private void remove() {
-            if (body != null && body.isValid()) body.remove();
-            cancel();
+        /** Rotate the heading toward {@code desired} (a unit vector) by at most EYE_TURN_DEG — the curving arc. */
+        private void steer(Vector desired) {
+            Vector cur = vel.clone().normalize();
+            double dot = Math.max(-1.0, Math.min(1.0, cur.dot(desired)));
+            double ang = Math.acos(dot);
+            double maxTurn = Math.toRadians(EYE_TURN_DEG);
+            if (ang <= maxTurn || ang < 1.0e-6) { vel = desired.clone(); return; }
+            Vector axis = cur.getCrossProduct(desired);
+            if (axis.lengthSquared() < 1.0e-9) { vel = desired.clone(); return; } // exactly opposed — just snap
+            vel = cur.rotateAroundAxis(axis.normalize(), maxTurn);
         }
     }
 
-    /** A glowing golden eye body — an ItemDisplay stand-in the pack can remodel; full-bright, viewer-facing. */
-    private ItemDisplay spawnEyeBody(Location at) {
-        return at.getWorld().spawn(at, ItemDisplay.class, d -> {
-            d.setItemStack(new ItemStack(Material.GLOWSTONE_DUST));
-            d.setBillboard(Display.Billboard.CENTER);
-            d.setBrightness(new Display.Brightness(15, 15));
-            d.setPersistent(false);
-            d.addScoreboardTag(VFX_TAG);
-            d.setTransformation(new Transformation(
-                    new Vector3f(), new Quaternionf(), new Vector3f(0.55f, 0.55f, 0.55f), new Quaternionf()));
-        });
+    /** The golden lid opening: a lens shape whose height grows from a slit to a full eye, a warm iris at the core. */
+    private void drawEyeOpening(World world, Location at, double frac) {
+        double w = 0.42;
+        double h = 0.03 + frac * 0.26; // a horizontal slit widening into an eye
+        int pts = 12;
+        for (int k = 0; k <= pts; k++) {
+            double a = Math.PI * k / pts;
+            double x = Math.cos(a) * w;
+            double lid = Math.sin(a) * h;
+            world.spawnParticle(Particle.DUST, at.clone().add(x, lid, 0), 1, 0, 0, 0, 0, EYE_GOLD);
+            world.spawnParticle(Particle.DUST, at.clone().add(x, -lid, 0), 1, 0, 0, 0, 0, EYE_GOLD);
+        }
+        if (frac > 0.45) world.spawnParticle(Particle.DUST, at, 1, 0.02, 0.02, 0.02, 0, EYE_IRIS);
     }
 
-    /** A dense, continuous gold-to-white dust ribbon between two points — a trailing streamer, not a dot cloud. */
-    private void ribbon(World world, Location from, Location to) {
-        Vector d = to.toVector().subtract(from.toVector());
-        double len = d.length();
-        if (len < 1.0e-4) return;
-        int steps = Math.max(2, (int) (len / 0.12));
-        Vector unit = d.multiply(1.0 / steps);
-        Location p = from.clone();
-        for (int i = 0; i <= steps; i++) {
-            world.spawnParticle(Particle.DUST_COLOR_TRANSITION, p, 1, 0.01, 0.01, 0.01, 0,
-                    new Particle.DustTransition(GOLD_DUST, WHITE_DUST, 1.1f));
-            if (i % 3 == 0) world.spawnParticle(Particle.END_ROD, p, 1, 0, 0, 0, 0.0);
-            p.add(unit);
-        }
+    /** The flying eye: a golden body with a warm amber iris, and a soft golden wake behind (no end-rod streak). */
+    private void drawEyeBody(World world, Location at, Vector heading) {
+        world.spawnParticle(Particle.DUST, at, 2, 0.05, 0.05, 0.05, 0, EYE_GOLD);
+        world.spawnParticle(Particle.DUST, at, 1, 0.0, 0.0, 0.0, 0, EYE_IRIS);
+        Location back = at.clone().subtract(heading.clone().multiply(EYE_SPEED * 0.6));
+        world.spawnParticle(Particle.DUST, back, 1, 0.03, 0.03, 0.03, 0, EYE_GOLD_FAINT); // reads the curve, softly
+    }
+
+    /** The eye's end: a small golden bloom where it strikes (or fades). */
+    private void drawEyeBurst(World world, Location at) {
+        world.spawnParticle(Particle.DUST, at, 16, 0.28, 0.28, 0.28, 0, new Particle.DustOptions(GOLD_DUST, 1.4f));
+        world.spawnParticle(Particle.FLASH, at, 1, 0, 0, 0, 0, GOLD_DUST);
     }
 
     // ---- helpers -------------------------------------------------------------------
@@ -638,16 +689,19 @@ public final class TwilightWeapon implements Weapon, Listener {
     private void crescent(Player player, int index) {
         Location origin = player.getEyeLocation();
         Vector aim = origin.getDirection();
+        // The kata: a down-right diagonal, a down-left diagonal, a wide horizontal sweep, then an overhead
+        // cleave. Each swings slower (higher duration = a smoother, more legible arc) and denser than the last.
         switch (index) {
-            case 0 -> SlashVfx.slash(plugin, origin, aim).tilt(-42).arcSpan(130).reach(3.8)
-                    .colours(GOLD_DUST, WHITE_DUST).thickness(1.1f).duration(4).play();
-            case 1 -> SlashVfx.slash(plugin, origin, aim).tilt(42).arcSpan(140).reach(4.1)
-                    .colours(GOLD_DUST, WHITE_DUST).thickness(1.2f).duration(4).play();
-            case 2 -> SlashVfx.slash(plugin, origin, aim).tilt(-8).arcSpan(160).reach(4.6)
-                    .colours(AMBER_DUST, GOLD_DUST).thickness(1.4f).duration(5).play();
-            default -> SlashVfx.slash(plugin, origin, aim).tilt(90).arcSpan(185).reach(5.3)
-                    .colours(WHITE_DUST, GOLD_DUST).thickness(1.7f).duration(6)
-                    .blade(Material.NETHERITE_SWORD).bladeScale(2.4).play();
+            case 0 -> SlashVfx.slash(plugin, origin, aim).tilt(-52).arcSpan(150).reach(4.0)
+                    .colours(GOLD_DUST, WHITE_DUST).thickness(1.3f).duration(6).play();
+            case 1 -> SlashVfx.slash(plugin, origin, aim).tilt(52).arcSpan(155).reach(4.3)
+                    .colours(GOLD_DUST, WHITE_DUST).thickness(1.4f).duration(6).play();
+            case 2 -> SlashVfx.slash(plugin, origin, aim).tilt(2).arcSpan(180).reach(4.8)
+                    .colours(AMBER_DUST, GOLD_DUST).thickness(1.6f).duration(7)
+                    .blade(Material.NETHERITE_SWORD).bladeScale(2.0).play();
+            default -> SlashVfx.slash(plugin, origin, aim).tilt(90).arcSpan(190).reach(5.6)
+                    .colours(WHITE_DUST, GOLD_DUST).thickness(1.9f).duration(8)
+                    .blade(Material.NETHERITE_SWORD).bladeScale(2.6).play();
         }
     }
 
@@ -707,17 +761,6 @@ public final class TwilightWeapon implements Weapon, Listener {
         }.runTaskTimer(plugin, 1L, 1L);
     }
 
-    private void eyesOpenVfx(Player player) {
-        World world = player.getWorld();
-        Location o = player.getEyeLocation().add(0, 0.6, 0);
-        for (int i = 0; i < 24; i++) {
-            double a = ThreadLocalRandom.current().nextDouble(0, Math.PI * 2);
-            Location p = o.clone().add(Math.cos(a) * 1.2, ThreadLocalRandom.current().nextDouble(-0.5, 0.9), Math.sin(a) * 1.2);
-            world.spawnParticle(Particle.DUST, p, 1, 0, 0, 0, 0, new Particle.DustOptions(GOLD_DUST, 1.2f));
-            if (i % 3 == 0) world.spawnParticle(Particle.END_ROD, p, 1, 0, 0, 0, 0.02);
-        }
-    }
-
     private void lungeVfx(Player player, Vector dir) {
         World world = player.getWorld();
         Location o = player.getLocation().add(0, 1.0, 0);
@@ -732,7 +775,7 @@ public final class TwilightWeapon implements Weapon, Listener {
         World world = player.getWorld();
         Location c = player.getLocation();
         world.playSound(c, Sound.BLOCK_BELL_USE, 1.0f, 0.7f);
-        world.playSound(c, Sound.ITEM_TOTEM_USE, 0.7f, 1.3f);
+        world.playSound(c, Sound.ITEM_GOAT_HORN_SOUND_2, 0.7f, 1.0f); // the third trumpet sounds — a horn, not a totem
         for (int i = 0; i < 40; i++) {
             double a = ThreadLocalRandom.current().nextDouble(0, Math.PI * 2);
             double r = ThreadLocalRandom.current().nextDouble(0, 1.6);
