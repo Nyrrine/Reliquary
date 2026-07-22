@@ -74,16 +74,17 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li><b>[Right Click]</b> — TWO-MODE, chosen by whether a fresh corpse is waiting (there is no prime step):
  *       on a fresh kill it is the signature Feast — the wielder VANISHES (invisibility + every equipment slot
  *       hidden from viewers, NO i-frames) and is free to slip away while a 30s torture show plays on the
- *       corpse, ending in a red censored RECTANGLE that bursts and leaves a lingering cognition-filter
+ *       corpse under a tall black redaction monolith, ending in a lingering cognition-filter
  *       ({@link #FEAST_COOLDOWN_MS} of silence afterward); with no corpse it is the grasping arm — a
  *       black-and-red root that stems out to the nearest body and drags it to the wielder
  *       ({@link #ARM_COOLDOWN_MS}).</li>
  * </ul>
  *
- * <p>All VFX are particles and all state is per-wielder maps and self-cancelling tasks, so nothing is left in
- * the world to reap — {@link #onDisable} just cancels the live tasks and clears the state. Every magnitude
- * below is a PLACEHOLDER, flagged for Nyrrine's balance wave; the shape holds the Aleph rail (present, not OP
- * against prot-netherite).
+ * <p>The VFX are particles plus a handful of display entities (the monolith, the grasping hand, flung bones);
+ * every display carries {@link #CENSORED_TAG} and is removed both on its own runnable's completion and by
+ * {@link #onDisable}, which cancels the live tasks, sweeps any tagged display ({@link #sweepOrphans}), and
+ * clears the per-wielder state. Every magnitude below is a PLACEHOLDER, flagged for Nyrrine's balance wave;
+ * the shape holds the Aleph rail (present, not OP against prot-netherite).
  */
 public final class CensoredWeapon implements EgoWeapon {
 
@@ -201,32 +202,24 @@ public final class CensoredWeapon implements EgoWeapon {
 
     /**
      * How long the Feast <b>animation</b> runs: 30 seconds of sustained, choreographed torture. This is a
-     * PURELY COSMETIC clock — it drives {@link CensoredFeast} and nothing else. It is NOT the i-frame window
-     * and NOT the heal window; those are {@link #FEAST_PROTECT_MS} and {@link #HEAL_WINDOW_TICKS} below, and
-     * both are kept deliberately short and INDEPENDENT of this number so the show can be long without handing
-     * out 30 seconds of invulnerability or 30 seconds of healing. Do not re-couple them.
+     * PURELY COSMETIC clock — it drives {@link CensoredFeast} and nothing else. It is NOT a protection window:
+     * the Feast's protection is STEALTH (invisibility + hidden gear, see {@link #vanish}), spent the instant
+     * the wielder attacks or swaps off the weapon, NOT invulnerability. Healing is limited to the short
+     * {@link #HEAL_WINDOW_TICKS} window, kept INDEPENDENT of this number so a long show never means long
+     * healing. Do not tie either to the show length.
      */
     private static final int    SHOW_SECONDS       = 30;
     private static final int    SHOW_TICKS         = SHOW_SECONDS * 20;   // 600 ticks, the animation length only
 
     /**
-     * <b>⚠ THE PvP-RELEVANT NUMBER — FLAGGED FOR NYRRINE.</b> The Feast grants the wielder i-frames (incoming
-     * damage zeroed by {@link #onIncomingDamage}) for THIS long after the kill, to cover the teleport-in and
-     * the first beat of the show. It is deliberately SHORT and is <b>decoupled from {@link #SHOW_TICKS}</b>:
-     * the show is 30s, the invulnerability is ~2.5s. Never derive this from the show length. Default 2500ms.
-     */
-    private static final long   FEAST_PROTECT_MS   = 2_500L;
-
-    /**
-     * The wielder heals only during this SHORT opening window of the show, never across the full 30s. Kept as
-     * its own tunable (separate from {@link #FEAST_PROTECT_MS} per Nyrrine's rule) even though the default
-     * matches the protect window. At {@value #HEAL_EVERY}-tick cadence this is ~6 chunks of
-     * {@value #HEAL_CHUNK}, ~6 HP, plus {@value #BURST_FINAL_HEAL} at the finale — a bounded ~9 HP, not 75.
+     * The wielder heals only during this SHORT opening window of the show, never across the full 30s. At
+     * {@value #HEAL_EVERY}-tick cadence this is ~6 chunks of {@value #HEAL_CHUNK}, ~6 HP, plus
+     * {@value #BURST_FINAL_HEAL} at the finale — a bounded ~9 HP, not 75.
      */
     private static final int    HEAL_WINDOW_TICKS  = 50;      // ~2.5s of healing, then the machine just hurts
     private static final int    HEAL_EVERY         = 8;       // heal a chunk this often during the heal window
     private static final double HEAL_CHUNK         = 1.0;
-    private static final double BURST_FINAL_HEAL   = 3.0;     // the red-bar-burst payoff heal, once, at the end
+    private static final double BURST_FINAL_HEAL   = 3.0;     // the finale payoff heal, once, at the end
 
     /** The torture-machine beat: every this-many ticks the show cranks — a heavier crush, bones, a bar-slam. */
     private static final int    CRANK_PERIOD       = 60;      // a crush every 3s across the 30s
@@ -679,9 +672,9 @@ public final class CensoredWeapon implements EgoWeapon {
      * The 30s show: a sustained, choreographed torture over the corpse. A steady pour of blood and dread runs
      * throughout; every {@link #CRANK_PERIOD} the machine CRANKS — a heavier crush, a fling of bone, a
      * redaction-bar slam — so it reads as a rhythm, never one burst stretched thin. The wielder heals only in
-     * the opening {@link #HEAL_WINDOW_TICKS} window, then it just hurts. A black censor bar rides the corpse
-     * the whole time (the wielder's opening bar lasts only the first beat). At the end the red RECTANGLE
-     * engulfs and bursts, paying off a final heal and leaving the lingering cognition filter.
+     * the opening {@link #HEAL_WINDOW_TICKS} window, then it just hurts. A tall black redaction monolith rides
+     * the corpse the whole time (the wielder's opening bar lasts only the first beat). At the end the finale
+     * pays off a final heal and leaves the lingering cognition filter; the monolith is reaped in {@link #stop}.
      */
     private final class CensoredFeast extends BukkitRunnable {
         private final UUID ownerId;
@@ -762,9 +755,9 @@ public final class CensoredWeapon implements EgoWeapon {
     }
 
     /**
-     * The cognition filter the burst leaves behind: a red censored square hanging over the spot that bleeds
-     * everything living near it, on a pulse, for {@link #COGNITION_TICKS}. Credited to the wielder while they
-     * are online so the pierce lands; pure VFX if they have gone.
+     * The cognition filter the Feast's finale leaves behind: a red censored square of motes hanging over the
+     * spot that bleeds everything living near it, on a pulse, for {@link #COGNITION_TICKS}. Credited to the
+     * wielder while they are online so the pierce lands; pure VFX if they have gone.
      */
     private final class CognitionFilter extends BukkitRunnable {
         private final UUID ownerId;
