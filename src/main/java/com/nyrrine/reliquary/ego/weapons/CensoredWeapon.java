@@ -6,6 +6,7 @@ import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
 import com.nyrrine.reliquary.ego.SlashVfx;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
@@ -251,31 +252,14 @@ public final class CensoredWeapon implements EgoWeapon {
     private static final float  BONE_SCALE      = 0.5f;
 
     /**
-     * The red CENSORED redaction as a BlockDisplay. Per Nyrrine: a large RECTANGLE with censor-bar
-     * proportions (wide + tall + THIN), NOT the old square/cube. It stands up over the corpse at the finale,
-     * engulfs, holds, then shatters. Long in width, tall in height, wafer-thin in depth — a redaction bar.
+     * The black CENSORED box that stands over the corpse for the Feast (the redaction monolith). Per Nyrrine's
+     * live pass: SUPER TALL and WIDE — much bigger than the player, a standing redaction, not a flat slab.
+     * Placeholder starting point for her feel-tune. Its base sits on the ground; the feast particles wrap its
+     * full volume rather than pooling at its foot. (The old red finale rectangle has been removed.)
      */
-    private static final int    BAR_ENGULF      = 8;
-    private static final int    BAR_HOLD        = 16;
-    // Nyrrine's live pass: scale the box WAY up — a massive censored redaction. ~8x longer, ~3x taller than the
-    // first pass (was 4.6 x 1.6 x 0.4). Placeholder starting point for her feel-tune.
-    private static final double BAR_W           = 36.0;  // ~8x longer — a MASSIVE censored box
-    private static final double BAR_H           = 4.8;   // ~3x taller
-    private static final double BAR_TH          = 0.5;   // still thin: a bar, not a cube
-    private static final int    SHARD_COUNT     = 16;
-    private static final int    SHARD_LIFE      = 26;
-    private static final double SHARD_SPEED     = 0.6;
-    private static final double SHARD_GRAVITY   = 0.05;
-    private static final float  SHARD_SPIN      = 0.6f;
-    private static final float  SHARD_SCALE     = 0.35f;
-
-    /**
-     * The black CENSORED bars that coat BOTH bodies during the Feast (the L-click redaction motif she loves):
-     * a wide, thin, tall black redaction bar clamped over the wielder AND over the corpse for the whole show.
-     */
-    private static final double BODY_BAR_W      = 1.7;   // wide enough to cover the body
-    private static final double BODY_BAR_H      = 0.62;  // a bar's height
-    private static final double BODY_BAR_TH     = 1.7;
+    private static final double BODY_BAR_W      = 3.4;   // wide — well past the player's width
+    private static final double BODY_BAR_H      = 6.0;   // super tall — a monolith standing over the corpse
+    private static final double BODY_BAR_TH     = 3.4;
 
     /** Scoreboard tag on every display this weapon spawns — the belt-and-braces orphan-reap key. */
     private static final String CENSORED_TAG    = "reliquary_censored_vfx";
@@ -423,8 +407,7 @@ public final class CensoredWeapon implements EgoWeapon {
         if (!free) {
             Long ready = grappleReadyAt.get(id);
             if (ready != null && now < ready) {
-                player.sendActionBar(EgoHud.cooldown("CENSORED", ready - now, CENSOR_RED));
-                player.playSound(player.getLocation(), Sound.BLOCK_SCULK_SPREAD, 0.25f, 0.5f);
+                player.playSound(player.getLocation(), Sound.BLOCK_SCULK_SPREAD, 0.25f, 0.5f); // the HUD shows the cd
                 return;
             }
         }
@@ -525,8 +508,7 @@ public final class CensoredWeapon implements EgoWeapon {
         long now = System.currentTimeMillis();
         Long ready = armReadyAt.get(id);
         if (ready != null && now < ready) {
-            player.sendActionBar(EgoHud.cooldown("CENSORED", ready - now, CENSOR_RED));
-            player.playSound(player.getLocation(), Sound.BLOCK_SCULK_SPREAD, 0.25f, 0.5f);
+            player.playSound(player.getLocation(), Sound.BLOCK_SCULK_SPREAD, 0.25f, 0.5f); // the HUD shows the cd
             return;
         }
         armReadyAt.put(id, now + ARM_WHIFF_LOCKOUT_MS); // tiny lockout now; a catch upgrades it to the full CD
@@ -547,7 +529,7 @@ public final class CensoredWeapon implements EgoWeapon {
         UUID id = killer.getUniqueId();
         corpseUntil.put(id, System.currentTimeMillis() + PRIME_WINDOW_MS);
         corpseLoc.put(id, where.clone());
-        killer.sendActionBar(EgoHud.status("CENSORED", CENSOR_RED)); // a body waits — press to feed
+        // No lone action-bar cue — the always-on HUD reads "Feast — feed" while the corpse waits.
         killer.playSound(killer.getLocation(), Sound.ENTITY_WARDEN_HEARTBEAT, 0.5f, 0.5f);
     }
 
@@ -689,8 +671,9 @@ public final class CensoredWeapon implements EgoWeapon {
         CensoredFeast(UUID ownerId, Location body, Location wielderAt) {
             this.ownerId = ownerId;
             this.body = body;
-            this.corpseBar  = spawnCensorBar(body.clone().add(0, 1.0, 0));
-            this.wielderBar = spawnCensorBar(wielderAt.clone().add(0, 1.1, 0)); // both bodies, the kill moment
+            // Centre the tall box at half its height so its base sits on the ground and it stands over the body.
+            this.corpseBar  = spawnCensorBar(body.clone().add(0, BODY_BAR_H * 0.5, 0));
+            this.wielderBar = spawnCensorBar(wielderAt.clone().add(0, BODY_BAR_H * 0.5, 0)); // both bodies, kill moment
         }
 
         @Override
@@ -710,7 +693,7 @@ public final class CensoredWeapon implements EgoWeapon {
 
             if (ticks >= SHOW_TICKS) { finale(owner); stop(); return; }
 
-            gruesomeVfx(body);
+            wrapVfx(body, ticks);
             macabreSfx(body, ticks);
             if (ticks % BONE_EVERY == 0) flingBones(body, BONE_BURST);
             if (ticks < HEAL_WINDOW_TICKS && ticks % HEAL_EVERY == 0) heal(owner, HEAL_CHUNK);
@@ -732,10 +715,13 @@ public final class CensoredWeapon implements EgoWeapon {
             if (corpseBar != null && corpseBar.isValid()) barSlam(corpseBar);
         }
 
-        /** The finale: the red RECTANGLE engulfs and bursts over the corpse, then the filter is left behind. */
+        /**
+         * The finale: a last heavy beat and the payoff, then the lingering cognition filter. The old red
+         * finale rectangle has been removed (Nyrrine's live pass — it was not working); the tall black box is
+         * the show, and it is reaped in {@link #stop()} right after this.
+         */
         private void finale(Player owner) {
             World world = body.getWorld();
-            track(new CensoredBar(body.clone())).runTaskTimer(plugin, 0L, 1L); // the red redaction, wide + thin
             world.playSound(body, Sound.ENTITY_WITHER_SPAWN, 0.7f, 0.4f);
             world.playSound(body, Sound.ENTITY_ENDERMAN_SCREAM, 0.8f, 0.4f);
             heal(owner, BURST_FINAL_HEAL); // one payoff heal, once, at the very end
@@ -800,7 +786,37 @@ public final class CensoredWeapon implements EgoWeapon {
     @Override
     public boolean onTick(Player player, long tick) {
         if (!feastGear.containsKey(player.getUniqueId())) lookScan(player);
+        player.sendActionBar(hud(player.getUniqueId())); // one composed line every tick, never a lone flash
         return true;
+    }
+
+    // ---- HUD: one always-on composed line — every cooldown/status at once, no lone flashing ----------
+
+    /**
+     * The whole readout, built fresh every tick and handed to {@code sendActionBar}: the maw cadence, the
+     * grapple cooldown, the Feast state (a fresh corpse to feed on, or its silence), and the grasping arm's
+     * cooldown. No ability sends its own lone line anymore — they all read here, always, in the same order, so
+     * nothing ever flashes in over another. Long is fine; the house rule is one line, never a replacement.
+     */
+    private Component hud(UUID id) {
+        long now = System.currentTimeMillis();
+        Component maw   = cdOrReady("Maw", lastMaw.getOrDefault(id, 0L) + MAW_COOLDOWN_MS, now);
+        Component grap  = cdOrReady("Grapple", grappleReadyAt.getOrDefault(id, 0L), now);
+        Component feast = feastPart(id, now);
+        Component arm   = cdOrReady("Arm", armReadyAt.getOrDefault(id, 0L), now);
+        return EgoHud.row(maw, grap, feast, arm);
+    }
+
+    private Component cdOrReady(String name, long readyAt, long now) {
+        return now >= readyAt ? EgoHud.ready(name, CENSOR_RED) : EgoHud.cooldown(name, readyAt - now, REDACT);
+    }
+
+    /** The Feast slot: a fresh corpse waiting to be fed on takes priority; else the silence, else ready. */
+    private Component feastPart(UUID id, long now) {
+        if (feastReady(id) && freshCorpse(id) != null) return EgoHud.status("Feast — feed", CENSOR_RED);
+        Long ready = feastReadyAt.get(id);
+        return (ready != null && now < ready) ? EgoHud.cooldown("Feast", ready - now, REDACT)
+                                              : EgoHud.ready("Feast", CENSOR_RED);
     }
 
     /**
@@ -927,26 +943,38 @@ public final class CensoredWeapon implements EgoWeapon {
     }
 
     /**
-     * Per-tick gruesome show: a MUSHED CORPSE. Not a tidy pool but a wide, flattened gore splat spread low
-     * across the ground — viscera-dark red motes, flesh-red block-crack laid flat, wet chunks flicked off it,
-     * and a thin mist hanging over the mush. Reads like a mob crushed into a spreading smear.
+     * Per-tick feast show: particles that WRAP the tall black box — clinging to its outer faces up its full
+     * height, not pooled at its foot (Nyrrine's live pass dropped the ground splat). The box is a solid opaque
+     * monolith, so every mote is placed just OUTSIDE its faces where it reads against the black: a scatter
+     * clinging round it, a red swirl climbing on a rising ring, and the odd wet gobbet down a face. Counts are
+     * deliberately trimmed so the show stays light and clears fast rather than caking the air.
      */
-    private void gruesomeVfx(Location body) {
+    private void wrapVfx(Location body, int t) {
         World world = body.getWorld();
         ThreadLocalRandom rng = ThreadLocalRandom.current();
-        Location ground = body.clone().add(0, 0.08, 0);
-        // The splat: wide and FLAT (tiny Y spread), viscera over blood, with flesh-red crack laid across it.
-        world.spawnParticle(Particle.DUST, ground, 22, 1.6, 0.04, 1.6, 0, VISCERA_DUST);
-        world.spawnParticle(Particle.DUST, ground, 14, 1.4, 0.03, 1.4, 0, BLOOD_DUST);
-        world.spawnParticle(Particle.BLOCK, ground, 10, 1.3, 0.05, 1.3, 0, SPLAT_BLOCK);
-        // wet gobbets flicked up off the mush
-        if (rng.nextInt(2) == 0) {
-            world.spawnParticle(Particle.FALLING_DUST, body.clone().add(0, 0.5, 0), 8, 1.0, 0.2, 1.0, 0, SPLAT_BLOCK);
-            world.spawnParticle(Particle.ITEM, ground, 3, 0.9, 0.05, 0.9, 0.02, BONE_ITEM);
+        double h = BODY_BAR_H, rW = BODY_BAR_W * 0.5 + 0.25, rTh = BODY_BAR_TH * 0.5 + 0.25; // a shell just outside
+
+        // A scatter clinging round the box, anywhere up its full height — red over black.
+        for (int i = 0; i < 4; i++) {
+            double a = rng.nextDouble() * Math.PI * 2;
+            Location p = body.clone().add(Math.cos(a) * rW, rng.nextDouble() * h, Math.sin(a) * rTh);
+            world.spawnParticle(Particle.DUST, p, 1, 0.05, 0.05, 0.05, 0, rng.nextBoolean() ? BLOOD_DUST : VOID_DUST);
         }
-        // a low mist hanging over the smear, thinning upward
-        world.spawnParticle(Particle.DUST, body.clone().add(0, 0.3, 0), 8, 0.7, 0.25, 0.7, 0, BLOOD_DUST);
-        if (rng.nextInt(3) == 0) world.spawnParticle(Particle.DUST, ground, 8, 1.2, 0.04, 1.2, 0, CENSOR_DUST);
+        // The wrap: a red swirl climbing the box's faces on a rising, rotating ring.
+        double climb = (t % 40) / 40.0;                 // sweeps up the full height, repeating
+        double ang = t * 0.30;
+        for (int k = 0; k < 2; k++) {
+            double a = ang + k * Math.PI;
+            world.spawnParticle(Particle.DUST, body.clone().add(Math.cos(a) * rW, climb * h, Math.sin(a) * rTh),
+                    1, 0.03, 0.03, 0.03, 0, CENSOR_DUST);
+        }
+        // An occasional wet gobbet sliding down a face.
+        if (t % 6 == 0) {
+            double a = rng.nextDouble() * Math.PI * 2;
+            world.spawnParticle(Particle.FALLING_DUST,
+                    body.clone().add(Math.cos(a) * rW, rng.nextDouble() * h, Math.sin(a) * rTh),
+                    2, 0.05, 0.1, 0.05, 0, BLOOD_BLOCK);
+        }
     }
 
     /** The sound of the feed: WET and squelching, violently uncomfortable — slime/mud squish over an eat and a
@@ -1035,21 +1063,21 @@ public final class CensoredWeapon implements EgoWeapon {
             ticks++;
         }
 
-        /** The thick red-and-black lance drawn from the wielder to the current tip. */
+        /** The thick red-and-black lance drawn from the wielder to the current tip — sparse, so it clears fast. */
         private void lance(double cur) {
             World world = origin.getWorld();
-            for (double t = 0.4; t <= cur; t += 0.3) {
+            for (double t = 0.5; t <= cur; t += 0.5) {
                 Location p = origin.clone().add(dir.clone().multiply(t));
-                world.spawnParticle(Particle.DUST, p, 2, thick * 0.6, thick * 0.6, thick * 0.6, 0, MAW_VOID_DUST);
-                world.spawnParticle(Particle.DUST, p, 2, thick * 0.7, thick * 0.7, thick * 0.7, 0, MAW_RED_DUST);
+                world.spawnParticle(Particle.DUST, p, 1, thick * 0.6, thick * 0.6, thick * 0.6, 0, MAW_VOID_DUST);
+                world.spawnParticle(Particle.DUST, p, 1, thick * 0.7, thick * 0.7, thick * 0.7, 0, MAW_RED_DUST);
             }
         }
 
-        /** A dense thick knot of red and black at the lance's leading point. */
+        /** A thick knot of red and black at the lance's leading point. */
         private void knot(Location p) {
             World world = p.getWorld();
-            world.spawnParticle(Particle.DUST, p, 8, 0.18, 0.18, 0.18, 0, MAW_VOID_DUST);
-            world.spawnParticle(Particle.DUST, p, 8, 0.15, 0.15, 0.15, 0, MAW_RED_DUST);
+            world.spawnParticle(Particle.DUST, p, 4, 0.16, 0.16, 0.16, 0, MAW_VOID_DUST);
+            world.spawnParticle(Particle.DUST, p, 4, 0.14, 0.14, 0.14, 0, MAW_RED_DUST);
         }
 
         private void arrive() {
@@ -1100,7 +1128,7 @@ public final class CensoredWeapon implements EgoWeapon {
         /** One jaw: a thick red-and-black crescent above (or below) the bite point, tips dipping inward. */
         private void drawJaw(double yOff) {
             World world = at.getWorld();
-            int n = 7;
+            int n = 5;
             for (int i = 0; i <= n; i++) {
                 double s = (i / (double) n - 0.5) * 2.0;               // -1..1 across the jaw's width
                 double curve = -yOff * 0.5 * (1.0 - s * s);            // a shallow crescent toward the centre
@@ -1112,9 +1140,9 @@ public final class CensoredWeapon implements EgoWeapon {
 
         private void snap() {
             World world = at.getWorld();
-            world.spawnParticle(Particle.DUST, at, 24, 0.3, 0.3, 0.3, 0, MAW_VOID_DUST);
-            world.spawnParticle(Particle.DUST, at, 20, 0.25, 0.25, 0.25, 0, MAW_RED_DUST);
-            world.spawnParticle(Particle.BLOCK, at, 10, 0.25, 0.25, 0.25, 0, BLOOD_BLOCK);
+            world.spawnParticle(Particle.DUST, at, 12, 0.28, 0.28, 0.28, 0, MAW_VOID_DUST);
+            world.spawnParticle(Particle.DUST, at, 10, 0.24, 0.24, 0.24, 0, MAW_RED_DUST);
+            world.spawnParticle(Particle.BLOCK, at, 6, 0.22, 0.22, 0.22, 0, BLOOD_BLOCK);
             world.playSound(at, Sound.ENTITY_RAVAGER_ATTACK, 0.8f, 0.5f);
             activeTasks.remove(this);
             cancel();
@@ -1274,109 +1302,6 @@ public final class CensoredWeapon implements EgoWeapon {
         }
     }
 
-    /**
-     * The red CENSORED redaction as a BlockDisplay: a large RECTANGLE with censor-bar proportions (wide, tall,
-     * wafer-thin — NOT the old square/cube). It stands up over the corpse, engulfs it via the display's own
-     * interpolation, holds while the redaction reads, then BURSTS into flung shards and a cloud of red
-     * block-crack. Real geometry, not a particle quad.
-     */
-    private final class CensoredBar extends BukkitRunnable {
-        private final Location centre;
-        private final BlockDisplay bar;
-        private int ticks = 0;
-
-        CensoredBar(Location centre) {
-            this.centre = centre.clone().add(0, 1.0, 0);
-            float w = (float) BAR_W, h = (float) BAR_H, th = (float) BAR_TH;
-            this.bar = this.centre.getWorld().spawn(this.centre, BlockDisplay.class, d -> {
-                d.setBlock(SQUARE_BLOCK);                       // RED_CONCRETE — the redaction
-                d.setTransformation(new Transformation(        // start as a sliver...
-                        new Vector3f(-w / 2, -h / 2, -th / 2), new Quaternionf(),
-                        new Vector3f(0.02f, 0.02f, 0.02f), new Quaternionf()));
-                d.setBrightness(new Display.Brightness(13, 15));
-                d.setInterpolationDuration(BAR_ENGULF);
-                d.setInterpolationDelay(0);
-                d.setPersistent(false);
-                d.addScoreboardTag(CENSORED_TAG);
-            });
-            // ...then let the display interpolate up to the full wide, tall, thin bar: the engulf.
-            bar.setTransformation(new Transformation(
-                    new Vector3f(-w / 2, -h / 2, -th / 2), new Quaternionf(),
-                    new Vector3f(w, h, th), new Quaternionf()));
-        }
-
-        @Override
-        public void run() {
-            if (!bar.isValid()) { activeTasks.remove(this); cancel(); return; }
-            ticks++;
-            if (ticks >= BAR_ENGULF + BAR_HOLD) { burstBar(); return; }
-            if (ticks > BAR_ENGULF && ticks % 3 == 0) { // a held pulse along the bar's broad face
-                centre.getWorld().spawnParticle(Particle.DUST, centre,
-                        10, BAR_W * 0.5, BAR_H * 0.5, BAR_TH * 0.5 + 0.1, 0, CENSOR_DUST);
-            }
-        }
-
-        private void burstBar() {
-            World world = centre.getWorld();
-            world.spawnParticle(Particle.DUST, centre, 90, BAR_W * 0.5, BAR_H * 0.5, BAR_TH * 0.5, 0, CENSOR_DUST);
-            world.spawnParticle(Particle.BLOCK, centre, 70, BAR_W * 0.5, BAR_H * 0.5, BAR_TH * 0.5, 0, SQUARE_BLOCK);
-            world.playSound(centre, Sound.ENTITY_WITHER_BREAK_BLOCK, 0.8f, 0.5f);
-            for (int i = 0; i < SHARD_COUNT; i++) {
-                double a = (Math.PI * 2 * i) / SHARD_COUNT;
-                Vector v = new Vector(Math.cos(a) * SHARD_SPEED,
-                        0.3 + ThreadLocalRandom.current().nextDouble() * 0.3, Math.sin(a) * SHARD_SPEED);
-                track(new FlungShard(centre.clone(), v)).runTaskTimer(plugin, 1L, 1L);
-            }
-            if (bar.isValid()) bar.remove();
-            activeTasks.remove(this);
-            cancel();
-        }
-    }
-
-    /** A shard of the shattered bar: a small red BlockDisplay flung on a gravity arc, reaped on land/timeout. */
-    private final class FlungShard extends BukkitRunnable {
-        private final BlockDisplay shard;
-        private final Vector vel;
-        private int life = SHARD_LIFE;
-        private float angle = 0f;
-
-        FlungShard(Location from, Vector vel) {
-            this.vel = vel;
-            float s = SHARD_SCALE;
-            this.shard = from.getWorld().spawn(from, BlockDisplay.class, d -> {
-                d.setBlock(SQUARE_BLOCK);
-                d.setTransformation(new Transformation(
-                        new Vector3f(-s / 2, -s / 2, -s / 2), new Quaternionf(),
-                        new Vector3f(s, s, s), new Quaternionf()));
-                d.setBrightness(new Display.Brightness(13, 15));
-                d.setInterpolationDuration(1);
-                d.setInterpolationDelay(0);
-                d.setPersistent(false);
-                d.addScoreboardTag(CENSORED_TAG);
-            });
-        }
-
-        @Override
-        public void run() {
-            if (!shard.isValid() || --life < 0) { done(); return; }
-            vel.setY(vel.getY() - SHARD_GRAVITY);
-            Location next = shard.getLocation().add(vel);
-            if (next.getBlock().getType().isSolid()) { done(); return; }
-            shard.teleport(next);
-            angle += SHARD_SPIN;
-            float s = SHARD_SCALE;
-            shard.setTransformation(new Transformation(
-                    new Vector3f(-s / 2, -s / 2, -s / 2), new Quaternionf().rotateXYZ(angle, angle * 0.5f, angle * 0.7f),
-                    new Vector3f(s, s, s), new Quaternionf()));
-        }
-
-        private void done() {
-            if (shard.isValid()) shard.remove();
-            activeTasks.remove(this);
-            cancel();
-        }
-    }
-
     /** Belt-and-braces: reap any display carrying the CENSORED tag across all loaded worlds. */
     private void sweepOrphans() {
         for (World w : plugin.getServer().getWorlds()) {
@@ -1433,19 +1358,15 @@ public final class CensoredWeapon implements EgoWeapon {
     private static final Color BLOOD_RGB   = Color.fromRGB(0x8A, 0x03, 0x03); // pouring blood
     private static final Color CENSOR_RGB  = Color.fromRGB(0xCC, 0x00, 0x22); // the red square / redaction
     private static final Color VOID_RGB    = Color.fromRGB(0x0E, 0x08, 0x12); // the maw's dark tendril / grapple wall
-    private static final Color VISCERA_RGB = Color.fromRGB(0x5A, 0x0A, 0x08); // dark, browner red — the mushed corpse
     private static final Particle.DustOptions BLOOD_DUST    = new Particle.DustOptions(BLOOD_RGB, 1.1f);
     private static final Particle.DustOptions CENSOR_DUST   = new Particle.DustOptions(CENSOR_RGB, 1.3f);
     private static final Particle.DustOptions VOID_DUST     = new Particle.DustOptions(VOID_RGB, 1.2f);
-    private static final Particle.DustOptions VISCERA_DUST  = new Particle.DustOptions(VISCERA_RGB, 1.4f);
     /** The THICK red and black motes the pierce-maw is drawn in now (particles, not block jaws). */
     private static final Particle.DustOptions MAW_RED_DUST  = new Particle.DustOptions(CENSOR_RGB, MAW_DUST_SIZE);
     private static final Particle.DustOptions MAW_VOID_DUST = new Particle.DustOptions(VOID_RGB, MAW_VOID_SIZE);
-    /** Blocks for crack particles and the remaining displays: red for the box/shards, flesh-red for the splat,
-     *  near-black for the grasping hand and the body bars. */
+    /** Blocks for crack particles: red for the crank bar-slam, near-black for the hand and the body box. */
     private static final BlockData BLOOD_BLOCK  = Material.REDSTONE_BLOCK.createBlockData();
     private static final BlockData SQUARE_BLOCK = Material.RED_CONCRETE.createBlockData();
-    private static final BlockData SPLAT_BLOCK  = Material.RED_TERRACOTTA.createBlockData(); // the mushed corpse's flesh
     private static final BlockData JAW_BLOCK    = Material.BLACK_CONCRETE.createBlockData();
     private static final ItemStack BONE_ITEM = new ItemStack(Material.BONE);
     /** The blank the Feast sends to viewers for each of the wielder's equipment slots, hiding the gear. */
