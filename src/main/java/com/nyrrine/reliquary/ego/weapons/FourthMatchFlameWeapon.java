@@ -8,6 +8,7 @@ import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import com.nyrrine.reliquary.ego.SlashVfx;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
@@ -85,6 +86,9 @@ public final class FourthMatchFlameWeapon implements EgoWeapon {
     /** Wielder -> epoch-millis of their last shot; gates the cooldown. Cleared on quit. */
     private final Map<UUID, Long> lastShot = new HashMap<>();
 
+    /** Wielder -> epoch-millis of their last Kindling Strike; gates the short M1 internal cd. Cleared on quit. */
+    private final Map<UUID, Long> lastKindling = new HashMap<>();
+
     /**
      * Every thrown-block flight currently in the air. Each entry removes its own BlockDisplay + cancels
      * its task on normal timeout/impact and deregisters here; on plugin disable / reload, {@link #onDisable}
@@ -95,16 +99,26 @@ public final class FourthMatchFlameWeapon implements EgoWeapon {
     // Tuning — a slow, heavy silver cannon-shotgun.
     private static final double RANGE          = 14.0;   // long-enough reach for a cannon
     private static final double HALF_ANGLE_DEG = 34.0;   // ~68 deg total — a wide, chaotic shotgun cone
-    private static final double DAMAGE_NEAR    = 15.0;   // point-blank wallop (7.5 hearts)
-    private static final double DAMAGE_FAR     =  7.0;   // still bites at max range (3.5 hearts)
+    private static final double DAMAGE_NEAR    = 18.0;   // point-blank wallop (PLACEHOLDER, was 15)
+    private static final double DAMAGE_FAR     =  9.0;   // still bites at max range (PLACEHOLDER, was 7)
     private static final double MOLTEN_BONUS   =  4.0;   // extra fire damage on the magma alt-fire
     private static final int    FIRE_TICKS     = 120;    // ~6s ablaze
     private static final int    MOLTEN_TICKS   = 200;    // ~10s ablaze on the molten blast
     private static final int    MAX_TARGETS    = 12;     // cap the cone scan
-    private static final long   COOLDOWN_MS    = 8000L;  // long reload — one heavy shot at a time
+    private static final long   COOLDOWN_MS    = 5000L;  // long reload, one heavy shot at a time (PLACEHOLDER, was 8000)
 
     private static final int    RAYS           = 16;     // fire projectiles fanned across the cone
     private static final double  RECOIL         = 0.55;   // self-knockback kick (screen-shake substitute)
+
+    // [Left Click] Kindling Strike — a fast fire jab that complements the heavy right-click cone. A short
+    // SlashVfx crescent that ignites and lightly damages the bodies directly in front, on a short internal
+    // cooldown so it stays spammable without the cannon's long reload. All magnitudes PLACEHOLDER.
+    private static final long   KINDLING_CD_MS       = 1_000L;  // short internal gate — spammable
+    private static final double KINDLING_DAMAGE      = 4.5;     // a modest jab (PLACEHOLDER)
+    private static final double KINDLING_RANGE       = 3.5;     // a melee-reach jab, not the cannon's 14
+    private static final double KINDLING_HALF_ANGLE  = 40.0;    // a narrow forward arc, not the wide cone
+    private static final int    KINDLING_FIRE_TICKS  = 60;      // ~3s ablaze (short vs the cone's 6s)
+    private static final int    KINDLING_MAX_TARGETS = 3;       // a jab, not a crowd-clearer
 
     // Fifth Match (a vanilla enchant — a FLINT_AND_STEEL holds Fire Aspect at an anvil, so this needs no
     // catalogue entry): the fourth match's fire clings a second longer per Fire Aspect level, up to +3s at
@@ -149,6 +163,72 @@ public final class FourthMatchFlameWeapon implements EgoWeapon {
     @Override
     public String id() {
         return "fourth_match_flame";
+    }
+
+    // ---- [Left Click] Kindling Strike ---------------------------------------------
+
+    /**
+     * Left-click: Kindling Strike. A fast fire jab that complements the heavy right-click cone — a short
+     * SlashVfx crescent that ignites and lightly damages the bodies directly in front of the wielder,
+     * gated by a short internal cooldown so it stays spammable without touching the cannon's long reload.
+     * Silent while still on that internal gate; the action bar keeps showing the cone's reload state.
+     */
+    @Override
+    public void onSwing(Player player) {
+        if (!matches(player.getInventory().getItemInMainHand())) return;
+        UUID id = player.getUniqueId();
+        long now = System.currentTimeMillis();
+        Long last = lastKindling.get(id);
+        if (last != null && now - last < KINDLING_CD_MS) return; // jabbing too fast — let it catch
+        lastKindling.put(id, now);
+        kindlingStrike(player);
+        EgoDurability.wearMainHand(player); // a jab is light wear, like one aimed shot
+    }
+
+    /**
+     * The jab: a quick fire crescent, then scald the narrow forward arc within reach. The left-click may have
+     * already landed the vanilla flint-and-steel tap and stamped hurt-immunity, so each struck body's i-frames
+     * are cleared first — the jab itself always registers on top of the tap.
+     */
+    private void kindlingStrike(Player player) {
+        World world = player.getWorld();
+        Location eye = player.getEyeLocation();
+        Vector dir = eye.getDirection().normalize();
+
+        // The actual attack animation: a short, fast fire crescent, ember-orange fading to a bright flare.
+        SlashVfx.slash(plugin, eye, dir)
+                .arcSpan(95).reach(KINDLING_RANGE * 0.9)
+                .colours(SPARK, FLARE)
+                .thickness(1.1f).duration(3).tilt(20)
+                .play();
+
+        world.playSound(eye, Sound.ITEM_FLINTANDSTEEL_USE, 0.9f, 1.4f);
+        world.playSound(eye, Sound.ENTITY_BLAZE_SHOOT, 0.5f, 1.6f);
+        world.spawnParticle(Particle.FLAME, eye.clone().add(dir.clone().multiply(1.3)), 8, 0.15, 0.15, 0.15, 0.02);
+        world.spawnParticle(Particle.SMALL_FLAME, eye.clone().add(dir.clone().multiply(1.7)), 10, 0.2, 0.2, 0.2, 0.01);
+
+        double cosLimit = Math.cos(Math.toRadians(KINDLING_HALF_ANGLE));
+        UUID selfId = player.getUniqueId();
+        int hit = 0;
+        for (var entity : player.getNearbyEntities(KINDLING_RANGE, KINDLING_RANGE, KINDLING_RANGE)) {
+            if (entity.getUniqueId().equals(selfId)) continue;      // never the wielder
+            if (!(entity instanceof LivingEntity target)) continue;
+
+            Vector to = target.getLocation().add(0, 1, 0).toVector().subtract(eye.toVector());
+            double dist = to.length();
+            if (dist < 1.0e-4 || dist > KINDLING_RANGE) continue;
+            if (to.multiply(1.0 / dist).dot(dir) < cosLimit) continue;
+
+            target.setNoDamageTicks(0);                            // clear the tap's i-frames so the jab lands
+            target.damage(KINDLING_DAMAGE, player);
+            if (target.getFireTicks() < KINDLING_FIRE_TICKS) target.setFireTicks(KINDLING_FIRE_TICKS);
+
+            Location body = target.getLocation().add(0, 1, 0);
+            world.spawnParticle(Particle.FLAME, body, 8, 0.25, 0.35, 0.25, 0.02);
+            world.spawnParticle(Particle.SMALL_FLAME, body, 6, 0.25, 0.35, 0.25, 0.01);
+
+            if (++hit >= KINDLING_MAX_TARGETS) break;
+        }
     }
 
     // ---- fire the cannon ----------------------------------------------------------
@@ -555,14 +635,19 @@ public final class FourthMatchFlameWeapon implements EgoWeapon {
                     "the first flame."
             ),
             List.of(
+                    new EgoLore.Ability("[Left Click] Kindling Strike",
+                            "A fast fire jab in front of you: a",
+                            "few damage, sets the target ablaze,",
+                            "and comes back almost at once. Feeds",
+                            "the flame between cannon shots."),
                     new EgoLore.Ability("[Right Click] Flame Cone",
                             "Fire the cannon: a wide cone of flame",
                             "out to 14 blocks, and a hard recoil",
                             "kick. Everything caught in it is set",
-                            "ablaze for 6 seconds and takes 15",
-                            "damage point-blank, falling to 7 at",
+                            "ablaze for 6 seconds and takes 18",
+                            "damage point-blank, falling to 9 at",
                             "the edge of the range. Hits up to 12",
-                            "bodies. 8 second reload."),
+                            "bodies. 5 second reload."),
                     new EgoLore.Ability("[Shift + Right-click] Molten Blast",
                             "Burns one Magma Block to fire a lava",
                             "blast alongside the flame cone: 4",
@@ -576,6 +661,7 @@ public final class FourthMatchFlameWeapon implements EgoWeapon {
     @Override
     public void onQuit(UUID id) {
         lastShot.remove(id);
+        lastKindling.remove(id);
     }
 
     @Override

@@ -88,7 +88,7 @@ public final class RegretWeapon implements EgoWeapon {
     //
     // It does not touch the ceiling: DMG_MAX is unchanged, and the charge RESETS on every hit, so the
     // sustained rate stays capped by the reset, not by the clock. See the DPS note on onHit.
-    private static final long   CHARGE_MS = 2_500L; // empty -> full recharge time while held (~2.5s)
+    private static final long   CHARGE_MS = 1_700L; // empty -> full recharge time while held (~1.7s, PLACEHOLDER)
     private static final double DMG_FLOOR = 3.0;    // damage at empty charge — a limp tap
     private static final double DMG_MAX   = 12.5;   // damage at full charge — deliberately over the band
     // Hair Trigger (ego-enchant): shaves the charge time only — the DMG ceiling is untouched, so it raises

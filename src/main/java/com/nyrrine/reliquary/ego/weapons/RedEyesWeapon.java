@@ -113,13 +113,13 @@ public final class RedEyesWeapon implements EgoWeapon {
     private static final double HEAL_RAMP_STEP     = 0.05; // +5% per non-healing strike
     private static final double HEAL_AMOUNT        = 2.0;  // ~1 heart mended on a proc
 
-    private static final long   SLAM_COOLDOWN_MS   = 180_000L; // 3 minutes
+    private static final long   SLAM_COOLDOWN_MS   = 15_000L;  // 15s (PLACEHOLDER — was 3 minutes)
     private static final long   FALL_GRACE_MS      = 4_000L;   // waived fall damage across the leap arc
     private static final long   SLAM_AIR_TIMEOUT_MS = 5_000L;  // safety: resolve the slam even if a landing is never seen
     private static final double LEAP_UP            = 0.95;     // the upward heave of the jump
     private static final double SLAM_RADIUS        = 4.5;      // AoE reach on landing
     private static final int    SLAM_MAX_TARGETS   = 10;       // cap the AoE scan for TPS
-    private static final double SLAM_DAMAGE        = 9.0;      // AoE damage (fenced against re-entry; i-frames cleared so it lands)
+    private static final double SLAM_DAMAGE        = 13.0;     // AoE damage (PLACEHOLDER, was 9.0; fenced against re-entry; i-frames cleared so it lands)
     private static final int    SLAM_STRENGTH_TICKS = 60;      // 3s of Strength I on a landed slam — sets up the follow-up melee
 
     public RedEyesWeapon(Reliquary plugin) {

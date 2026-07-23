@@ -134,14 +134,14 @@ public final class HarmonyWeapon implements EgoWeapon {
 
     // ---- tuning: Note --------------------------------------------------------------
 
-    private static final double NOTE_DAMAGE       = 6.0;    // the bare beam, no stacks, no stance
-    private static final long   NOTE_COOLDOWN_MS  = 7000L;  // "refreshes every 7 seconds"
+    private static final double NOTE_DAMAGE       = 7.5;    // the bare beam, no stacks, no stance (PLACEHOLDER)
+    private static final long   NOTE_COOLDOWN_MS  = 4500L;  // refresh gate (PLACEHOLDER — was 7000)
     /**
      * The Note's refresh <b>while Obsession burns</b>. The machine, run on blood, plays 75% more often;
      * the shot itself is untouched, so the per-instance balance band is exactly where it was. See the
      * class Balance note for the sustained figures this buys.
      */
-    private static final long   NOTE_COOLDOWN_OBSESSED_MS = 4000L;
+    private static final long   NOTE_COOLDOWN_OBSESSED_MS = 2500L;
 
     // Tempo (a vanilla enchant — Harmony's crossbow base holds Quick Charge at an anvil, so this needs no
     // catalogue entry): a machine kept in tempo refreshes the Note faster, cutting the recharge 15% per level,

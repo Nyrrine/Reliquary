@@ -132,7 +132,7 @@ public final class SwordOfTearsWeapon implements EgoWeapon {
     private static final int    SWIFT_RETURN_CAP       = 3;
     private static final double STAB_DAMAGE        = 2.0;    // one rapier's puncture — Double Tag and duel stab alike
     private static final double IMPALE_DAMAGE      = 5.5;    // per committed blade on the Converging Impale
-    private static final long   IMPALE_COOLDOWN_MS = 45000L; // the formation-wide commit gate (the old 45s, re-homed)
+    private static final long   IMPALE_COOLDOWN_MS = 25000L; // the formation-wide commit gate (PLACEHOLDER, was 45s)
 
     // Converging Grief (a custom enchant — id "converging_grief"): grief gathers sooner. Cuts the Converging
     // Impale gate by 12% per level, up to 36% at level 3 (~28.8s). Utility only — never a blade's damage or

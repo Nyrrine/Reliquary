@@ -125,10 +125,10 @@ public final class DiscordWeapon implements EgoWeapon {
 
     // ---- The Devil's Pendant tuning (left-click) ----------------------------------
 
-    /** The beam rests this long between shots. */
-    private static final long PENDANT_CD_MS = 4_000L;
-    /** A small laser, not a cannon: a touch over a third of the falchion's own swing. */
-    private static final double PENDANT_DAMAGE = 3.0;
+    /** The beam rests this long between shots (PLACEHOLDER — was 4000). */
+    private static final long PENDANT_CD_MS = 2_500L;
+    /** A small laser, not a cannon: a touch over a third of the falchion's own swing (PLACEHOLDER — was 3.0). */
+    private static final double PENDANT_DAMAGE = 4.5;
     /** Blocks of travel per tick. The beam runs on a 1-tick timer. */
     private static final double PENDANT_SPEED = 1.6;
     /** Bounce cap. "Ricochets off every wall for a bit" — a beam that bounces forever is a real perf hazard. */

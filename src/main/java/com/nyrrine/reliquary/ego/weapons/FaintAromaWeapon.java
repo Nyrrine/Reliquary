@@ -173,8 +173,13 @@ public final class FaintAromaWeapon implements EgoWeapon {
 
     /** The Full Bloom cooldown for the bird held right now: the base rest cut by its Quicker Scent bonus. */
     private long fullBloomCooldownMs(Player player) {
+        return fullBloomCooldownMs(player.getInventory().getItemInMainHand());
+    }
+
+    /** As above, for a specific stack — used by the Duet path, where Faint Aroma is carried in the OFF hand. */
+    private long fullBloomCooldownMs(ItemStack faintAroma) {
         int qc = Math.min(QUICKER_SCENT_CAP,
-                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.QUICK_CHARGE));
+                faintAroma == null ? 0 : faintAroma.getEnchantmentLevel(Enchantment.QUICK_CHARGE));
         return (long) (FULL_BLOOM_COOLDOWN_MS * (1.0 - QUICKER_SCENT_PER_LEVEL * qc));
     }
 
@@ -216,15 +221,16 @@ public final class FaintAromaWeapon implements EgoWeapon {
     // ---- [Left Click] Blossoming Fragrance -----------------------------------------
 
     /**
-     * The spec's cadence: one lavender arrow every 1.5 seconds.
+     * The cadence: one lavender arrow every ~0.9 seconds (PLACEHOLDER — Nyrrine's live tune; was 1.5s,
+     * tightened to cut the downtime between clicks).
      *
      * <p>Checked <b>before</b> the shot, against a {@link Bloom#lastBlossom} that starts at {@code 0} — so
      * this is a floor on the gap <em>between</em> arrows and never a wait in front of the first one. See
      * the class docs.
      */
-    private static final long BLOSSOM_CADENCE_MS = 1_500L;
+    private static final long BLOSSOM_CADENCE_MS = 900L;
 
-    /** Per arrow, before petals. Modest on purpose — at a 1.5s cadence this is a steady poke, not burst. */
+    /** Per arrow, before petals. Modest on purpose — at this cadence this is a steady poke, not burst. */
     private static final double BLOSSOM_DAMAGE = 6.0;
 
     /** Blocks/tick. Fast enough to read as instant in a fight, slow enough that Full Bloom can beat it. */
@@ -619,6 +625,62 @@ public final class FaintAromaWeapon implements EgoWeapon {
         world.playSound(eye, Sound.BLOCK_BEACON_POWER_SELECT, 0.8f, 1.3f);
         world.spawnParticle(Particle.DUST_COLOR_TRANSITION, eye, 14, 0.3, 0.3, 0.3, 0, BLOOM_FADE, FORCE_PARTICLES);
         player.sendActionBar(EgoHud.status("Magnificent End", CYAN));
+    }
+
+    // ---- Duet (dual-wield: Solitude main hand + Faint Aroma off hand) -----------------
+    // Only the main-hand weapon ticks, so Solitude drives the merged tick + HUD and calls these hooks; each
+    // stays fully functional solo. Solitude fetches this instance from the registry (plugin.weapons()). See
+    // SolitudeWeapon for the input mapping — a loaded RC opens Full Bloom, each Bang feeds the scent.
+
+    /** A Solitude Bang landing while Faint Aroma is off-hand chips the body a little on top of the round. */
+    private static final double DUET_CHIP_DAMAGE = 1.5; // PLACEHOLDER — gunfire feeds the bloom, a light chip
+
+    /**
+     * The Duet feed: a Solitude Bang that lands while this weapon is carried off-hand grows the aroma charge
+     * (so bullets build toward the same Weakness the ninth arrow would carry), drops a lingering blossom at
+     * the hit, and chips the body. Petals are deliberately NOT grown here — those still come only from real
+     * arrows; bullets feed the scent, blooms feed the petals.
+     */
+    public void duetBang(Player wielder, LivingEntity victim, Location hit) {
+        if (victim == null || victim.isDead() || !victim.isValid()) return;
+        feedAroma(wielder, victim);            // the ninth bullet-or-arrow catches, the same wielder-keyed meter
+        flowerBurst(hit);                      // the lingering blossom at the hit
+        // A small chip, fenced through the manager so it is never handed back to Solitude's onHit (which would
+        // cancel it — Solitude cancels every non-bullet hit) and never re-enters this weapon's own onHit.
+        plugin.weapons().pierceDamage(victim, DUET_CHIP_DAMAGE, 0.0, wielder);
+    }
+
+    /** Duet: open Full Bloom from the partner (Solitude's loaded RC). Fires the burst from the OFF hand. */
+    public void duetFullBloom(Player wielder) {
+        Bloom bloom = blooms.computeIfAbsent(wielder.getUniqueId(), k -> new Bloom());
+        long now = System.currentTimeMillis();
+        if (now < bloom.fullBloomCd) {
+            wielder.playSound(wielder.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 0.4f, 1.7f);
+            return;
+        }
+        bloom.fullBloomCd = now + fullBloomCooldownMs(wielder.getInventory().getItemInOffHand());
+        for (int i = 0; i < FULL_BLOOM_ARROWS; i++) {
+            scheduleDuetBloomArrow(wielder, i * FULL_BLOOM_GAP_TICKS);
+        }
+    }
+
+    /** Like {@link #scheduleBloomArrow} but the delayed shots re-check the OFF hand — Faint Aroma sits there. */
+    private void scheduleDuetBloomArrow(Player player, long delayTicks) {
+        if (delayTicks <= 0L) { looseBloomArrow(player); return; }
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (player.isOnline() && matches(player.getInventory().getItemInOffHand())) {
+                looseBloomArrow(player);
+            }
+        }, delayTicks);
+    }
+
+    /**
+     * Duet: this weapon's petal + aroma (+ Full Bloom rest) readout, for Solitude to fold into its own
+     * always-on action-bar line. The same pieces {@link #renderBar} composes, without its leading bar.
+     */
+    public Component duetReadout(Player wielder) {
+        Bloom bloom = blooms.computeIfAbsent(wielder.getUniqueId(), k -> new Bloom());
+        return EgoHud.row(petalReadout(wielder, bloom), aromaReadout(bloom), fullBloomReadout(bloom));
     }
 
     // ---- [Passive] Unwithering Flower ------------------------------------------------

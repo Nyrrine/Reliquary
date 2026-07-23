@@ -149,6 +149,28 @@ public final class SolitudeWeapon implements EgoWeapon {
         return "solitude";
     }
 
+    // ---- Duet (dual-wield with Faint Aroma in the off hand) ---------------------------
+    // When Faint Aroma is carried off-hand, the revolver and the crossbow play together: each Bang feeds
+    // the scent + chips through Faint Aroma, and Solitude's otherwise-dead loaded right-click opens Faint
+    // Aroma's Full Bloom. Only the main-hand weapon ticks, so Solitude drives the merged HUD. Both stay
+    // fully functional solo — every Duet path is gated on the off-hand partner being present.
+
+    /** The Duet partner, fetched lazily from the registry the first time it is needed. */
+    private FaintAromaWeapon partner;
+
+    private FaintAromaWeapon partner() {
+        if (partner == null && plugin.weapons().get("faint_aroma") instanceof FaintAromaWeapon fa) {
+            partner = fa;
+        }
+        return partner;
+    }
+
+    /** True when Faint Aroma is in the off hand — the Duet condition. */
+    private boolean duetActive(Player player) {
+        FaintAromaWeapon fa = partner();
+        return fa != null && fa.matches(player.getInventory().getItemInOffHand());
+    }
+
     /**
      * A wielder's cylinder. Every timer here is an absolute wall-clock stamp rather than a countdown, so
      * a reload and the ability cooldown both resolve on their own while the gun is stowed and this weapon
@@ -226,7 +248,14 @@ public final class SolitudeWeapon implements EgoWeapon {
         // at all, by design. It is what the gun does when it has nothing left to say.
         if (cyl.burst != null) return;                       // never stack a second burst
         if (cyl.reloading()) { dryClick(player); return; }
-        if (cyl.rounds > 0) { dryClick(player); return; }    // the gate: rounds left, no story
+        if (cyl.rounds > 0) {                                // rounds left — no story
+            // Duet: the loaded right-click is otherwise a dead no-op, so with Faint Aroma off-hand it opens
+            // Faint Aroma's Full Bloom — petals loosed alongside a loaded revolver. A DRY cylinder still
+            // tells Stories, exactly as it does solo.
+            if (duetActive(player)) { partner().duetFullBloom(player); renderBar(player, cyl); return; }
+            dryClick(player);
+            return;
+        }
         if (now < cyl.storiesReady) {
             dryClick(player);
             player.sendActionBar(EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT));
@@ -339,6 +368,9 @@ public final class SolitudeWeapon implements EgoWeapon {
                     ? EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT)
                     : EgoHud.ready(STORIES, PRIMARY));
         }
+        // Duet: fold Faint Aroma's petal + aroma readout onto the same always-on line, so the merged HUD
+        // reflects both weapons at once (Faint Aroma does not tick from the off hand — Solitude paints it).
+        if (duetActive(player)) bar = EgoHud.row(bar, partner().duetReadout(player));
         player.sendActionBar(bar);
     }
 
@@ -392,6 +424,9 @@ public final class SolitudeWeapon implements EgoWeapon {
             }
             le.setVelocity(velocity);   // a void in the soul, not a wound — it never shoves them
             voidBloom(world, end);
+            // Duet: an AIMED Bang landing while Faint Aroma is off-hand feeds the scent and chips the body —
+            // gunfire building the bloom. The hurried Stories rounds (aimed == false) do not feed it.
+            if (aimed && duetActive(player)) partner().duetBang(player, le, end);
         } else {
             end = eye.clone().add(dir.clone().multiply(maxDist));
         }
