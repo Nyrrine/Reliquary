@@ -52,8 +52,9 @@ public final class CarmenBrainVfx {
     private static final float  HITBOX_SIZE     = 1.0f;
     private static final int    PUNCH_TO_COLLECT = 4;    // hits to knock the Brain loose and drop the item
 
-    private static final Color GREEN      = Color.fromRGB(0x5B, 0xE8, 0x7A);
-    private static final Color GREEN_SOFT = Color.fromRGB(0x8F, 0xF0, 0xA8);
+    /** The Carmen's Brain green palette — shared with the extraction show ({@link WellDisplay}). */
+    public static final Color GREEN      = Color.fromRGB(0x5B, 0xE8, 0x7A);
+    public static final Color GREEN_SOFT = Color.fromRGB(0x8F, 0xF0, 0xA8);
     private static final Particle.DustOptions AMBIENT_DUST = new Particle.DustOptions(GREEN_SOFT, 0.7f);
 
     private final Reliquary plugin;
@@ -144,10 +145,34 @@ public final class CarmenBrainVfx {
         return true;
     }
 
-    /** The deploy location of the Brain whose hitbox is {@code interaction}, or null — for routing right-clicks. */
+    /** The floating hover centre of the Brain whose hitbox is {@code interaction}, or null — for routing right-clicks. */
     public Location locationOf(Entity interaction) {
         Node node = byInteraction.get(interaction.getUniqueId());
-        return node != null ? node.well.clone() : null;
+        return node != null ? node.brainAt.clone() : null;
+    }
+
+    /** The floating hover centre a Brain deployed at block-corner {@code well} bobs around. */
+    public static Location brainCentre(Location well) {
+        return well.clone().add(0.5, HOVER, 0.5);
+    }
+
+    /**
+     * The floating hover centre of the nearest deployed Carmen's Brain to {@code from} in the same world and
+     * within {@code range} blocks (measured to the hover centre), or {@code null} if none is in reach. Reads the
+     * authoritative deployed set from {@link Stations#wells()} so it works even before the idle show has grown.
+     */
+    public Location nearestWell(Location from, double range) {
+        if (from == null || from.getWorld() == null) return null;
+        World world = from.getWorld();
+        double best = range * range;
+        Location nearest = null;
+        for (Location well : stations.wells()) {
+            if (well.getWorld() != world) continue;
+            Location centre = brainCentre(well);
+            double d2 = centre.distanceSquared(from);
+            if (d2 <= best) { best = d2; nearest = centre; }
+        }
+        return nearest;
     }
 
     private void collect(Node node) {

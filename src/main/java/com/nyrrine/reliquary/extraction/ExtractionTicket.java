@@ -17,11 +17,11 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * An <b>Extraction Ticket</b> — an admin / event item (a PDC-tagged Paper) that can be poured straight at the
- * Pocket Well <i>without</i> brewing a cogito. It carries one or more grade "pools" (ZAYIN…ALEPH); pouring it
- * spins the Well carousel and extracts a random weapon from the union of those pools. Pools are chained onto
- * a ticket with {@code /cogito ticket add <grade>}, so a single ticket can span any range you like — handy for
- * previewing the Well animation and for event giveaways.
+ * An <b>Extraction Ticket</b> — an admin / event item (a PDC-tagged Paper) held near a deployed Carmen's Brain
+ * to draw a weapon out <i>without</i> brewing a cogito. It carries one or more grade "pools" (ZAYIN…ALEPH); a
+ * sneak right-click extracts a random weapon from the union of those pools. Pools are chained onto a ticket with
+ * {@code /cogito ticket add <grade>}, so a single ticket can span any range you like, handy for previewing the
+ * extraction show and for event giveaways.
  */
 public final class ExtractionTicket {
 
@@ -98,13 +98,13 @@ public final class ExtractionTicket {
         meta.displayName(Component.text("Extraction Ticket").color(NAME)
                 .decoration(TextDecoration.ITALIC, false).decoration(TextDecoration.BOLD, true));
         List<Component> lore = new ArrayList<>();
-        lore.add(Component.text("Pour it at the Well — no cogito needed.", FAINT)
+        lore.add(Component.text("Hold it near Carmen's Brain to draw out a weapon.", FAINT)
                 .decoration(TextDecoration.ITALIC, true));
         lore.add(Component.text(pools.isEmpty()
-                        ? "Pools: none — /cogito ticket add <grade>"
+                        ? "Pools: none (add with /cogito ticket add <grade>)"
                         : "Pools: " + String.join(", ", pools), NamedTextColor.AQUA)
                 .decoration(TextDecoration.ITALIC, false));
-        lore.add(Component.text("Right-click Well: preview · Sneak: pull (consumes ticket)", FAINT)
+        lore.add(Component.text("Right-click nearby: preview. Sneak right-click: extract (spends the ticket).", FAINT)
                 .decoration(TextDecoration.ITALIC, true));
         meta.lore(lore);
         meta.setEnchantmentGlintOverride(true);

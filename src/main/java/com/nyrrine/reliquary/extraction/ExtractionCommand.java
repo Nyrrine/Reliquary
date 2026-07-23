@@ -20,8 +20,9 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * The {@code /cogito} command — now just the ticket + gacha Carmen's Brain and a cosmetic dispenser. The brewing
  * minigame (Font/Alembic/Censer/Centrifuge/Manifold/Crucible chemistry) has been removed; getting an E.G.O
- * weapon is: hold an Extraction Ticket, right-click a placed Carmen's Brain, sneak-click to pull a random weapon
- * from the ticket's grade pools. (The actual weapon-give for the testbed stays on {@code /reliquary}.)
+ * weapon is: hold an Extraction Ticket near a deployed Carmen's Brain, right-click anywhere to preview the pool
+ * as a floating show, sneak right-click to pull a random weapon from the ticket's grade pools. (The actual
+ * weapon-give for the testbed stays on {@code /reliquary}.)
  *
  * <p>Reached via {@code /cogito <sub> ...} (aliases {@code /ext}, {@code /co}) or {@code /reliquary ext ...}.
  */
@@ -77,8 +78,8 @@ public final class ExtractionCommand {
         player.sendMessage(msg("Cogito extraction:", GREEN));
         player.sendMessage(msg("• /cogito ticket [grades…] — get an Extraction Ticket; add pools with "
                 + "/cogito ticket add <grade>.", FAINT));
-        player.sendMessage(msg("• Right-click a placed Carmen's Brain with the ticket to preview, sneak-click to "
-                + "pull a random weapon.", FAINT));
+        player.sendMessage(msg("• Hold the ticket near a Carmen's Brain and right-click to preview, sneak "
+                + "right-click to pull a random weapon.", FAINT));
         player.sendMessage(msg("• /cogito give <item> or /cogito giveall — the cosmetic items.", FAINT));
     }
 
@@ -166,20 +167,20 @@ public final class ExtractionCommand {
         }
         giveOrDrop(player, t);
         player.sendMessage(msg("Gave an Extraction Ticket. Chain pools with /cogito ticket add <grade>, then "
-                + "right-click Carmen's Brain to preview (sneak = pull).", GREEN));
+                + "hold it near a Carmen's Brain to preview (sneak = pull).", GREEN));
     }
 
     // ---- the Well ------------------------------------------------------------------
 
-    /** Right-click a placed Carmen's Brain: it only takes an Extraction Ticket now. */
-    public void stationWell(Player player, Location wellLoc, boolean sneaking) {
+    /** Hold an Extraction Ticket near a Carmen's Brain: preview, or (sneaking) pull. Only takes a ticket now. */
+    public void stationWell(Player player, Location brainCentre, boolean sneaking) {
         ItemStack held = player.getInventory().getItemInMainHand();
-        if (ExtractionTicket.matches(held)) { ticketWell(player, wellLoc, sneaking, held); return; }
-        player.sendMessage(msg("The Carmen's Brain takes an Extraction Ticket — hold one and right-click.", GREY));
+        if (ExtractionTicket.matches(held)) { ticketWell(player, brainCentre, sneaking, held); return; }
+        player.sendMessage(msg("Carmen's Brain draws from an Extraction Ticket — hold one nearby.", GREY));
     }
 
-    /** Pour an Extraction Ticket at the Well: spin the carousel over its pools, then extract a random weapon. */
-    private void ticketWell(Player player, Location wellLoc, boolean sneaking, ItemStack ticket) {
+    /** Preview the ticket's pool as the solar-system show; sneaking, pull a random weapon from it. */
+    private void ticketWell(Player player, Location brainCentre, boolean sneaking, ItemStack ticket) {
         java.util.Set<String> pools = ExtractionTicket.pools(ticket);
         List<WeaponSpec> pool = new ArrayList<>();
         for (WeaponSpec w : WeaponSignatures.all()) if (pools.contains(w.grade().name())) pool.add(w);
@@ -188,14 +189,12 @@ public final class ExtractionCommand {
                     NamedTextColor.RED));
             return;
         }
-        double odds = 1.0 / pool.size();
-        List<WellRoll.Chance> chances = new ArrayList<>();
-        for (WeaponSpec w : pool) chances.add(new WellRoll.Chance(w, 1.0, odds));
-        wellDisplay.reveal(wellLoc, chances, this::weaponItem);
+        // Build/keep the floating preview; on a pull we transition this same scene.
+        wellDisplay.reveal(brainCentre, pool, this::weaponItem);
 
         if (!sneaking) {
             player.sendActionBar(msg("Ticket — " + pool.size() + " weapons across "
-                    + String.join("/", pools) + ". Sneak-click to pull.", GREEN));
+                    + String.join("/", pools) + ". Sneak to pull.", GREEN));
             return;
         }
         // Pull a random weapon; only spend the ticket if a weapon is actually extracted.
@@ -212,12 +211,13 @@ public final class ExtractionCommand {
         plugin.weapons().engage(weapon, player.getUniqueId());
         ticket.setAmount(ticket.getAmount() - 1);
         player.getInventory().setItemInMainHand(ticket.getAmount() <= 0 ? null : ticket);
+        wellDisplay.pull(brainCentre, pick); // the gacha pull: others dissolve, the chosen blooms out
         player.sendMessage(msg("Carmen's Brain grants " + pick.display() + " (" + pick.grade().display()
                 + ") from the ticket.", GREEN));
         player.playSound(player.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, 0.6f, 1.4f);
     }
 
-    /** The weapon item a spec resolves to (via the plugin's registry), for the Well carousel. */
+    /** The weapon item a spec resolves to (via the plugin's registry), for the floating show. */
     private ItemStack weaponItem(WeaponSpec spec) {
         Weapon w = plugin.weapons().get(spec.id());
         return w != null ? w.createItem() : null;
@@ -225,9 +225,9 @@ public final class ExtractionCommand {
 
     // ---- lifecycle + tab -----------------------------------------------------------
 
-    /** Reap any live Well carousel on plugin disable. */
+    /** Reap any live extraction show on plugin disable (+ cross-world tag sweep). */
     public void disable() {
-        wellDisplay.stop();
+        wellDisplay.disable();
     }
 
     /** Tab completion. Everything is admin-gated. */
