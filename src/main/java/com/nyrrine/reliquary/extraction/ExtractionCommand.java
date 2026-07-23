@@ -126,28 +126,9 @@ public final class ExtractionCommand {
 
     // ---- ticket --------------------------------------------------------------------
 
-    /** {@code /cogito ticket [grades…] | add <grade|all> | clear} — the admin/event Extraction Ticket. */
+    /** {@code /cogito ticket [grades…] | custom | add <grade|id|all> | clear} — the admin/event Extraction Ticket. */
     private void ticket(Player player, String[] a) {
-        if (a.length >= 2 && a[1].equalsIgnoreCase("add")) {
-            ItemStack held = player.getInventory().getItemInMainHand();
-            if (!ExtractionTicket.matches(held)) {
-                player.sendMessage(msg("Hold an Extraction Ticket to add a pool (/cogito ticket to get one).",
-                        NamedTextColor.RED));
-                return;
-            }
-            if (a.length < 3) {
-                player.sendMessage(msg("Usage: /cogito ticket add <zayin|teth|he|waw|aleph|all>", GREY));
-                return;
-            }
-            if (a[2].equalsIgnoreCase("all")) ExtractionTicket.addAllPools(held);
-            else if (!ExtractionTicket.addPool(held, a[2])) {
-                player.sendMessage(msg("Invalid or already-present pool: " + a[2], NamedTextColor.RED));
-                return;
-            }
-            player.getInventory().setItemInMainHand(held);
-            player.sendMessage(msg("Ticket pools: " + String.join(", ", ExtractionTicket.pools(held)), GREEN));
-            return;
-        }
+        if (a.length >= 2 && a[1].equalsIgnoreCase("add")) { ticketAdd(player, a); return; }
         if (a.length >= 2 && a[1].equalsIgnoreCase("clear")) {
             ItemStack held = player.getInventory().getItemInMainHand();
             if (!ExtractionTicket.matches(held)) {
@@ -156,10 +137,16 @@ public final class ExtractionCommand {
             }
             ExtractionTicket.clearPools(held);
             player.getInventory().setItemInMainHand(held);
-            player.sendMessage(msg("Cleared the ticket's pools.", GREEN));
+            player.sendMessage(msg("Cleared the ticket's pools and picks.", GREEN));
             return;
         }
-        // Default: give a blank ticket (plus any grades listed after "ticket").
+        if (a.length >= 2 && a[1].equalsIgnoreCase("custom")) {
+            giveOrDrop(player, ExtractionTicket.createCustom());
+            player.sendMessage(msg("Gave a Custom Extraction Ticket. Hand-pick weapons with /cogito ticket add "
+                    + "<id> (grades still work too), then hold it near a Carmen's Brain.", GREEN));
+            return;
+        }
+        // Default: give a blank grade ticket (plus any grades listed after "ticket").
         ItemStack t = ExtractionTicket.create();
         for (int i = 1; i < a.length; i++) {
             if (a[i].equalsIgnoreCase("all")) ExtractionTicket.addAllPools(t);
@@ -168,6 +155,51 @@ public final class ExtractionCommand {
         giveOrDrop(player, t);
         player.sendMessage(msg("Gave an Extraction Ticket. Chain pools with /cogito ticket add <grade>, then "
                 + "hold it near a Carmen's Brain to preview (sneak = pull).", GREEN));
+    }
+
+    /** {@code /cogito ticket add <arg>} — auto-routes: a grade goes to the grade pool, a weapon id to the picks. */
+    private void ticketAdd(Player player, String[] a) {
+        ItemStack held = player.getInventory().getItemInMainHand();
+        if (!ExtractionTicket.matches(held)) {
+            player.sendMessage(msg("Hold an Extraction Ticket to add to it (/cogito ticket to get one).",
+                    NamedTextColor.RED));
+            return;
+        }
+        if (a.length < 3) {
+            player.sendMessage(msg("Usage: /cogito ticket add <grade | weapon-id | all>", GREY));
+            return;
+        }
+        String arg = a[2];
+        if (arg.equalsIgnoreCase("all")) {
+            ExtractionTicket.addAllPools(held);
+        } else if (ExtractionTicket.isValidPool(arg)) {          // a grade → grade pool
+            if (!ExtractionTicket.addPool(held, arg)) {
+                player.sendMessage(msg("Pool already on the ticket: " + arg.toUpperCase(java.util.Locale.ROOT),
+                        NamedTextColor.RED));
+                return;
+            }
+        } else if (plugin.weapons().get(arg.toLowerCase(java.util.Locale.ROOT)) != null) { // a weapon id → picks
+            if (!ExtractionTicket.addId(held, arg)) {
+                player.sendMessage(msg("Pick already on the ticket: " + arg.toLowerCase(java.util.Locale.ROOT),
+                        NamedTextColor.RED));
+                return;
+            }
+        } else {
+            player.sendMessage(msg("Not a grade or a known weapon id: " + arg, NamedTextColor.RED));
+            return;
+        }
+        player.getInventory().setItemInMainHand(held);
+        player.sendMessage(msg("Ticket now: " + ticketSummary(held), GREEN));
+    }
+
+    /** A short "pools + picks" summary of a ticket, for confirmations. */
+    private String ticketSummary(ItemStack ticket) {
+        java.util.Set<String> pools = ExtractionTicket.pools(ticket);
+        java.util.Set<String> ids = ExtractionTicket.ids(ticket);
+        StringBuilder sb = new StringBuilder();
+        sb.append("pools ").append(pools.isEmpty() ? "none" : String.join("/", pools));
+        if (!ids.isEmpty()) sb.append(", picks ").append(String.join("/", ids));
+        return sb.toString();
     }
 
     // ---- the Well ------------------------------------------------------------------
@@ -182,19 +214,27 @@ public final class ExtractionCommand {
     /** Preview the ticket's pool as the solar-system show; sneaking, pull a random weapon from it. */
     private void ticketWell(Player player, Location brainCentre, boolean sneaking, ItemStack ticket) {
         java.util.Set<String> pools = ExtractionTicket.pools(ticket);
-        List<WeaponSpec> pool = new ArrayList<>();
-        for (WeaponSpec w : WeaponSignatures.all()) if (pools.contains(w.grade().name())) pool.add(w);
+        java.util.Set<String> ids = ExtractionTicket.ids(ticket);
+        // Candidate pool = grade pools ∪ hand-picked ids, de-duplicated by id in add order.
+        java.util.LinkedHashMap<String, WeaponSpec> byId = new java.util.LinkedHashMap<>();
+        for (WeaponSpec w : WeaponSignatures.all()) if (pools.contains(w.grade().name())) byId.putIfAbsent(w.id(), w);
+        for (String id : ids) {
+            WeaponSpec s = customSpec(id);
+            if (s != null) byId.putIfAbsent(s.id(), s);
+        }
+        List<WeaponSpec> pool = new ArrayList<>(byId.values());
         if (pool.isEmpty()) {
-            player.sendMessage(msg("This ticket has no reachable pools — add one with /cogito ticket add <grade>.",
-                    NamedTextColor.RED));
+            player.sendMessage(msg("This ticket has no reachable pools — add a grade or a weapon id with "
+                    + "/cogito ticket add <grade|id>.", NamedTextColor.RED));
             return;
         }
         // Build/keep the floating preview; on a pull we transition this same scene.
         wellDisplay.reveal(brainCentre, pool, this::weaponItem);
 
         if (!sneaking) {
-            player.sendActionBar(msg("Ticket — " + pool.size() + " weapons across "
-                    + String.join("/", pools) + ". Sneak to pull.", GREEN));
+            String across = pools.isEmpty() ? "custom picks" : String.join("/", pools)
+                    + (ids.isEmpty() ? "" : " + picks");
+            player.sendActionBar(msg("Ticket: " + pool.size() + " weapons (" + across + "). Sneak to pull.", GREEN));
             return;
         }
         // Pull a random weapon; only spend the ticket if a weapon is actually extracted.
@@ -223,6 +263,29 @@ public final class ExtractionCommand {
         return w != null ? w.createItem() : null;
     }
 
+    /**
+     * The spec for a hand-picked id: the roster spec if it is on the grade ladder, else a synthesized
+     * {@link EgoGrade#SPECIAL} spec for any registered weapon (Twilight and the like). Null if unregistered.
+     */
+    private WeaponSpec customSpec(String id) {
+        String key = id.toLowerCase(java.util.Locale.ROOT);
+        WeaponSpec known = WeaponSignatures.byId(key);
+        if (known != null) return known;
+        Weapon w = plugin.weapons().get(key);
+        return w != null ? new WeaponSpec(key, prettyId(key), EgoGrade.SPECIAL) : null;
+    }
+
+    /** A display label for an off-roster id: {@code sword_of_tears} → {@code Sword Of Tears}. */
+    private static String prettyId(String id) {
+        StringBuilder sb = new StringBuilder();
+        for (String p : id.split("_")) {
+            if (p.isEmpty()) continue;
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(Character.toUpperCase(p.charAt(0))).append(p.substring(1));
+        }
+        return sb.toString();
+    }
+
     // ---- lifecycle + tab -----------------------------------------------------------
 
     /** Reap any live extraction show on plugin disable (+ cross-world tag sweep). */
@@ -247,12 +310,13 @@ public final class ExtractionCommand {
         return List.of();
     }
 
-    /** Tab options for the ticket command — grades (+ all), plus add/clear at the first arg. */
+    /** Tab options for the ticket command — grades (+ all) and weapon ids, plus the subcommands at the first arg. */
     private List<String> ticketArgs(boolean firstArg) {
         List<String> out = new ArrayList<>();
-        if (firstArg) { out.add("add"); out.add("clear"); }
+        if (firstArg) { out.add("add"); out.add("clear"); out.add("custom"); }
         out.add("all");
         for (String p : ExtractionTicket.POOL_NAMES) out.add(p.toLowerCase(java.util.Locale.ROOT));
+        if (!firstArg) for (Weapon w : plugin.weapons().all()) out.add(w.id()); // ids only offered under `add`
         return out;
     }
 

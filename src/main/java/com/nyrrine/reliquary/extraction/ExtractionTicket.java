@@ -22,13 +22,19 @@ import java.util.Set;
  * sneak right-click extracts a random weapon from the union of those pools. Pools are chained onto a ticket with
  * {@code /cogito ticket add <grade>}, so a single ticket can span any range you like, handy for previewing the
  * extraction show and for event giveaways.
+ *
+ * <p>A <b>custom</b> ticket ({@code /cogito ticket custom}) additionally carries an explicit set of weapon ids
+ * ({@code /cogito ticket add <id>}), so a curator can hand-pick any registered weapon, grade ladder or not. The
+ * candidate pool a ticket draws from is the union of its grade pools and its hand-picked ids.
  */
 public final class ExtractionTicket {
 
     private ExtractionTicket() {}
 
-    private static final NamespacedKey MARK  = new NamespacedKey("reliquary", "extraction_ticket");
-    private static final NamespacedKey POOLS = new NamespacedKey("reliquary", "ticket_pools");
+    private static final NamespacedKey MARK   = new NamespacedKey("reliquary", "extraction_ticket");
+    private static final NamespacedKey POOLS  = new NamespacedKey("reliquary", "ticket_pools");
+    private static final NamespacedKey IDS    = new NamespacedKey("reliquary", "ticket_ids");
+    private static final NamespacedKey CUSTOM = new NamespacedKey("reliquary", "ticket_custom");
     private static final Material MATERIAL = Material.PAPER;
 
     /** Valid pool names (grades) — the full ZAYIN…ALEPH ladder. */
@@ -43,22 +49,40 @@ public final class ExtractionTicket {
         return m != null && m.getPersistentDataContainer().has(MARK, PersistentDataType.BYTE);
     }
 
-    /** A fresh ticket with no pools yet. */
-    public static ItemStack create() {
+    /** A fresh grade ticket with no pools yet. */
+    public static ItemStack create() { return blank(false); }
+
+    /** A fresh custom ticket (hand-picked weapon ids), with nothing on it yet. */
+    public static ItemStack createCustom() { return blank(true); }
+
+    private static ItemStack blank(boolean custom) {
         ItemStack item = new ItemStack(MATERIAL);
         ItemMeta meta = item.getItemMeta();
         meta.getPersistentDataContainer().set(MARK, PersistentDataType.BYTE, (byte) 1);
-        style(meta, new LinkedHashSet<>());
+        if (custom) meta.getPersistentDataContainer().set(CUSTOM, PersistentDataType.BYTE, (byte) 1);
+        style(meta, new LinkedHashSet<>(), new LinkedHashSet<>(), custom);
         item.setItemMeta(meta);
         return item;
     }
 
+    /** Whether this ticket was minted as a custom (hand-picked) ticket, for naming. */
+    public static boolean isCustom(ItemStack item) {
+        if (item == null) return false;
+        ItemMeta m = item.getItemMeta();
+        return m != null && m.getPersistentDataContainer().has(CUSTOM, PersistentDataType.BYTE);
+    }
+
     /** The pools (grade names, upper-case) configured on this ticket, in add order. */
-    public static LinkedHashSet<String> pools(ItemStack item) {
+    public static LinkedHashSet<String> pools(ItemStack item) { return read(item, POOLS); }
+
+    /** The explicit weapon ids (lower-case) hand-picked onto this ticket, in add order. */
+    public static LinkedHashSet<String> ids(ItemStack item) { return read(item, IDS); }
+
+    private static LinkedHashSet<String> read(ItemStack item, NamespacedKey key) {
         LinkedHashSet<String> out = new LinkedHashSet<>();
         if (item == null) return out;
         ItemMeta m = item.getItemMeta();
-        String s = m == null ? null : m.getPersistentDataContainer().get(POOLS, PersistentDataType.STRING);
+        String s = m == null ? null : m.getPersistentDataContainer().get(key, PersistentDataType.STRING);
         if (s != null && !s.isEmpty()) for (String p : s.split(",")) if (!p.isEmpty()) out.add(p);
         return out;
     }
@@ -73,7 +97,7 @@ public final class ExtractionTicket {
         if (!isValidPool(pool)) return false;
         LinkedHashSet<String> pools = pools(item);
         if (!pools.add(pool.toUpperCase(Locale.ROOT))) return false;
-        writePools(item, pools);
+        write(item, POOLS, pools);
         return true;
     }
 
@@ -81,35 +105,69 @@ public final class ExtractionTicket {
     public static void addAllPools(ItemStack item) {
         LinkedHashSet<String> pools = pools(item);
         pools.addAll(POOL_NAMES);
-        writePools(item, pools);
+        write(item, POOLS, pools);
     }
 
-    public static void clearPools(ItemStack item) { writePools(item, new LinkedHashSet<>()); }
+    /** Add a hand-picked weapon id (lower-cased) to the ticket; returns false if already present. */
+    public static boolean addId(ItemStack item, String id) {
+        if (id == null || id.isEmpty()) return false;
+        LinkedHashSet<String> ids = ids(item);
+        if (!ids.add(id.toLowerCase(Locale.ROOT))) return false;
+        write(item, IDS, ids);
+        return true;
+    }
 
-    private static void writePools(ItemStack item, Set<String> pools) {
+    /** Clear both the grade pools and the hand-picked ids (keeps the ticket and its custom flag). */
+    public static void clearPools(ItemStack item) {
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return;
-        meta.getPersistentDataContainer().set(POOLS, PersistentDataType.STRING, String.join(",", pools));
-        style(meta, pools);
+        meta.getPersistentDataContainer().set(POOLS, PersistentDataType.STRING, "");
+        meta.getPersistentDataContainer().set(IDS, PersistentDataType.STRING, "");
+        restyle(item, meta);
         item.setItemMeta(meta);
     }
 
-    private static void style(ItemMeta meta, Set<String> pools) {
-        meta.displayName(Component.text("Extraction Ticket").color(NAME)
+    private static void write(ItemStack item, NamespacedKey key, Set<String> values) {
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return;
+        meta.getPersistentDataContainer().set(key, PersistentDataType.STRING, String.join(",", values));
+        restyle(item, meta);
+        item.setItemMeta(meta);
+    }
+
+    /** Re-run styling from the ticket's current pools/ids/custom flag. */
+    private static void restyle(ItemStack item, ItemMeta meta) {
+        style(meta, pools(item), ids(item), isCustom(item));
+    }
+
+    private static void style(ItemMeta meta, Set<String> pools, Set<String> ids, boolean custom) {
+        meta.displayName(Component.text(custom ? "Custom Extraction Ticket" : "Extraction Ticket").color(NAME)
                 .decoration(TextDecoration.ITALIC, false).decoration(TextDecoration.BOLD, true));
         List<Component> lore = new ArrayList<>();
-        lore.add(Component.text("Hold it near Carmen's Brain to draw out a weapon.", FAINT)
+        lore.add(Component.text(custom
+                        ? "Hold it near Carmen's Brain to draw a hand-picked weapon."
+                        : "Hold it near Carmen's Brain to draw out a weapon.", FAINT)
                 .decoration(TextDecoration.ITALIC, true));
-        lore.add(Component.text(pools.isEmpty()
-                        ? "Pools: none (add with /cogito ticket add <grade>)"
-                        : "Pools: " + String.join(", ", pools), NamedTextColor.AQUA)
-                .decoration(TextDecoration.ITALIC, false));
+        boolean empty = pools.isEmpty() && ids.isEmpty();
+        if (empty) {
+            lore.add(Component.text("Pools: none (add with /cogito ticket add <grade|id>)", NamedTextColor.AQUA)
+                    .decoration(TextDecoration.ITALIC, false));
+        } else {
+            if (!pools.isEmpty()) {
+                lore.add(Component.text("Pools: " + String.join(", ", pools), NamedTextColor.AQUA)
+                        .decoration(TextDecoration.ITALIC, false));
+            }
+            if (!ids.isEmpty()) {
+                lore.add(Component.text("Picks: " + String.join(", ", ids), NamedTextColor.AQUA)
+                        .decoration(TextDecoration.ITALIC, false));
+            }
+        }
         lore.add(Component.text("Right-click nearby: preview. Sneak right-click: extract (spends the ticket).", FAINT)
                 .decoration(TextDecoration.ITALIC, true));
         meta.lore(lore);
         meta.setEnchantmentGlintOverride(true);
-        // Once a ticket carries an apex pool (WAW or ALEPH) it wears the upgraded model; a plain ZAYIN..HE
-        // ticket keeps the base one. The pack maps each string to its own texture.
+        // Once a ticket carries an apex grade pool (WAW or ALEPH) it wears the upgraded model; a plain ZAYIN..HE
+        // or custom-only ticket keeps the base one. The pack maps each string to its own texture.
         boolean apex = pools.contains("WAW") || pools.contains("ALEPH");
         var cmd = meta.getCustomModelDataComponent();
         cmd.setStrings(List.of(apex ? "extraction/ticket/waw" : "extraction/ticket"));

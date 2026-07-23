@@ -30,7 +30,7 @@ import java.util.UUID;
 public final class StationListener implements Listener {
 
     /** How near (blocks, eye→brain-centre) a deployed Brain must be to extract with a held ticket. Placeholder. */
-    private static final double PREVIEW_RANGE = 7.0;
+    private static final double PREVIEW_RANGE = 16.0;
 
     private final ExtractionCommand extraction;
     private final CarmenBrainVfx brainVfx;
@@ -98,19 +98,31 @@ public final class StationListener implements Listener {
     }
 
     /**
-     * Legacy path: right-click the floating Brain itself with an Extraction Ticket. The proximity handler already
-     * covers this (you're within range when you touch it), so this is a fallback — the per-tick claim guards it
-     * from double-firing an extract alongside {@link #onExtract}.
+     * Entity-click paths. Right-clicking the floating Brain routes to the pull (legacy). Right-clicking a floating
+     * <i>preview weapon</i> ({@link WellDisplay#TAG} hitbox) would otherwise swallow the click as an entity
+     * interaction — so with a ticket held we route it to the same proximity extract, and the crosshair landing on
+     * a weapon still previews/pulls. The per-tick claim guards both from double-firing alongside {@link #onExtract}.
+     * (Left-click batting of the preview weapons is polled inside {@link WellDisplay}; no listener here.)
      */
     @EventHandler
     public void onInteractEntity(PlayerInteractEntityEvent event) {
         if (event.getHand() != EquipmentSlot.HAND) return;
-        Location loc = brainVfx.locationOf(event.getRightClicked());
-        if (loc == null) return; // not a Carmen's Brain hitbox
-        event.setCancelled(true);
         Player player = event.getPlayer();
-        if (!claimExtract(player)) return; // proximity path already handled this click
-        extraction.stationWell(player, loc, player.isSneaking());
+        Location loc = brainVfx.locationOf(event.getRightClicked());
+        if (loc != null) { // the Brain hitbox
+            event.setCancelled(true);
+            if (!claimExtract(player)) return;
+            extraction.stationWell(player, loc, player.isSneaking());
+            return;
+        }
+        if (event.getRightClicked().getScoreboardTags().contains(WellDisplay.TAG)
+                && ExtractionTicket.matches(player.getInventory().getItemInMainHand())) {
+            event.setCancelled(true);
+            Location brain = brainVfx.nearestWell(player.getEyeLocation(), PREVIEW_RANGE);
+            if (brain != null && claimExtract(player)) {
+                extraction.stationWell(player, brain, player.isSneaking());
+            }
+        }
     }
 
     /**
