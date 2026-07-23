@@ -635,27 +635,50 @@ public final class FaintAromaWeapon implements EgoWeapon {
     // Real damage on every shot comes from deal() routing through the manager's dealing() fence — without it
     // Solitude's onHit would cancel every Faint Aroma arrow (the v1 damage bug).
 
+    /** Petals a Duet blossom grants on fire, on top of the +1 its landed hit grows — so Magnificent End
+     *  comes online in a realistic Duet fight rather than a marathon (PLACEHOLDER for Nyrrine's tune). */
+    private static final int DUET_BLOSSOM_PETALS = 2;
+
     /** Duet: fire one REAL Blossoming arrow from the wielder, ignoring cadence — the every-2nd-Bang follow-up. */
     public void duetAutoBlossom(Player wielder) {
         if (!matches(wielder.getInventory().getItemInOffHand())) return; // stale schedule / partner swapped away
         Bloom bloom = blooms.computeIfAbsent(wielder.getUniqueId(), k -> new Bloom());
-        bloom.lastBlossom = System.currentTimeMillis(); // share one cadence clock with the reload stream
+        bloom.lastBlossom = System.currentTimeMillis(); // share one cadence clock with the empty/reload stream
         launch(wielder, bloom, Shot.BLOSSOM);
+        growDuetPetals(wielder, bloom, DUET_BLOSSOM_PETALS);
         blossomSfx(wielder);
         wearOffHand(wielder);
     }
 
-    /** Duet: a Blossoming arrow during Solitude's reload, respecting the normal cadence. True if one left. */
-    public boolean duetReloadBlossom(Player wielder) {
+    /**
+     * Duet: a Blossoming arrow fired from Solitude's left-click while the cylinder is empty or reloading,
+     * respecting the normal cadence. Infinite (no ammo) and builds petals, so an empty Solitude never goes
+     * dead — it keeps firing through Faint Aroma. True if one actually left.
+     */
+    public boolean duetBlossom(Player wielder) {
         if (!matches(wielder.getInventory().getItemInOffHand())) return false;
         Bloom bloom = blooms.computeIfAbsent(wielder.getUniqueId(), k -> new Bloom());
         long now = System.currentTimeMillis();
         if (now - bloom.lastBlossom < BLOSSOM_CADENCE_MS) return false;
         bloom.lastBlossom = now;
         launch(wielder, bloom, Shot.BLOSSOM);
+        growDuetPetals(wielder, bloom, DUET_BLOSSOM_PETALS);
         blossomSfx(wielder);
         wearOffHand(wielder);
         return true;
+    }
+
+    /**
+     * Grow petals directly (no heal), clamped to the OFF-hand cap and chiming at full bloom. This is the
+     * Duet blossoms' bonus build, on top of the +1 a landed blossom grows via {@link #feedUnwitheringFlower};
+     * with the empty-fire + every-2nd auto-follows, it lets a sustained engagement reach Magnificent End.
+     */
+    private void growDuetPetals(Player wielder, Bloom bloom, int n) {
+        int cap = petalCap(wielder.getInventory().getItemInOffHand());
+        for (int i = 0; i < n && bloom.petals < cap; i++) {
+            bloom.petals++;
+            if (bloom.petals == cap) fullBloomChime(wielder); // the moment Magnificent End unlocks
+        }
     }
 
     /** Duet: a Solitude aimed Bang that lands feeds this weapon's aroma charge (its ninth catches the Weakness). */

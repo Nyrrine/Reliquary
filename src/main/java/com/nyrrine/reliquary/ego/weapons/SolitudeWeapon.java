@@ -237,15 +237,13 @@ public final class SolitudeWeapon implements EgoWeapon {
         long now = System.currentTimeMillis();
 
         if (cyl.burst != null) return;                       // the burst owns the trigger while it talks
-        if (cyl.reloading()) {
-            // Duet: the reload is otherwise dead trigger-time, so route left-click to Faint Aroma's infinite
-            // blossoms — the reload becomes covering fire (cadence-gated, no ammo). Solo it stays a dry click.
-            if (duetActive(player)) { partner().duetReloadBlossom(player); renderBar(player, cyl); }
+        // Duet: an empty OR reloading cylinder keeps firing through Faint Aroma's infinite blossoms
+        // (cadence-gated, no ammo, and they build petals), so an empty Solitude never goes dead — it keeps
+        // firing via Faint Aroma. Solo, both states stay a dry click. Shift-RC still refills the stronger
+        // Bangs when she wants them back.
+        if (cyl.reloading() || cyl.rounds <= 0) {
+            if (duetActive(player)) partner().duetBlossom(player);
             else dryClick(player);
-            return;
-        }
-        if (cyl.rounds <= 0) {                               // an empty gun stays empty — it never auto-reloads
-            dryClick(player);
             renderBar(player, cyl);
             return;
         }
@@ -278,23 +276,29 @@ public final class SolitudeWeapon implements EgoWeapon {
         // Stories that Never Cease. It only ever answers a DRY cylinder — with rounds left it does nothing
         // at all, by design. It is what the gun does when it has nothing left to say.
         if (cyl.burst != null) return;                       // never stack a second burst
+
+        // Duet: Magnificent End takes the right-click at full bloom, at ANY cylinder state (loaded, empty, or
+        // reloading) — priority over Stories. Gating it to the loaded RC meant she could never reach it once
+        // empty; RC now means Magnificent End whenever it is charged. Below full bloom, the old behaviour
+        // resumes just below (dry -> Stories, loaded -> the "petals not ready" cue).
+        if (duetActive(player) && partner().duetMagnificentReady(player)) {
+            partner().duetMagnificentEnd(player);
+            renderBar(player, cyl);
+            return;
+        }
+
         if (cyl.reloading()) { dryClick(player); return; }
-        if (cyl.rounds > 0) {                                // rounds left — no story
-            // Duet: the loaded right-click is otherwise a dead no-op, so with Faint Aroma off-hand it
-            // detonates Faint Aroma's Magnificent End once petals are at full bloom; below that it just says
-            // so. A DRY cylinder still tells Stories, exactly as it does solo.
+        if (cyl.rounds > 0) {                                // loaded, below full bloom
+            // In Duet the loaded RC has no other job now — say why Magnificent End did not fire. Solo: dead.
             if (duetActive(player)) {
-                if (partner().duetMagnificentEnd(player)) {
-                    renderBar(player, cyl);
-                } else {
-                    player.sendActionBar(EgoHud.status("Magnificent End — petals not ready", FAINT));
-                    dryClick(player);
-                }
+                player.sendActionBar(EgoHud.status("Magnificent End — petals not ready", FAINT));
+                dryClick(player);
                 return;
             }
             dryClick(player);
             return;
         }
+        // dry cylinder, below full bloom -> Stories
         if (now < cyl.storiesReady) {
             dryClick(player);
             player.sendActionBar(EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT));
@@ -403,9 +407,15 @@ public final class SolitudeWeapon implements EgoWeapon {
             bar = bar.append(plain("  ", FAINT))
                     .append(EgoHud.cooldown("Reloading", reloadMs(player) - (now - cyl.reloadStart), PRIMARY));
         } else if (cyl.rounds <= 0) {
-            bar = bar.append(plain("  ", FAINT)).append(now < cyl.storiesReady
-                    ? EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT)
-                    : EgoHud.ready(STORIES, PRIMARY));
+            // Dry cylinder: show Stories' state — unless a charged Duet Magnificent End would take the RC
+            // first, in which case the merged readout's ME-ready cue is the truthful one and a "Stories ready"
+            // line here would only mislead about what the right-click does.
+            boolean meTakesRc = duetActive(player) && partner().duetMagnificentReady(player);
+            if (!meTakesRc) {
+                bar = bar.append(plain("  ", FAINT)).append(now < cyl.storiesReady
+                        ? EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT)
+                        : EgoHud.ready(STORIES, PRIMARY));
+            }
         }
         // Duet: fold Faint Aroma's petal + aroma readout onto the same always-on line, so the merged HUD
         // reflects both weapons at once (Faint Aroma does not tick from the off hand — Solitude paints it).
