@@ -200,6 +200,28 @@ public final class CarmenBrainVfx {
 
     private static boolean tagged(Entity e) { return e.getScoreboardTags().contains(TAG); }
 
+    /** Shrink + hide the Brain at {@code brainCentre} so the pull's central reel is the sole focus. */
+    public void beginExtract(Location brainCentre) {
+        Node n = nodeAt(brainCentre);
+        if (n != null) { n.extracting = true; n.tgtScale = 0.02; }
+    }
+
+    /** Restore the Brain at {@code brainCentre} to full scale + glow. Safe to call any number of times. */
+    public void endExtract(Location brainCentre) {
+        Node n = nodeAt(brainCentre);
+        if (n != null) { n.extracting = true; n.tgtScale = BRAIN_SCALE; }
+    }
+
+    /** The live Node whose hover centre is {@code brainCentre} (within half a block), or null. */
+    private Node nodeAt(Location brainCentre) {
+        if (brainCentre == null || brainCentre.getWorld() == null) return null;
+        for (Node n : live.values()) {
+            if (n.brainAt.getWorld() == brainCentre.getWorld()
+                    && n.brainAt.distanceSquared(brainCentre) < 0.25) return n;
+        }
+        return null;
+    }
+
     private static String key(Location loc) {
         return loc.getWorld().getName() + "," + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ();
     }
@@ -215,7 +237,10 @@ public final class CarmenBrainVfx {
         private int frame = 0;
         private int punches = 0;
         private long lastAttackTs = 0L;
-        boolean interrupted = false;     // the seam a future gacha pull sets to suspend the idle
+        boolean interrupted = false;     // the seam a gacha pull sets to suspend the idle
+        boolean extracting = false;      // a pull owns the display: shrink to focus, then restore
+        double curScale = BRAIN_SCALE;   // eased scale while extracting
+        double tgtScale = BRAIN_SCALE;   // ~0 during a pull, back to BRAIN_SCALE on restore
 
         Node(Location where) {
             this.world = where.getWorld();
@@ -248,10 +273,30 @@ public final class CarmenBrainVfx {
         boolean valid() { return brain.isValid() && hitbox.isValid(); }
 
         void animate() {
-            if (interrupted) return; // a future gacha pull owns the display while this is set
+            if (extracting) { driveExtract(); return; } // the pull owns the display: shrink/restore, no idle
+            if (interrupted) return;
             frame++;
             floatBrain();
             ambiance();
+        }
+
+        /** Ease the brain toward {@link #tgtScale} (tiny + glow off during a pull, back to full on restore). */
+        private void driveExtract() {
+            if (!brain.isValid()) return;
+            curScale += (tgtScale - curScale) * 0.28;
+            float s = (float) Math.max(0.0, curScale);
+            float yaw = (float) (frame * YAW_RATE);
+            brain.setInterpolationDelay(0);
+            brain.setTransformation(new Transformation(
+                    new Vector3f(0f, 0f, 0f), new Quaternionf().rotateY(yaw),
+                    new Vector3f(s, s, s), new Quaternionf()));
+            brain.setGlowing(tgtScale >= 0.5); // glow off while shrunk/hidden, on again as it restores
+            if (tgtScale >= BRAIN_SCALE && Math.abs(curScale - tgtScale) < 0.02) {
+                curScale = BRAIN_SCALE;
+                extracting = false; // restore complete — idle resumes
+                brain.setGlowing(true);
+                brain.setGlowColorOverride(GREEN);
+            }
         }
 
         /** Bob on a slow sine + rotate slowly on yaw, interpolated between frames. */

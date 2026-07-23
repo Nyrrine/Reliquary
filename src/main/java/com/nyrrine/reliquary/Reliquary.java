@@ -160,6 +160,7 @@ public final class Reliquary extends JavaPlugin implements TabCompleter {
         stations.registerRecipes(); // registers Carmen's Brain craft recipe (the only station left)
         this.brainVfx = new com.nyrrine.reliquary.extraction.CarmenBrainVfx(this, stations);
         brainVfx.start(); // idle floating-brain show at every placed Carmen's Brain, gated on watchers
+        extraction.attachBrain(brainVfx); // so the pull can shrink/restore the Brain for focus
         getServer().getPluginManager().registerEvents(
                 new com.nyrrine.reliquary.extraction.StationListener(extraction, brainVfx), this);
 

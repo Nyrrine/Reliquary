@@ -81,7 +81,7 @@ public enum StationType {
         ItemStack item = brainHead();
         ItemMeta meta = item.getItemMeta();
         meta.displayName(Component.text(display).color(NAME).decoration(TextDecoration.ITALIC, false));
-        meta.lore(List.of(Component.text("For extracting Cogito.", FAINT)
+        meta.lore(List.of(Component.text("For extracting.", FAINT)
                 .decoration(TextDecoration.ITALIC, true)));
         meta.setEnchantmentGlintOverride(true);
         meta.getPersistentDataContainer().set(KEY, org.bukkit.persistence.PersistentDataType.STRING, name());

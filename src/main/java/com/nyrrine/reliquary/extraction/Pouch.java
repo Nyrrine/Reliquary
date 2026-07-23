@@ -15,6 +15,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.persistence.PersistentDataType;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -34,39 +35,43 @@ public final class Pouch {
     private static final NamespacedKey MARK   = new NamespacedKey("reliquary", "pouch");
     private static final NamespacedKey RARITY = new NamespacedKey("reliquary", "pouch_rarity");
 
-    /** Shared pouch skull texture (base64 skin profile). */
-    private static final String TEXTURE =
-            "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvNTRjYWU0OWExZTdmNjVmOTM1YmQ2MjAzYmYzZjNjOTQ0ZGU4M2Y0YTk2MDhhMjZjOGM3NzVjMTg0OWI1YTc0ZiJ9fX0=";
-
     /** Random wood pool for a Common "log" roll. */
     private static final Material[] LOGS = {
             Material.OAK_LOG, Material.SPRUCE_LOG, Material.BIRCH_LOG,
             Material.JUNGLE_LOG, Material.ACACIA_LOG, Material.DARK_OAK_LOG };
 
-    /** A pouch tier: its name colour, its burst colour, a flavour line, and its (uniform) loot table. */
+    /** A loot tier: display label, name colour, burst colour, its skull texture, a flavour line, and its table. */
     public enum Rarity {
-        COMMON(NamedTextColor.GRAY, 0xAAAAAA, "A worn pouch of odds and ends.", List.of(
+        COMMON("Common", NamedTextColor.GRAY, 0xAAAAAA,
+                "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvNDdlYzQxZTBkZjhlMTcwZDk3ZjliOWFmMWQ2NWVkYWQ0OTc5Yzc4Yzg5YjAxYjE4MGYzODllZTA4YTYxYWY4MiJ9fX0=",
+                "A worn bag of odds and ends.", List.of(
                 new ItemStack(Material.COAL, 16),
                 new ItemStack(Material.IRON_INGOT, 16),
                 new ItemStack(Material.OAK_LOG, 16),        // rolled as a random wood
                 new ItemStack(Material.COBBLESTONE, 32),
                 new ItemStack(Material.COPPER_INGOT, 16),
                 new ItemStack(Material.BREAD, 16))),
-        UNCOMMON(NamedTextColor.GREEN, 0x55FF55, "A tidy pouch with a little promise.", List.of(
+        UNCOMMON("Uncommon", NamedTextColor.GREEN, 0x55FF55,
+                "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMmQwYmRmMzliNTRmNDk2OTJmYjM3OWI0ZWIwNGQxZWI0YTAwZTc4ZWQzOTExYWQzYjYzYTdlNWJmMzE3NjgzNyJ9fX0=",
+                "A tidy bag with a little promise.", List.of(
                 new ItemStack(Material.COPPER_BLOCK, 8),
                 new ItemStack(Material.REDSTONE, 16),
                 new ItemStack(Material.LAPIS_LAZULI, 16),
                 new ItemStack(Material.GOLD_INGOT, 8),
                 new ItemStack(Material.IRON_BLOCK, 4),
                 new ItemStack(Material.GLOWSTONE_DUST, 16))),
-        RARE(NamedTextColor.BLUE, 0x5555FF, "A heavy pouch that clinks with worth.", List.of(
+        RARE("Rare", NamedTextColor.BLUE, 0x5555FF,
+                "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvYmE2ZGFjODAzNWQzNjFiYTdmMmMyYTYxNGI0ZWJhYWZjMWU1ZTMxMDFmODViZWVmNjgzNTM2ZjMzN2U1MDkwIn19fQ==",
+                "A heavy bag that clinks with worth.", List.of(
                 new ItemStack(Material.GOLD_BLOCK, 4),
                 new ItemStack(Material.EMERALD, 8),
                 new ItemStack(Material.DIAMOND, 2),
                 new ItemStack(Material.COPPER_BLOCK, 16),
                 new ItemStack(Material.IRON_BLOCK, 3),
                 new ItemStack(Material.AMETHYST_SHARD, 16))),
-        LEGENDARY(NamedTextColor.GOLD, 0xFFAA00, "A gilded pouch heavy with fortune.", List.of(
+        LEGENDARY("Fabled", NamedTextColor.GOLD, 0xFFAA00,
+                "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMmVlNGE1Y2Q0ZWU2ZTk4OWE2M2RjNDFjNGI0MGQ4M2YwZDU4NTk4ZTdlY2RmMmM5NGRmZWVjMGFkYTAyZWM5MyJ9fX0=",
+                "A gilded bag heavy with fortune.", List.of(
                 new ItemStack(Material.TOTEM_OF_UNDYING, 1),
                 new ItemStack(Material.DIAMOND_BLOCK, 3),
                 new ItemStack(Material.GOLD_BLOCK, 8),
@@ -74,21 +79,25 @@ public final class Pouch {
                 new ItemStack(Material.EMERALD_BLOCK, 4),
                 new ItemStack(Material.DIAMOND, 6)));
 
+        private final String label;
         private final TextColor nameColor;
         private final Color burst;
+        private final String texture;
         private final String flavour;
         private final List<ItemStack> loot;
 
-        Rarity(TextColor nameColor, int burstRgb, String flavour, List<ItemStack> loot) {
+        Rarity(String label, TextColor nameColor, int burstRgb, String texture, String flavour, List<ItemStack> loot) {
+            this.label = label;
             this.nameColor = nameColor;
             this.burst = Color.fromRGB(burstRgb);
+            this.texture = texture;
             this.flavour = flavour;
             this.loot = loot;
         }
 
         public TextColor nameColor() { return nameColor; }
         public Color burst() { return burst; }
-        public String display() { return name().charAt(0) + name().substring(1).toLowerCase(Locale.ROOT); }
+        public String display() { return label; }
 
         static Rarity byId(String id) {
             if (id == null) return null;
@@ -96,11 +105,11 @@ public final class Pouch {
         }
     }
 
-    /** A sealed pouch item of the given rarity. */
+    /** A sealed Loot bag of the given rarity. Same-rarity bags stack (fixed profile + identical meta). */
     public static ItemStack create(Rarity rarity) {
-        ItemStack item = skull();
+        ItemStack item = skull(rarity);
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text(rarity.display() + " Pouch").color(rarity.nameColor)
+        meta.displayName(Component.text(rarity.label + " Loot").color(rarity.nameColor)
                 .decoration(TextDecoration.ITALIC, false).decoration(TextDecoration.BOLD, true));
         meta.lore(List.of(
                 Component.text(rarity.flavour, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, true),
@@ -135,11 +144,17 @@ public final class Pouch {
         return pick;
     }
 
-    private static ItemStack skull() {
+    /**
+     * A Loot skull. The profile UUID is <b>deterministic per rarity</b> (not random) so every bag of a rarity
+     * carries byte-identical meta and therefore <b>stacks</b>; different rarities differ by UUID/texture/name so
+     * they never cross-stack.
+     */
+    private static ItemStack skull(Rarity rarity) {
         ItemStack item = new ItemStack(Material.PLAYER_HEAD);
         if (item.getItemMeta() instanceof SkullMeta skull) {
-            PlayerProfile profile = Bukkit.createProfile(UUID.randomUUID(), "ReliquaryPouch");
-            profile.setProperty(new ProfileProperty("textures", TEXTURE));
+            UUID id = UUID.nameUUIDFromBytes(("reliquary_loot_" + rarity.name()).getBytes(StandardCharsets.UTF_8));
+            PlayerProfile profile = Bukkit.createProfile(id, "ReliquaryLoot");
+            profile.setProperty(new ProfileProperty("textures", rarity.texture));
             skull.setPlayerProfile(profile);
             item.setItemMeta(skull);
         }

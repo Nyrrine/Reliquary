@@ -33,11 +33,15 @@ public final class ExtractionCommand {
 
     private final Reliquary plugin;
     private final WellDisplay wellDisplay;
+    private CarmenBrainVfx brainVfx; // wired after construction (the Brain manager is built later)
 
     public ExtractionCommand(Reliquary plugin) {
         this.plugin = plugin;
         this.wellDisplay = new WellDisplay(plugin);
     }
+
+    /** Wire the Brain manager so a pull can shrink/restore the Brain for focus. */
+    public void attachBrain(CarmenBrainVfx brainVfx) { this.brainVfx = brainVfx; }
 
     /** Permission for every subcommand — give and ticket both hand out items, so all are admin-gated. */
     public static final String ADMIN_PERM = "reliquary.admin";
@@ -257,8 +261,7 @@ public final class ExtractionCommand {
             return;
         }
         List<WellDisplay.FloatItem> floats = new ArrayList<>();
-        List<ItemStack> reel = new ArrayList<>();
-        for (WeaponSpec w : pool) { floats.add(weaponFloat(w)); reel.add(displayFor(weaponItem(w))); }
+        for (WeaponSpec w : pool) floats.add(weaponFloat(w));
         wellDisplay.reveal(brainCentre, floats);
 
         if (!sneaking) {
@@ -269,77 +272,87 @@ public final class ExtractionCommand {
         }
         WeaponSpec pick = pool.get(ThreadLocalRandom.current().nextInt(pool.size()));
         Weapon weapon = plugin.weapons().get(pick.id());
-        if (weapon == null) {
+        if (weapon == null) { // pre-spend error: nothing is spent, ticket kept
             player.sendMessage(msg("No item is wired for '" + pick.id() + "' yet — ticket kept.", NamedTextColor.RED));
             return;
         }
-        grantWeapon(player, weapon);
-        spend(player, ticket);
-        wellDisplay.pull(brainCentre, new WellDisplay.PullShow(displayFor(weaponItem(pick)),
-                pick.grade().color(), pick.grade().ordinal() + 1, false, reel));
-        player.sendMessage(msg("Carmen's Brain grants " + pick.display() + " (" + pick.grade().display()
-                + ") from the ticket.", GREEN));
-        player.playSound(player.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, 0.6f, 1.4f);
+        WellDisplay.PullShow show = new WellDisplay.PullShow(displayFor(weaponItem(pick)),
+                pick.grade().color(), pick.grade().ordinal() + 1, false, floats);
+        deliverAfterShow(player, brainCentre, ticket, weaponDeliverable(player, weapon), weapon, show);
     }
 
     /** Standard ticket: roll the fixed weighted table (weapons by grade, pouches, the 1% bag). */
     private void standardWell(Player player, Location brainCentre, boolean sneaking, ItemStack ticket) {
-        // The whole board floats: every weapon (grade-coloured), the 4 pouch tiers, and the Daughters Bag.
+        // The whole board floats: every weapon (grade-coloured), the 4 loot tiers, and the Daughters Bag.
         List<WellDisplay.FloatItem> floats = new ArrayList<>();
-        List<ItemStack> reel = new ArrayList<>();
-        for (WeaponSpec w : WeaponSignatures.all()) { floats.add(weaponFloat(w)); reel.add(displayFor(weaponItem(w))); }
+        for (WeaponSpec w : WeaponSignatures.all()) floats.add(weaponFloat(w));
         for (Pouch.Rarity r : Pouch.Rarity.values()) {
-            ItemStack pouch = Pouch.create(r);
-            floats.add(new WellDisplay.FloatItem(pouch, r.burst(), "pouch_" + r.name()));
-            reel.add(pouch);
+            floats.add(new WellDisplay.FloatItem(Pouch.create(r), r.burst(), "loot_" + r.name()));
         }
-        ItemStack bagItem = DaughtersBag.create();
-        floats.add(new WellDisplay.FloatItem(bagItem, BAG_COLOR, "daughters_bag"));
-        reel.add(bagItem);
+        floats.add(new WellDisplay.FloatItem(DaughtersBag.create(), BAG_COLOR, "daughters_bag"));
         wellDisplay.reveal(brainCentre, floats);
 
         if (!sneaking) {
             player.sendActionBar(msg("Standard ticket — sneak to roll the table.", GREEN));
             return;
         }
-        // A single weighted pick; the ticket is spent only once a result is actually granted.
+        // A single weighted pick; deliver the predetermined result only when the show completes.
         StdRoll roll = rollStandard();
+        ItemStack deliverable;
+        Weapon engage = null;
         ItemStack display;
         Color color;
         int tier;
         boolean bag = false;
-        String label;
         if (roll.grade() != null) {
             WeaponSpec pick = randomWeaponOfGrade(roll.grade());
             Weapon weapon = pick != null ? plugin.weapons().get(pick.id()) : null;
-            if (pick == null || weapon == null) {
+            if (pick == null || weapon == null) { // pre-spend error: ticket kept
                 player.sendMessage(msg("No " + roll.grade().display() + " weapon is wired yet — ticket kept.",
                         NamedTextColor.RED));
                 return;
             }
-            grantWeapon(player, weapon);
+            engage = weapon;
+            deliverable = weaponDeliverable(player, weapon);
             display = displayFor(weaponItem(pick));
             color = pick.grade().color();
             tier = pick.grade().ordinal() + 1;
-            label = pick.display() + " (" + pick.grade().display() + ")";
         } else if (roll.rarity() != null) {
-            giveOrDrop(player, Pouch.create(roll.rarity()));
+            deliverable = Pouch.create(roll.rarity());
             display = Pouch.create(roll.rarity());
             color = roll.rarity().burst();
             tier = roll.rarity().ordinal() + 1;
-            label = roll.rarity().display() + " Pouch";
         } else {
-            giveOrDrop(player, DaughtersBag.create());
+            deliverable = DaughtersBag.create();
             display = DaughtersBag.create();
             color = BAG_COLOR;
             tier = 5;
             bag = true;
-            label = "A Certain Daughters Bag";
         }
+        WellDisplay.PullShow show = new WellDisplay.PullShow(display, color, tier, bag, floats);
+        deliverAfterShow(player, brainCentre, ticket, deliverable, engage, show);
+    }
+
+    /**
+     * Spend the ticket now, shrink the Brain, run the pull, and hand {@code deliverable} over only when the show
+     * completes — the {@link WellDisplay#pull} callback fires <b>exactly once</b> on any termination, so a spent
+     * ticket always pays out (to the player if online, else dropped at the Brain), the weapon engages on the same
+     * beat, and the Brain is restored. No chat result line; the reveal is purely visual.
+     */
+    private void deliverAfterShow(Player player, Location brainCentre, ItemStack ticket,
+                                  ItemStack deliverable, Weapon engage, WellDisplay.PullShow show) {
         spend(player, ticket);
-        wellDisplay.pull(brainCentre, new WellDisplay.PullShow(display, color, tier, bag, reel));
-        player.sendMessage(msg("Carmen's Brain yields " + label + ".", GREEN));
-        player.playSound(player.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, 0.6f, 1.4f);
+        final java.util.UUID uuid = player.getUniqueId();
+        final Location dropAt = brainCentre.clone();
+        if (brainVfx != null) brainVfx.beginExtract(brainCentre);
+        Runnable onComplete = () -> {
+            if (brainVfx != null) brainVfx.endExtract(brainCentre);
+            Player p = plugin.getServer().getPlayer(uuid);
+            if (p != null && p.isOnline()) giveOrDrop(p, deliverable);
+            else if (dropAt.getWorld() != null) dropAt.getWorld().dropItemNaturally(dropAt, deliverable);
+            if (engage != null) plugin.weapons().engage(engage, uuid);
+        };
+        wellDisplay.pull(brainCentre, show, onComplete);
     }
 
     /** Open a held Pouch: roll one loot entry, give it, consume exactly one, small rarity-coloured pop. */
@@ -373,13 +386,11 @@ public final class ExtractionCommand {
         return it != null ? it : new ItemStack(Material.NETHER_STAR);
     }
 
-    /** Grant a rolled weapon: attribution, tracker register, give (overflow drops), engage its lifecycle. */
-    private void grantWeapon(Player player, Weapon weapon) {
+    /** The final deliverable for a rolled weapon: attribution + tracker register (give/engage happen on show end). */
+    private ItemStack weaponDeliverable(Player player, Weapon weapon) {
         ItemStack item = weapon.createItem();
         stampAttribution(item, player.getName());
-        item = plugin.tracker().register(item, weapon.id(), player.getName() + " (ticket)");
-        giveOrDrop(player, item);
-        plugin.weapons().engage(weapon, player.getUniqueId());
+        return plugin.tracker().register(item, weapon.id(), player.getName() + " (ticket)");
     }
 
     /** Spend exactly one ticket from the main hand. */

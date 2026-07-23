@@ -50,8 +50,9 @@ public final class WellDisplay {
     /** One floating opportunity: the item to show, its show colour (tendril/glow/burst), and a stable id. */
     public record FloatItem(ItemStack display, Color color, String id) {}
 
-    /** The predetermined result the reel slams onto: the item, its burst colour + tier, bag flag, and reel pool. */
-    public record PullShow(ItemStack result, Color color, int tier, boolean bag, List<ItemStack> reel) {}
+    /** The predetermined result the reel slams onto: the item, its burst colour + tier, bag flag, and reel pool
+     *  (each reel entry carries its own colour so the central glow tracks the flashed item, not the result). */
+    public record PullShow(ItemStack result, Color color, int tier, boolean bag, List<FloatItem> reel) {}
 
     /** Scoreboard tag on every entity this show spawns — distinct from the idle Brain tag, for orphan reaping. */
     public static final String TAG = "reliquary_well_preview";
@@ -68,12 +69,13 @@ public final class WellDisplay {
     private static final int    OUTRO_START   = DURATION_TICKS - OUTRO_LEN;
     private static final double WATCH_RANGE   = 40.0;
 
-    // The hype reel timings.
-    private static final int    RUSH_TICKS = 10;   // floaters rush into the Brain
-    private static final int    REEL_TICKS = 50;   // slot-machine flashing (~2.5s), decelerating
-    private static final int    REEL_END   = RUSH_TICKS + REEL_TICKS;
-    private static final int    SLAM_HOLD  = 18;   // hold the result after the slam
-    private static final float  REEL_SCALE = 0.95f;
+    // The hype reel timings (longer, decelerating, built for someone watching).
+    private static final int    LEAD_TICKS = 8;    // floaters turn to face centre + the reel scales in
+    private static final int    REEL_TICKS = 74;   // slot-machine flashing (~3.7s), decelerating enticingly
+    private static final int    REEL_END   = LEAD_TICKS + REEL_TICKS;
+    private static final int    FINALE_BASE = 14;  // slam finale length + tier * FINALE_PER (bag longest)
+    private static final int    FINALE_PER  = 6;
+    private static final float  REEL_SCALE = 1.05f;
 
     private static final float  PLANET_SCALE  = 0.65f;
     private static final double GOLDEN_ANGLE  = Math.PI * (3.0 - Math.sqrt(5.0));
@@ -105,8 +107,16 @@ public final class WellDisplay {
 
     private Location sceneCentre;
     private String sceneKey;
+    private Runnable onPullDone; // the exactly-once completion (delivery + brain restore) for a running pull
 
     public WellDisplay(Plugin plugin) { this.plugin = plugin; }
+
+    /** Fire the pending pull completion exactly once (delivery + brain restore); no-op if none/already fired. */
+    private void firePullDone() {
+        Runnable r = onPullDone;
+        onPullDone = null;
+        if (r != null) r.run();
+    }
 
     /** One drifting opportunity: its display + hitbox, colour, and its live aquarium motion state. */
     private static final class Planet {
@@ -144,6 +154,7 @@ public final class WellDisplay {
     public void stop() {
         if (active != null) { active.cancel(); active = null; }
         reapScene();
+        firePullDone(); // a spent ticket always pays out, even on an interrupt (new preview/pull, disable)
     }
 
     public void disable() {
@@ -218,67 +229,103 @@ public final class WellDisplay {
     // ---- the hype reel pull --------------------------------------------------------
 
     /**
-     * Play the sneak-pull hype reel from whatever state the aquarium is in: the floaters rush into the Brain, a
-     * slot-machine reel flashes {@code show.reel()} fast then decelerating, and slams onto {@code show.result()}
-     * with a tiered burst. Purely cosmetic — the grant already happened.
+     * Play the sneak-pull hype reel. The floaters freeze and stream their colour inward to feed a central reel
+     * that flashes {@code show.reel()} (its glow tracking each flashed item) fast then decelerating, then slams
+     * onto {@code show.result()} with a per-tier finale. Purely cosmetic. {@code onComplete} is the delivery +
+     * brain-restore callback, fired <b>exactly once</b> on any termination (natural end, interrupt, disable).
      */
-    public void pull(Location brainCentre, PullShow show) {
+    public void pull(Location brainCentre, PullShow show, Runnable onComplete) {
         if (active != null) { active.cancel(); active = null; }
+        firePullDone();            // deliver any prior pending pull first (one pull at a time; defensive)
+        onPullDone = onComplete;   // guarded: fires exactly once via firePullDone() on every path below
+
         final Location centre = sceneCentre != null ? sceneCentre : brainCentre.clone();
+        if (sceneCentre == null) sceneCentre = centre;
         final World world = centre.getWorld();
         final Vector cc = centre.toVector();
 
         for (Planet pl : planets) if (pl.hitbox.isValid()) pl.hitbox.remove(); // no batting mid-pull
 
-        final List<ItemStack> pool = show.reel().isEmpty() ? List.of(show.result()) : show.reel();
-        final ItemDisplay reel = spawnBody(centre, resolve(pool.get(0)), 0.01f, show.color());
+        final List<FloatItem> pool = show.reel().isEmpty()
+                ? List.of(new FloatItem(show.result(), show.color(), "result")) : show.reel();
+        final ItemDisplay reel = spawnBody(centre, resolve(pool.get(0).display()), 0.01f, pool.get(0).color());
         current.add(reel);
+        final int finaleLen = FINALE_BASE + (show.bag() ? 5 : Math.max(1, Math.min(5, show.tier()))) * FINALE_PER;
 
         world.playSound(centre, Sound.BLOCK_BEACON_ACTIVATE, 0.8f, 1.2f);
 
         active = new BukkitRunnable() {
             int t = 0;
-            int nextSwap = RUSH_TICKS;
+            int nextSwap = LEAD_TICKS;
             boolean slammed = false;
             @Override public void run() {
-                if (!alive(centre)) { reapScene(); cancel(); if (active == this) active = null; return; }
+                if (!alive(centre)) {
+                    reapScene(); cancel(); if (active == this) active = null; firePullDone(); return;
+                }
                 double time = t / 20.0;
 
-                if (t < RUSH_TICKS) {
-                    double rp = t / (double) RUSH_TICKS;
-                    for (Planet pl : planets) {
-                        if (pl.popped || !pl.body.isValid()) continue;
-                        Vector start = pl.lastPos.lengthSquared() > 0 ? pl.lastPos : cc;
-                        Vector pos = lerp(start, cc, easeIn(rp));
-                        place(pl.body, centre, pos, yaw((float) (time * pl.spin)), (float) (pl.scale * (1 - easeIn(rp))));
-                        drawTendrilPts(centre, pos.toLocation(world), 1 - rp, pl.color);
-                    }
-                } else if (t < REEL_END) {
-                    double rp = (t - RUSH_TICKS) / (double) REEL_TICKS;
-                    place(reel, centre, cc.clone().add(new Vector(0, 0.3, 0)), yaw((float) (time * 5)), REEL_SCALE);
-                    if (t >= nextSwap) {
-                        reel.setItemStack(resolve(pool.get(ThreadLocalRandom.current().nextInt(pool.size()))));
-                        nextSwap = t + 2 + (int) Math.round(rp * rp * 10); // decelerate
-                        float pitch = (float) (0.7 + rp * 1.6);
-                        world.playSound(centre, Sound.BLOCK_NOTE_BLOCK_HAT, 0.6f, pitch);
-                        world.spawnParticle(Particle.CRIT, cc.clone().add(new Vector(0, 0.3, 0)).toLocation(world),
+                if (t < REEL_END) {
+                    double reelScale = t < LEAD_TICKS ? REEL_SCALE * (t / (double) LEAD_TICKS) : REEL_SCALE;
+                    place(reel, centre, cc.clone().add(new Vector(0, 0.35, 0)), yaw((float) (time * 5)), (float) reelScale);
+                    feedFloaters(centre, time); // frozen floaters stream their colour inward, feeding the reel
+                    if (t >= LEAD_TICKS && t >= nextSwap) {
+                        double rp = (t - LEAD_TICKS) / (double) REEL_TICKS;
+                        FloatItem fi = pool.get(ThreadLocalRandom.current().nextInt(pool.size()));
+                        reel.setItemStack(resolve(fi.display()));
+                        reel.setGlowColorOverride(fi.color());          // glow tracks the flashed item, no telegraph
+                        nextSwap = t + 2 + (int) Math.round(rp * rp * 16); // decelerate enticingly toward the slam
+                        world.playSound(centre, Sound.BLOCK_NOTE_BLOCK_HAT, 0.6f, (float) (0.6 + rp * 1.7));
+                        world.spawnParticle(Particle.CRIT, cc.clone().add(new Vector(0, 0.35, 0)).toLocation(world),
                                 4, 0.25, 0.25, 0.25, 0.03);
                     }
                 } else {
                     if (!slammed) {
                         reel.setItemStack(resolve(show.result()));
+                        reel.setGlowColorOverride(show.color());
+                        fadeFloaters(centre); // the floaters wink out as the result lands
                         slammed = true;
-                        tieredBurst(cc.clone().add(new Vector(0, 0.4, 0)).toLocation(world), show.color(), show.tier(), show.bag());
                     }
-                    double hp = Math.min(1.0, (t - REEL_END) / (double) (SLAM_HOLD / 2));
-                    float sc = (float) lerp(REEL_SCALE, slamScale(show.tier(), show.bag()), easeOut(hp));
-                    place(reel, centre, cc.clone().add(new Vector(0, 0.4, 0)), yaw((float) (time * 2)), sc);
-                    if (t >= REEL_END + SLAM_HOLD) { reapScene(); cancel(); if (active == this) active = null; return; }
+                    int ft = t - REEL_END;
+                    Location at = cc.clone().add(new Vector(0, 0.45, 0)).toLocation(world);
+                    double gp = Math.min(1.0, ft / 8.0);
+                    place(reel, centre, cc.clone().add(new Vector(0, 0.45, 0)), yaw((float) (time * 2)),
+                            (float) lerp(REEL_SCALE, slamScale(show.tier(), show.bag()), easeOut(gp)));
+                    finale(at, show.color(), show.tier(), show.bag(), ft, finaleLen);
+                    if (ft >= finaleLen) {
+                        reapScene(); cancel(); if (active == this) active = null; firePullDone(); return;
+                    }
                 }
                 t += PERIOD;
             }
         };
         active.runTaskTimer(plugin, 0L, PERIOD);
+    }
+
+    /** The frozen floaters each stream a colour bead inward toward the reel and breathe gently — "feeding" it. */
+    private void feedFloaters(Location centre, double time) {
+        World world = centre.getWorld();
+        Vector cc = centre.toVector();
+        for (Planet pl : planets) {
+            if (pl.popped || !pl.body.isValid()) continue;
+            double pulse = 1.0 + 0.12 * Math.sin(time * 6 + pl.order);
+            place(pl.body, centre, pl.lastPos, yaw((float) (time * 0.8)), (float) (pl.scale * pulse));
+            double u = frac01((float) (time * 1.3 + pl.order * 0.13));
+            Vector bead = lerp(pl.lastPos, cc, u);
+            world.spawnParticle(Particle.DUST, bead.toLocation(world), 1, 0.02, 0.02, 0.02, 0,
+                    new Particle.DustOptions(pl.color, 0.85f));
+        }
+    }
+
+    /** Pop each floater out (a small colour puff) as the reel slams. */
+    private void fadeFloaters(Location centre) {
+        World world = centre.getWorld();
+        for (Planet pl : planets) {
+            if (pl.popped || !pl.body.isValid()) continue;
+            pl.popped = true;
+            world.spawnParticle(Particle.DUST, pl.lastPos.toLocation(world), 6, 0.15, 0.15, 0.15, 0,
+                    new Particle.DustOptions(pl.color, 0.85f));
+            pl.body.remove();
+        }
     }
 
     private static float slamScale(int tier, boolean bag) {
@@ -543,48 +590,69 @@ public final class WellDisplay {
         spawnAt(world, bezier(a, control, b, bu), bead);
     }
 
-    /** Straight retracting tendril for the reel rush-in. */
-    private void drawTendrilPts(Location centre, Location end, double grow, Color color) {
-        if (grow <= 0.02) return;
-        World world = centre.getWorld();
-        Particle.DustOptions dust = new Particle.DustOptions(color, 0.6f);
-        Vector a = centre.toVector();
-        Vector b = end.toVector();
-        Vector control = a.clone().add(b).multiply(0.5).add(new Vector(0, 0.35, 0));
-        for (int s = 1; s <= 5; s++) spawnAt(world, bezier(a, control, b, (s / 5.0) * grow), dust);
+    /**
+     * The per-tier slam finale, animated over {@code ft} in {@code [0, len]}. Each tier reads as a distinct
+     * payoff (not one burst recoloured): a modest pop at ZAYIN/Common up through a layered expanding storm at
+     * ALEPH/Fabled, and the bag gets its own red/blue/gold swirl spectacle.
+     */
+    private void finale(Location at, Color color, int tier, boolean bag, int ft, int len) {
+        World world = at.getWorld();
+        double p = Math.min(1.0, ft / (double) Math.max(1, len));
+        if (bag) { bagFinale(world, at, ft, p); return; }
+        int tt = Math.max(1, Math.min(5, tier));
+        if (ft == 0) { // the slam hit, sized + pitched by tier (higher = deeper, louder)
+            world.spawnParticle(Particle.DUST, at, 10 + tt * 12, 0.3 + tt * 0.12, 0.3, 0.3 + tt * 0.12, 0,
+                    new Particle.DustOptions(color, 1.2f + tt * 0.2f));
+            world.playSound(at, Sound.BLOCK_AMETHYST_BLOCK_RESONATE, 0.6f + tt * 0.08f, (float) (1.5 - tt * 0.12));
+            world.playSound(at, Sound.BLOCK_BEACON_ACTIVATE, 0.6f, (float) (1.5 - tt * 0.12));
+            if (tt >= 5) world.playSound(at, Sound.ENTITY_ENDER_DRAGON_GROWL, 0.4f, 1.6f);
+        }
+        // Concurrent expanding rings — more rings, wider, the higher the tier.
+        int rings = tt >= 5 ? 3 : tt >= 3 ? 2 : 1;
+        for (int k = 0; k < rings; k++) {
+            double phase = p + k * 0.18;
+            if (phase > 1.0) continue;
+            ringFlat(world, at, color, 0.4 + phase * (0.8 + tt * 0.35), 10 + tt * 3);
+        }
+        if (tt >= 4) { // a rising colour column + sparks for the top tiers
+            world.spawnParticle(Particle.DUST, at.clone().add(0, p * (1.0 + tt * 0.3), 0), 3, 0.12, 0.2, 0.12, 0,
+                    new Particle.DustOptions(color, 1.2f));
+            world.spawnParticle(Particle.END_ROD, at, 2, 0.3, 0.4, 0.3, 0.03);
+        }
+        if (tt >= 2 && ft % (PERIOD * 2) == 0) world.spawnParticle(Particle.END_ROD, at, tt, 0.25, 0.3, 0.25, 0.02);
     }
 
-    /** The reveal/pull burst, sized + coloured by outcome tier; the bag gets its own top-tier swirl. */
-    private void tieredBurst(Location at, Color color, int tier, boolean bag) {
-        World world = at.getWorld();
-        if (bag) {
-            ring(world, at, BAG_RED, 1.4, 22);
-            ring(world, at, BAG_BLUE, 1.0, 18);
-            ring(world, at, BAG_GOLD, 0.6, 14);
-            world.spawnParticle(Particle.END_ROD, at, 44, 0.5, 0.6, 0.5, 0.12);
+    /** The Daughters Bag's own top-tier spectacle: three counter-rotating red/blue/gold rings + a gold column. */
+    private void bagFinale(World world, Location at, int ft, double p) {
+        if (ft == 0) {
             world.playSound(at, Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
             world.playSound(at, Sound.BLOCK_BEACON_POWER_SELECT, 0.9f, 0.7f);
-            world.playSound(at, Sound.ENTITY_ENDER_DRAGON_GROWL, 0.4f, 1.5f);
-            return;
+            world.playSound(at, Sound.ENTITY_ENDER_DRAGON_GROWL, 0.5f, 1.4f);
         }
-        int tt = Math.max(1, Math.min(5, tier));
-        world.spawnParticle(Particle.DUST, at, 18 + tt * 14, 0.4 + tt * 0.1, 0.4 + tt * 0.1, 0.4 + tt * 0.1, 0,
-                new Particle.DustOptions(color, 1.2f + tt * 0.2f));
-        ring(world, at, color, 0.6 + tt * 0.2, 12 + tt * 4);
-        float pitch = (float) (1.5 - tt * 0.12); // higher tier = deeper resonance
-        float vol = (float) (0.6 + tt * 0.08);
-        world.playSound(at, Sound.BLOCK_AMETHYST_BLOCK_RESONATE, vol, pitch);
-        world.playSound(at, Sound.BLOCK_BEACON_ACTIVATE, 0.6f, pitch);
-        if (tt >= 5) world.playSound(at, Sound.ENTITY_ENDER_DRAGON_GROWL, 0.35f, 1.6f);
+        double base = 0.4 + p * 2.2;
+        swirlRing(world, at, BAG_RED,  base,        p * 6.0, 14);
+        swirlRing(world, at, BAG_BLUE, base * 0.8, -p * 6.0 + 2.0, 12);
+        swirlRing(world, at, BAG_GOLD, base * 0.6,  p * 6.0 + 4.0, 10);
+        world.spawnParticle(Particle.DUST, at.clone().add(0, p * 2.0, 0), 3, 0.15, 0.25, 0.15, 0,
+                new Particle.DustOptions(BAG_GOLD, 1.3f));
+        if (ft % (PERIOD * 2) == 0) world.spawnParticle(Particle.END_ROD, at, 6, 0.4, 0.5, 0.4, 0.05);
     }
 
-    private void ring(World world, Location at, Color color, double radius, int points) {
-        Particle.DustOptions dust = new Particle.DustOptions(color, 1.4f);
+    private void ringFlat(World world, Location at, Color color, double radius, int points) {
+        Particle.DustOptions dust = new Particle.DustOptions(color, 1.3f);
         for (int i = 0; i < points; i++) {
             double a = (2 * Math.PI * i) / points;
-            Location p = at.clone().add(Math.cos(a) * radius, 0, Math.sin(a) * radius);
-            world.spawnParticle(Particle.DUST, p, 1, 0, 0, 0, 0, dust);
-            world.spawnParticle(Particle.END_ROD, p, 1, 0, 0, 0, 0.01);
+            world.spawnParticle(Particle.DUST, at.clone().add(Math.cos(a) * radius, 0, Math.sin(a) * radius),
+                    1, 0, 0, 0, 0, dust);
+        }
+    }
+
+    private void swirlRing(World world, Location at, Color color, double radius, double angOff, int points) {
+        Particle.DustOptions dust = new Particle.DustOptions(color, 1.2f);
+        for (int i = 0; i < points; i++) {
+            double a = (2 * Math.PI * i) / points + angOff;
+            world.spawnParticle(Particle.DUST, at.clone().add(Math.cos(a) * radius, 0, Math.sin(a) * radius),
+                    1, 0, 0, 0, 0, dust);
         }
     }
 
