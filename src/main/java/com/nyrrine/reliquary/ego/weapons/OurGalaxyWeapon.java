@@ -48,10 +48,11 @@ import java.util.concurrent.ThreadLocalRandom;
  * the sky at close range to brand a foe for the comets to hunt.
  *
  * <ul>
- *   <li><b>Left-click — Star Lash.</b> A quick cosmic slash ({@link SlashVfx}) that <b>marks</b> every foe it
- *       sweeps for {@value #MARK_MS}ms. A marked foe pulls comets in harder and takes
- *       {@code ×}{@value #MARK_DAMAGE_MULT} on the hit that lands (spending the mark). It ties the kit
- *       together: lash up close, then loose comets that seek the branded body.</li>
+ *   <li><b>Left-click — Star Lash.</b> A quick cosmic slash ({@link SlashVfx}) that cuts every foe it sweeps
+ *       for {@value #LASH_DAMAGE} and <b>marks</b> them for {@value #MARK_MS}ms. The mark is a timed buff, not
+ *       a charge: for its whole window a marked foe pulls comets in harder and <b>every</b> comet that lands
+ *       on it takes {@code ×}{@value #MARK_DAMAGE_MULT} — the mark is never spent on a hit, it just lapses. It
+ *       ties the kit together: lash up close, then loose a volley of comets that seek the branded body.</li>
  *   <li><b>Right-click — Comet.</b> Loose a fast homing comet, curving toward the nearest living body ahead of
  *       it (a marked one first). On contact it bursts for {@value #BOLT_DAMAGE} damage in a small starburst; a
  *       wall or a guttered-out light ends it in the same starburst but deals nothing; a raised shield negates
@@ -110,8 +111,9 @@ public final class OurGalaxyWeapon implements EgoWeapon {
     private static final double LASH_RANGE        = 3.5;    // how far ahead the slash brands bodies
     private static final double LASH_ARC_DOT      = 0.30;   // within ~72° of the look line counts as swept
     private static final int    LASH_MARK_CAP     = 4;      // at most this many foes branded by one slash
-    private static final long   MARK_MS           = 6_000L; // how long a brand lingers on a foe
-    private static final double MARK_DAMAGE_MULT  = 1.5;    // a comet hits a marked foe half again as hard
+    private static final double LASH_DAMAGE       = 4.5;    // the slash itself bites each swept foe
+    private static final long   MARK_MS           = 6_000L; // how long a brand lingers — a timed buff, never spent on a hit
+    private static final double MARK_DAMAGE_MULT  = 1.5;    // EVERY comet that hits a marked foe in the window bites half again as hard
 
     // Comet homing.
     private static final double HOMING        = 0.22; // per-tick lerp of heading toward an unmarked mark
@@ -233,22 +235,27 @@ public final class OurGalaxyWeapon implements EgoWeapon {
 
     // ---- Star Lash (left-click brand) ---------------------------------------------
 
-    /** Sweep a cosmic slash and brand every foe roughly ahead within reach, so the comets hunt them. */
+    /** Sweep a cosmic slash that bites and brands every foe roughly ahead within reach, so the comets hunt them. */
     private void starLash(Player player, long now) {
         World world = player.getWorld();
         Location eye = player.getEyeLocation();
         Vector look = eye.getDirection().normalize();
 
-        // The slash itself: a purple-to-starlight crescent swept across the look line.
+        // The slash itself: a purple-to-starlight crescent swept across the look line. sweepEdge(false) keeps
+        // the dust crescent + crit but drops the vanilla white SWEEP_ATTACK arc (Nyrrine: no sword-sweep look).
         SlashVfx.slash(plugin, eye, look)
                 .arcSpan(140).reach(3.2)
                 .colours(C_PURPLE, C_WHITE)
                 .thickness(1.1f).duration(4).tilt(20)
+                .sweepEdge(false)
                 .play();
         world.playSound(eye, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.5f, 1.6f);
         world.playSound(eye, Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.4f, 1.8f);
 
-        // Brand the bodies the slash swept: ahead of the wielder, within reach.
+        // Cut and brand the bodies the slash swept: ahead of the wielder, within reach. The bite is dealt
+        // through the pierce helper with zero armour-ignore — it clears the vanilla left-click swing's hurt
+        // immunity (so the slash actually lands rather than being eaten by those i-frames), respects armour,
+        // and is fenced/zero-knockback, all in one call.
         UUID id = player.getUniqueId();
         int branded = 0;
         for (Entity e : world.getNearbyEntities(eye, LASH_RANGE, LASH_RANGE, LASH_RANGE)) {
@@ -259,6 +266,7 @@ public final class OurGalaxyWeapon implements EgoWeapon {
             if (dist < 0.01 || dist > LASH_RANGE) continue;
             if (to.multiply(1.0 / dist).dot(look) < LASH_ARC_DOT) continue; // not swept — behind or off to the side
             markedUntil.put(le.getUniqueId(), now + MARK_MS);
+            plugin.weapons().pierceDamage(le, LASH_DAMAGE, 0.0, player);
             markFx(le);
             branded++;
         }
@@ -505,7 +513,11 @@ public final class OurGalaxyWeapon implements EgoWeapon {
             spin++;
         }
 
-        /** Contact with a body: shield-negated if it blocks, else modest damage (harder on a branded foe). */
+        /**
+         * Contact with a body: shield-negated if it blocks, else modest damage (harder on a branded foe).
+         * The brand is a <b>timed buff</b>, not a charge — every comet that lands inside its {@link #MARK_MS}
+         * window takes the {@value #MARK_DAMAGE_MULT}× bonus. It is never spent on a hit; it simply lapses.
+         */
         private void impact(Player owner, LivingEntity victim) {
             if (blockedByShield(victim)) {
                 Location c = center(victim).toLocation(world);
@@ -514,16 +526,10 @@ public final class OurGalaxyWeapon implements EgoWeapon {
                 world.spawnParticle(Particle.DUST, c, 6, 0.25, 0.35, 0.25, 0, SWIRL_BLUE);
                 return;
             }
-            UUID vid = victim.getUniqueId();
-            boolean marked = isMarked(vid);
+            boolean marked = isMarked(victim.getUniqueId());
             double dmg = marked ? BOLT_DAMAGE * MARK_DAMAGE_MULT : BOLT_DAMAGE;
             victim.damage(dmg, owner); // re-enters onHit dispatch; this weapon doesn't override it
-            if (marked) {
-                markedUntil.remove(vid); // the brand is spent on the comet that answered it
-                markedStarburst(pos.clone());
-            } else {
-                starburst(pos.clone());
-            }
+            if (marked) markedStarburst(pos.clone()); else starburst(pos.clone());
             world.playSound(pos, Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.8f, 1.3f);
             world.playSound(pos, Sound.ENTITY_FIREWORK_ROCKET_TWINKLE, 0.6f, 1.5f);
         }
@@ -644,10 +650,11 @@ public final class OurGalaxyWeapon implements EgoWeapon {
             ),
             List.of(
                     new EgoLore.Ability("[Left Click] Star Lash",
-                            "A cosmic slash that marks the foes",
-                            "it sweeps for 6 seconds. Comets seek",
-                            "a marked foe first and burst on them",
-                            "for half again the damage."),
+                            "A cosmic slash that cuts for 4 and",
+                            "marks the foes it sweeps for 6",
+                            "seconds. While marked, comets seek",
+                            "them first and burst for half again",
+                            "the damage."),
                     new EgoLore.Ability("[Right Click] Comet",
                             "Looses a homing comet that bursts",
                             "for 6 damage on contact. A raised",
