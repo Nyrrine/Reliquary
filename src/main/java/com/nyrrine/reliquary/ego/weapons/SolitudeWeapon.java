@@ -150,10 +150,14 @@ public final class SolitudeWeapon implements EgoWeapon {
     }
 
     // ---- Duet (dual-wield with Faint Aroma in the off hand) ---------------------------
-    // When Faint Aroma is carried off-hand, the revolver and the crossbow play together: each Bang feeds
-    // the scent + chips through Faint Aroma, and Solitude's otherwise-dead loaded right-click opens Faint
-    // Aroma's Full Bloom. Only the main-hand weapon ticks, so Solitude drives the merged HUD. Both stay
-    // fully functional solo — every Duet path is gated on the off-hand partner being present.
+    // When Faint Aroma is carried off-hand, the revolver and the crossbow play together, woven into Solitude's
+    // FIRE: every 2nd aimed Bang auto-follows a real blossom, the reload becomes Faint-Aroma fire, aimed Bangs
+    // feed the aroma charge and ride the petal bonus, and a loaded right-click at full bloom detonates
+    // Magnificent End. Only the main-hand weapon ticks, so Solitude drives the merged HUD. Both stay fully
+    // functional solo — every Duet path is gated on the off-hand partner being present.
+
+    private static final int  DUET_BANGS_PER_BLOSSOM   = 2;    // every Nth aimed Bang auto-follows a blossom (PLACEHOLDER)
+    private static final long DUET_BLOSSOM_DELAY_TICKS = 10L;  // 0.5s after the Bang (PLACEHOLDER)
 
     /** The Duet partner, fetched lazily from the registry the first time it is needed. */
     private FaintAromaWeapon partner;
@@ -172,6 +176,23 @@ public final class SolitudeWeapon implements EgoWeapon {
     }
 
     /**
+     * Count one aimed Bang toward the auto-follow; on every {@value #DUET_BANGS_PER_BLOSSOM}th, schedule a
+     * real Faint Aroma blossom {@value #DUET_BLOSSOM_DELAY_TICKS} ticks later. The delayed shot re-checks the
+     * off hand (via {@code duetAutoBlossom}) so a partner swapped away mid-delay fires nothing.
+     */
+    private void duetCountBang(Player player) {
+        Cyl cyl = cylinders.get(player.getUniqueId());
+        if (cyl == null) return;
+        if (++cyl.duetBangCount < DUET_BANGS_PER_BLOSSOM) return;
+        cyl.duetBangCount = 0;
+        FaintAromaWeapon fa = partner();
+        if (fa == null) return;
+        plugin.getServer().getScheduler().runTaskLater(plugin,
+                () -> { if (player.isOnline() && duetActive(player)) fa.duetAutoBlossom(player); },
+                DUET_BLOSSOM_DELAY_TICKS);
+    }
+
+    /**
      * A wielder's cylinder. Every timer here is an absolute wall-clock stamp rather than a countdown, so
      * a reload and the ability cooldown both resolve on their own while the gun is stowed and this weapon
      * isn't ticking — nothing has to be driven to completion.
@@ -182,6 +203,7 @@ public final class SolitudeWeapon implements EgoWeapon {
         long reloadStart  = 0L;  // 0 = not reloading
         long storiesReady = 0L;  // stamp the ability comes back up
         BukkitTask burst  = null; // non-null while a Stories burst is running
+        int  duetBangCount = 0;  // Duet: aimed Bangs counted toward the every-2nd auto-follow blossom
 
         boolean reloading() { return reloadStart != 0L; }
     }
@@ -215,7 +237,13 @@ public final class SolitudeWeapon implements EgoWeapon {
         long now = System.currentTimeMillis();
 
         if (cyl.burst != null) return;                       // the burst owns the trigger while it talks
-        if (cyl.reloading()) { dryClick(player); return; }   // mid-reload the trigger is dead
+        if (cyl.reloading()) {
+            // Duet: the reload is otherwise dead trigger-time, so route left-click to Faint Aroma's infinite
+            // blossoms — the reload becomes covering fire (cadence-gated, no ammo). Solo it stays a dry click.
+            if (duetActive(player)) { partner().duetReloadBlossom(player); renderBar(player, cyl); }
+            else dryClick(player);
+            return;
+        }
         if (cyl.rounds <= 0) {                               // an empty gun stays empty — it never auto-reloads
             dryClick(player);
             renderBar(player, cyl);
@@ -227,7 +255,10 @@ public final class SolitudeWeapon implements EgoWeapon {
 
         cyl.lastShot = now;
         cyl.rounds--;
-        loose(player, SHOT_DAMAGE, SHOT_SPREAD, true);
+        // Duet: the revolver's own round rides Faint Aroma's petal bonus too, so blooms buff both weapons.
+        double dmg = SHOT_DAMAGE;
+        if (duetActive(player)) dmg *= partner().duetPetalMultiplier(player);
+        loose(player, dmg, SHOT_SPREAD, true);
         EgoDurability.wearMainHand(player); // mild — one point per aimed round
         renderBar(player, cyl);
     }
@@ -249,10 +280,18 @@ public final class SolitudeWeapon implements EgoWeapon {
         if (cyl.burst != null) return;                       // never stack a second burst
         if (cyl.reloading()) { dryClick(player); return; }
         if (cyl.rounds > 0) {                                // rounds left — no story
-            // Duet: the loaded right-click is otherwise a dead no-op, so with Faint Aroma off-hand it opens
-            // Faint Aroma's Full Bloom — petals loosed alongside a loaded revolver. A DRY cylinder still
-            // tells Stories, exactly as it does solo.
-            if (duetActive(player)) { partner().duetFullBloom(player); renderBar(player, cyl); return; }
+            // Duet: the loaded right-click is otherwise a dead no-op, so with Faint Aroma off-hand it
+            // detonates Faint Aroma's Magnificent End once petals are at full bloom; below that it just says
+            // so. A DRY cylinder still tells Stories, exactly as it does solo.
+            if (duetActive(player)) {
+                if (partner().duetMagnificentEnd(player)) {
+                    renderBar(player, cyl);
+                } else {
+                    player.sendActionBar(EgoHud.status("Magnificent End — petals not ready", FAINT));
+                    dryClick(player);
+                }
+                return;
+            }
             dryClick(player);
             return;
         }
@@ -424,15 +463,20 @@ public final class SolitudeWeapon implements EgoWeapon {
             }
             le.setVelocity(velocity);   // a void in the soul, not a wound — it never shoves them
             voidBloom(world, end);
-            // Duet: an AIMED Bang landing while Faint Aroma is off-hand feeds the scent and chips the body —
-            // gunfire building the bloom. The hurried Stories rounds (aimed == false) do not feed it.
-            if (aimed && duetActive(player)) partner().duetBang(player, le, end);
+            // Duet: an AIMED Bang that lands feeds Faint Aroma's aroma charge — gunfire building the scent
+            // toward its Weakness. The petal-damage bonus was already applied at the trigger; the hurried
+            // Stories rounds (aimed == false) never feed it.
+            if (aimed && duetActive(player)) partner().duetFeedAroma(player, le);
         } else {
             end = eye.clone().add(dir.clone().multiply(maxDist));
         }
 
         reportFx(world, muzzle, aimed);
         drawTracer(world, muzzle, end);
+
+        // Duet: every DUET_BANGS_PER_BLOSSOM aimed Bang fired (hit or miss) auto-follows a real Faint Aroma
+        // blossom half a second later. Stories rounds are aimed == false, so they never count.
+        if (aimed && duetActive(player)) duetCountBang(player);
     }
 
     /** Nudge a shot off true by a hair — a placed round barely, a hurried one noticeably. */
