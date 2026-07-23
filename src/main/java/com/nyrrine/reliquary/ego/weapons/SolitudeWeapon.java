@@ -287,12 +287,8 @@ public final class SolitudeWeapon implements EgoWeapon {
 
         if (cyl.reloading()) { dryClick(player); return; }
         if (cyl.rounds > 0) {                                // loaded, below full bloom
-            // In Duet the loaded RC has no other job now — say why Magnificent End did not fire. Solo: dead.
-            if (duetActive(player)) {
-                player.sendActionBar(EgoHud.status("Magnificent End — petals not ready", FAINT));
-                dryClick(player);
-                return;
-            }
+            // In Duet the loaded RC has no other job now. No popup — the persistent (dim) Magnificent End
+            // indicator on the always-on line already shows it is still charging; just a dry click. Solo: dead.
             dryClick(player);
             return;
         }
@@ -399,26 +395,33 @@ public final class SolitudeWeapon implements EgoWeapon {
      * when it matters). Everything reads in whole seconds.
      */
     private void renderBar(Player player, Cyl cyl) {
+        if (duetActive(player)) { player.sendActionBar(duetBar(player, cyl)); return; }
+
         long now = System.currentTimeMillis();
         Component bar = EgoHud.ammo(PRIMARY, "Chambers", cyl.rounds, MAG);
         if (cyl.reloading()) {
             bar = bar.append(plain("  ", FAINT))
                     .append(EgoHud.cooldown("Reloading", reloadMs(player) - (now - cyl.reloadStart), PRIMARY));
         } else if (cyl.rounds <= 0) {
-            // Dry cylinder: show Stories' state — unless a charged Duet Magnificent End would take the RC
-            // first, in which case the merged readout's ME-ready cue is the truthful one and a "Stories ready"
-            // line here would only mislead about what the right-click does.
-            boolean meTakesRc = duetActive(player) && partner().duetMagnificentReady(player);
-            if (!meTakesRc) {
-                bar = bar.append(plain("  ", FAINT)).append(now < cyl.storiesReady
-                        ? EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT)
-                        : EgoHud.ready(STORIES, PRIMARY));
-            }
+            bar = bar.append(plain("  ", FAINT)).append(now < cyl.storiesReady
+                    ? EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT)
+                    : EgoHud.ready(STORIES, PRIMARY));
         }
-        // Duet: fold Faint Aroma's petal + aroma readout onto the same always-on line, so the merged HUD
-        // reflects both weapons at once (Faint Aroma does not tick from the off hand — Solitude paints it).
-        if (duetActive(player)) bar = EgoHud.row(bar, partner().duetReadout(player));
         player.sendActionBar(bar);
+    }
+
+    /**
+     * The standardized Duet line, all of it on one {@link EgoHud#row}: the revolver's chambers, which mode
+     * left-click is in (Bang while loaded, Faint Aroma blossom-fire while empty or reloading), then Faint
+     * Aroma's slice — the petals gauge with its full-bloom cue, the Blossoming Fragrance charge state, and
+     * the persistent Magnificent End indicator (dim charging, lit at full bloom). Faint Aroma does not tick
+     * from the off hand, so Solitude paints the whole thing.
+     */
+    private Component duetBar(Player player, Cyl cyl) {
+        Component chambers = EgoHud.ammo(PRIMARY, "Chambers", cyl.rounds, MAG);
+        boolean bangMode = cyl.rounds > 0 && !cyl.reloading();
+        Component lcMode = plain("LC ", FAINT).append(plain(bangMode ? "Bang" : "Blossom", PRIMARY));
+        return EgoHud.row(chambers, lcMode, partner().duetReadout(player));
     }
 
     private static Component plain(String s, TextColor c) {

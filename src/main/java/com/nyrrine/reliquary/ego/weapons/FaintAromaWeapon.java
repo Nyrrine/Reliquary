@@ -634,25 +634,25 @@ public final class FaintAromaWeapon implements EgoWeapon {
     // Real damage on every shot comes from deal() routing through the manager's dealing() fence — without it
     // Solitude's onHit would cancel every Faint Aroma arrow (the v1 damage bug).
 
-    /** Petals a Duet blossom grants on fire, on top of the +1 its landed hit grows — so Magnificent End
-     *  comes online in a realistic Duet fight rather than a marathon (PLACEHOLDER for Nyrrine's tune). */
-    private static final int DUET_BLOSSOM_PETALS = 2;
+    /** Petals a Duet blossom grows when it LANDS on a body — the only way petals charge in a Duet, so full
+     *  bloom is a reward for landing shots, not a free on-fire charge. Grown via {@link #feedUnwitheringFlower}
+     *  on the real hit path. PLACEHOLDER for Nyrrine's tune — bump if full bloom comes too slow. */
+    private static final int DUET_PETALS_PER_HIT = 1;
 
     /** Duet: fire one REAL Blossoming arrow from the wielder, ignoring cadence — the every-2nd-Bang follow-up. */
     public void duetAutoBlossom(Player wielder) {
         if (!matches(wielder.getInventory().getItemInOffHand())) return; // stale schedule / partner swapped away
         Bloom bloom = blooms.computeIfAbsent(wielder.getUniqueId(), k -> new Bloom());
         bloom.lastBlossom = System.currentTimeMillis(); // share one cadence clock with the empty/reload stream
-        launch(wielder, bloom, Shot.BLOSSOM);
-        growDuetPetals(wielder, bloom, DUET_BLOSSOM_PETALS);
+        launch(wielder, bloom, Shot.BLOSSOM);           // petals grow only if this LANDS (feedUnwitheringFlower)
         blossomSfx(wielder);
         wearOffHand(wielder);
     }
 
     /**
      * Duet: a Blossoming arrow fired from Solitude's left-click while the cylinder is empty or reloading,
-     * respecting the normal cadence. Infinite (no ammo) and builds petals, so an empty Solitude never goes
-     * dead — it keeps firing through Faint Aroma. True if one actually left.
+     * respecting the normal cadence. Infinite (no ammo), so an empty Solitude never goes dead — it keeps
+     * firing through Faint Aroma. Petals charge only on a landed hit. True if one actually left.
      */
     public boolean duetBlossom(Player wielder) {
         if (!matches(wielder.getInventory().getItemInOffHand())) return false;
@@ -660,24 +660,10 @@ public final class FaintAromaWeapon implements EgoWeapon {
         long now = System.currentTimeMillis();
         if (now - bloom.lastBlossom < BLOSSOM_CADENCE_MS) return false;
         bloom.lastBlossom = now;
-        launch(wielder, bloom, Shot.BLOSSOM);
-        growDuetPetals(wielder, bloom, DUET_BLOSSOM_PETALS);
+        launch(wielder, bloom, Shot.BLOSSOM);           // petals grow only if this LANDS (feedUnwitheringFlower)
         blossomSfx(wielder);
         wearOffHand(wielder);
         return true;
-    }
-
-    /**
-     * Grow petals directly (no heal), clamped to the OFF-hand cap and chiming at full bloom. This is the
-     * Duet blossoms' bonus build, on top of the +1 a landed blossom grows via {@link #feedUnwitheringFlower};
-     * with the empty-fire + every-2nd auto-follows, it lets a sustained engagement reach Magnificent End.
-     */
-    private void growDuetPetals(Player wielder, Bloom bloom, int n) {
-        int cap = petalCap(wielder.getInventory().getItemInOffHand());
-        for (int i = 0; i < n && bloom.petals < cap; i++) {
-            bloom.petals++;
-            if (bloom.petals == cap) fullBloomChime(wielder); // the moment Magnificent End unlocks
-        }
     }
 
     /** Duet: a Solitude aimed Bang that lands feeds this weapon's aroma charge (its ninth catches the Weakness). */
@@ -727,20 +713,35 @@ public final class FaintAromaWeapon implements EgoWeapon {
     }
 
     /**
-     * Duet: this weapon's petals + aroma readout plus a Magnificent-End-ready cue, for Solitude to fold onto
-     * its own always-on line. Reads the OFF-hand cap (Faint Aroma sits there), so a Rampant Bloom cap shows
-     * true and the ME cue lights exactly when a loaded RC would detonate. Full Bloom is not a Duet input, so
-     * its rest is not shown.
+     * Duet: Faint Aroma's slice of the merged HUD, for Solitude to fold onto its one always-on line — the
+     * petals gauge (turning cyan with a "full bloom" cue at the cap), the Blossoming Fragrance charge state
+     * (ready to loose vs cycling its cadence), and a <b>persistent</b> Magnificent End indicator (dim while
+     * charging, lit at full bloom — never a popup). Reads the OFF-hand cap (Faint Aroma sits there), so a
+     * Rampant Bloom cap shows true and the ME light matches exactly when a right-click would detonate.
+     *
+     * <p>The aroma/Weakness meter is deliberately not on this line: with chambers, the LC-mode tag, petals,
+     * the BF state and the ME light already sharing one action bar, a fourth gauge overruns it. Aroma still
+     * builds and fires; it just is not painted here.
      */
     public Component duetReadout(Player wielder) {
         Bloom bloom = blooms.computeIfAbsent(wielder.getUniqueId(), k -> new Bloom());
         int cap = petalCap(wielder.getInventory().getItemInOffHand());
         boolean bloomed = bloom.petals >= cap;
-        Component petals = EgoHud.gauge(bloomed ? CYAN : LAVENDER, (double) bloom.petals / cap,
-                plain("Petals  " + bloom.petals + "/" + cap, COUNT)
-                        .append(plain("  +" + (bloom.petals * PETAL_DAMAGE_PER_STACK_PCT) + "%", bloomed ? CYAN : FAINT)));
-        Component me = bloomed ? EgoHud.ready("Magnificent End", CYAN) : null;
-        return EgoHud.row(petals, aromaReadout(bloom), me);
+
+        Component petalLabel = plain("Petals " + bloom.petals + "/" + cap, COUNT)
+                .append(plain("  +" + (bloom.petals * PETAL_DAMAGE_PER_STACK_PCT) + "%", bloomed ? CYAN : FAINT));
+        if (bloomed) petalLabel = petalLabel.append(plain("  full bloom", CYAN));
+        Component petals = EgoHud.gauge(bloomed ? CYAN : LAVENDER, (double) bloom.petals / cap, petalLabel);
+
+        // Blossoming Fragrance: online (ready to loose now) vs still cycling its cadence. The gap is under a
+        // second, so a ready/cycling word reads cleaner than a seconds countdown that would always round to 1.
+        boolean bfReady = System.currentTimeMillis() - bloom.lastBlossom >= BLOSSOM_CADENCE_MS;
+        Component bf = plain(bfReady ? "Blossom ready" : "Blossom cycling", bfReady ? LAVENDER : FAINT);
+
+        // Persistent Magnificent End indicator: dim while charging, lit at full bloom. Never a transient popup.
+        Component me = plain("Magnificent End", bloomed ? CYAN : FAINT);
+
+        return EgoHud.row(petals, bf, me);
     }
 
     /** The Blossoming Fragrance shot SFX, shared by the solo click and the Duet blossom paths. */
@@ -770,8 +771,14 @@ public final class FaintAromaWeapon implements EgoWeapon {
     private void feedUnwitheringFlower(Player wielder) {
         Bloom bloom = blooms.computeIfAbsent(wielder.getUniqueId(), k -> new Bloom());
         healWielder(wielder);
-        int cap = petalCap(wielder);
-        if (bloom.petals < cap) {
+        // Duet: a blossom that lands while Faint Aroma is carried OFF-hand (Solitude in the main hand) grows a
+        // tunable number of petals per landed hit, so Magnificent End is a reward for landing shots rather than
+        // a free on-fire charge. Solo (Faint Aroma main-hand), the normal one petal per strike. The cap tracks
+        // the same hand so the off-hand's Rampant Bloom is honoured during a Duet.
+        boolean duet = matches(wielder.getInventory().getItemInOffHand());
+        int cap  = duet ? petalCap(wielder.getInventory().getItemInOffHand()) : petalCap(wielder);
+        int gain = duet ? DUET_PETALS_PER_HIT : 1;
+        for (int i = 0; i < gain && bloom.petals < cap; i++) {
             bloom.petals++;
             if (bloom.petals == cap) fullBloomChime(wielder); // the moment Magnificent End unlocks
         }
