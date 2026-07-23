@@ -756,14 +756,13 @@ public final class FaintAromaWeapon implements EgoWeapon {
 
     /**
      * Duet: Faint Aroma's slice of the merged HUD, for Solitude to fold onto its one always-on line — the
-     * petals gauge (turning cyan with a "full bloom" cue at the cap) and the Blossoming Fragrance charge state
-     * (ready to loose vs cycling its cadence). Reads the OFF-hand cap (Faint Aroma sits there), so a Rampant
-     * Bloom cap shows true. The right-click cue (Magnificent End / Full Bloom / Stories) is composed by
-     * Solitude, which alone knows the cylinder state that decides the Stories fallthrough.
+     * petals gauge alone (turning cyan with a "full bloom" cue at the cap). Reads the OFF-hand cap (Faint
+     * Aroma sits there), so a Rampant Bloom cap shows true. The right-click cue (Magnificent End / Stories /
+     * Full Bloom) is composed by Solitude, which alone knows the cylinder state that decides the priority.
      *
-     * <p>The aroma/Weakness meter is deliberately not on this line: with chambers, the LC-mode tag, petals,
-     * the BF state and the RC cue already sharing one action bar, a fourth gauge overruns it. Aroma still
-     * builds and fires; it just is not painted here.
+     * <p>Neither the aroma/Weakness meter nor a Blossoming Fragrance charge state is painted here: the aroma
+     * gauge would overrun the shared bar, and the BF cadence readout was dropped on Nyrrine's call (the player
+     * does not need it). Both still function; they are simply not shown.
      */
     public Component duetReadout(Player wielder) {
         Bloom bloom = blooms.computeIfAbsent(wielder.getUniqueId(), k -> new Bloom());
@@ -773,14 +772,7 @@ public final class FaintAromaWeapon implements EgoWeapon {
         Component petalLabel = plain("Petals " + bloom.petals + "/" + cap, COUNT)
                 .append(plain("  +" + (bloom.petals * PETAL_DAMAGE_PER_STACK_PCT) + "%", bloomed ? CYAN : FAINT));
         if (bloomed) petalLabel = petalLabel.append(plain("  full bloom", CYAN));
-        Component petals = EgoHud.gauge(bloomed ? CYAN : LAVENDER, (double) bloom.petals / cap, petalLabel);
-
-        // Blossoming Fragrance: online (ready to loose now) vs still cycling its cadence. The gap is under a
-        // second, so a ready/cycling word reads cleaner than a seconds countdown that would always round to 1.
-        boolean bfReady = System.currentTimeMillis() - bloom.lastBlossom >= BLOSSOM_CADENCE_MS;
-        Component bf = plain(bfReady ? "Blossom ready" : "Blossom cycling", bfReady ? LAVENDER : FAINT);
-
-        return EgoHud.row(petals, bf);
+        return EgoHud.gauge(bloomed ? CYAN : LAVENDER, (double) bloom.petals / cap, petalLabel);
     }
 
     /** The Blossoming Fragrance shot SFX, shared by the solo click and the Duet blossom paths. */

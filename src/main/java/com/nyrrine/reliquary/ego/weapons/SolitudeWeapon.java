@@ -275,38 +275,38 @@ public final class SolitudeWeapon implements EgoWeapon {
         // at all, by design. It is what the gun does when it has nothing left to say.
         if (cyl.burst != null) return;                       // never stack a second burst
 
-        // Duet: the right-click drives Faint Aroma at ANY cylinder state, in priority order:
-        //   1. petals at full bloom -> Magnificent End (the finisher).
-        //   2. else Full Bloom off cooldown -> its real 3-arrow burst (fenced so the arrows deal damage).
-        //   3. else (Full Bloom resting) -> fall through to Solitude's own Stories (dry) / dead loaded RC.
-        // The composed HUD's RC cue always names which of these the trigger will do right now.
+        // Duet: the right-click drives Faint Aroma, in priority order (Nyrrine's ruling):
+        //   1. Magnificent End - petals at full bloom (the finisher).
+        //   2. Stories         - if online: a dry cylinder, off its cooldown, not mid-reload. Favored over FB.
+        //   3. Full Bloom      - the fallback that otherwise gives the right-click a purpose: a loaded or
+        //                        reloading cylinder, or Stories resting, whenever Full Bloom is itself off cd.
+        //   4. else            - a dry click; the composed HUD's RC cue names whatever is resting.
         if (duetActive(player)) {
             if (partner().duetMagnificentReady(player)) {
                 partner().duetMagnificentEnd(player);
-                renderBar(player, cyl);
-                return;
+            } else if (storiesOnline(cyl, now)) {
+                beginStories(player, cyl);
+            } else if (!partner().duetFullBloom(player)) {   // fires the burst if ready; false while resting
+                dryClick(player);                            // ME / Stories / Full Bloom all unavailable
             }
-            if (partner().duetFullBloom(player)) {           // fires the burst if ready; false while resting
-                renderBar(player, cyl);
-                return;
-            }
-            // Full Bloom is resting — fall through to the Stories/loaded-dead logic below (rendered composed).
-        }
-
-        if (cyl.reloading()) { dryClick(player); if (duetActive(player)) renderBar(player, cyl); return; }
-        if (cyl.rounds > 0) {                                // loaded, no ME/Full Bloom available
-            dryClick(player);
-            if (duetActive(player)) renderBar(player, cyl);  // composed line's RC cue shows why (Full Bloom resting)
+            renderBar(player, cyl);
             return;
         }
-        // dry cylinder -> Stories (the Duet fallthrough when Full Bloom is resting)
+
+        // Solo (unchanged): the loaded right-click is dead, a dry cylinder tells Stories.
+        if (cyl.reloading()) { dryClick(player); return; }
+        if (cyl.rounds > 0) { dryClick(player); return; }
         if (now < cyl.storiesReady) {
             dryClick(player);
-            if (duetActive(player)) renderBar(player, cyl);  // composed line shows the Stories rest
-            else player.sendActionBar(EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT));
+            player.sendActionBar(EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT));
             return;
         }
         beginStories(player, cyl);
+    }
+
+    /** True when Stories is the right-click's job right now: a dry cylinder, off its cooldown, not reloading. */
+    private boolean storiesOnline(Cyl cyl, long now) {
+        return cyl.rounds <= 0 && !cyl.reloading() && now >= cyl.storiesReady;
     }
 
     /**
@@ -420,10 +420,9 @@ public final class SolitudeWeapon implements EgoWeapon {
 
     /**
      * The standardized Duet line, all of it on one {@link EgoHud#row}: the revolver's chambers, which mode
-     * left-click is in (Bang while loaded, Faint Aroma blossom-fire while empty or reloading), Faint Aroma's
-     * slice (the petals gauge with its full-bloom cue and the Blossoming Fragrance charge state), then the
-     * right-click cue naming what RC does right now. Faint Aroma does not tick from the off hand, so Solitude
-     * paints the whole thing.
+     * left-click is in (Bang while loaded, Faint Aroma blossom-fire while empty or reloading), the petals
+     * gauge with its full-bloom cue, then the right-click cue naming what RC does right now. Faint Aroma does
+     * not tick from the off hand, so Solitude paints the whole thing.
      */
     private Component duetBar(Player player, Cyl cyl) {
         Component chambers = EgoHud.ammo(PRIMARY, "Chambers", cyl.rounds, MAG);
@@ -434,28 +433,25 @@ public final class SolitudeWeapon implements EgoWeapon {
 
     /**
      * The right-click cue: names what the trigger will do right now, mirroring {@link #onInteract}'s Duet
-     * priority exactly — Magnificent End at full bloom (lit), else Full Bloom (ready, or its rest), else the
-     * Stories fallthrough on a dry cylinder (ready, or its rest), else the dead loaded/reloading RC (which
-     * shows the Full Bloom rest, since that is what is blocking it).
+     * priority branch-for-branch — Magnificent End at full bloom (lit), else Stories while it is online
+     * (favored, on a dry cylinder), else Full Bloom (ready, or its rest). When everything is resting it names
+     * the primary path for this cylinder state: the Stories rest on a dry cylinder, else the Full Bloom rest.
      */
     private Component rcCue(Player player, Cyl cyl) {
         long now = System.currentTimeMillis();
         Component label;
         if (partner().duetMagnificentReady(player)) {
             label = plain("Magnificent End", PRIMARY);           // lit — RC detonates the finisher
+        } else if (storiesOnline(cyl, now)) {
+            label = plain("Stories", PRIMARY);                   // dry + ready — RC tells Stories (favored)
+        } else if (partner().duetFullBloomRemaining(player) <= 0L) {
+            label = plain("Full Bloom", PRIMARY);                // RC fires the burst
+        } else if (cyl.rounds <= 0 && !cyl.reloading()) {
+            // Everything resting on a dry cylinder: Stories is the favored path, so name its rest.
+            label = EgoHud.cooldown("Stories", Math.max(1L, cyl.storiesReady - now), FAINT);
         } else {
-            long fb = partner().duetFullBloomRemaining(player);
-            if (fb <= 0L) {
-                label = plain("Full Bloom", PRIMARY);            // ready — RC fires the burst
-            } else if (cyl.rounds <= 0 && !cyl.reloading()) {
-                // Full Bloom resting, dry cylinder -> RC falls through to Stories.
-                label = now < cyl.storiesReady
-                        ? EgoHud.cooldown("Stories", cyl.storiesReady - now, FAINT)
-                        : plain("Stories", PRIMARY);
-            } else {
-                // Full Bloom resting, loaded/reloading -> RC is dead; name what is blocking it.
-                label = EgoHud.cooldown("Full Bloom", fb, FAINT);
-            }
+            // Everything resting on a loaded/reloading cylinder: Full Bloom is the only path — name its rest.
+            label = EgoHud.cooldown("Full Bloom", partner().duetFullBloomRemaining(player), FAINT);
         }
         return plain("RC ", FAINT).append(label);
     }
