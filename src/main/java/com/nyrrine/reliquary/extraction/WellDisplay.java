@@ -267,7 +267,7 @@ public final class WellDisplay {
                 if (t < REEL_END) {
                     double reelScale = t < LEAD_TICKS ? REEL_SCALE * (t / (double) LEAD_TICKS) : REEL_SCALE;
                     place(reel, centre, cc.clone().add(new Vector(0, 0.35, 0)), yaw((float) (time * 5)), (float) reelScale);
-                    feedFloaters(centre, time); // frozen floaters stream their colour inward, feeding the reel
+                    // The floaters hold frozen through the spin (the idle is cancelled); no inward feed particles.
                     if (t >= LEAD_TICKS && t >= nextSwap) {
                         double rp = (t - LEAD_TICKS) / (double) REEL_TICKS;
                         FloatItem fi = pool.get(ThreadLocalRandom.current().nextInt(pool.size()));
@@ -299,21 +299,6 @@ public final class WellDisplay {
             }
         };
         active.runTaskTimer(plugin, 0L, PERIOD);
-    }
-
-    /** The frozen floaters each stream a colour bead inward toward the reel and breathe gently — "feeding" it. */
-    private void feedFloaters(Location centre, double time) {
-        World world = centre.getWorld();
-        Vector cc = centre.toVector();
-        for (Planet pl : planets) {
-            if (pl.popped || !pl.body.isValid()) continue;
-            double pulse = 1.0 + 0.12 * Math.sin(time * 6 + pl.order);
-            place(pl.body, centre, pl.lastPos, yaw((float) (time * 0.8)), (float) (pl.scale * pulse));
-            double u = frac01((float) (time * 1.3 + pl.order * 0.13));
-            Vector bead = lerp(pl.lastPos, cc, u);
-            world.spawnParticle(Particle.DUST, bead.toLocation(world), 1, 0.02, 0.02, 0.02, 0,
-                    new Particle.DustOptions(pl.color, 0.85f));
-        }
     }
 
     /** Pop each floater out (a small colour puff) as the reel slams. */
@@ -591,69 +576,60 @@ public final class WellDisplay {
     }
 
     /**
-     * The per-tier slam finale, animated over {@code ft} in {@code [0, len]}. Each tier reads as a distinct
-     * payoff (not one burst recoloured): a modest pop at ZAYIN/Common up through a layered expanding storm at
-     * ALEPH/Fabled, and the bag gets its own red/blue/gold swirl spectacle.
+     * The per-tier slam finale: firework-style crackling bursts spread across {@code [0, len]}, escalating with
+     * tier (Common = a single modest crackle, ALEPH/Fabled = several bigger, longer, layered crackles), the bag
+     * getting its own red/blue/gold multi-firework spectacle. <b>Damage-free by construction:</b> it uses
+     * {@link Particle#FIREWORK} sparks + a coloured dust star + the firework crackle SFX, so no {@code Firework}
+     * entity is spawned and nothing can ever hurt a player (the sanctioned no-damage path).
      */
     private void finale(Location at, Color color, int tier, boolean bag, int ft, int len) {
         World world = at.getWorld();
-        double p = Math.min(1.0, ft / (double) Math.max(1, len));
-        if (bag) { bagFinale(world, at, ft, p); return; }
+        if (bag) { bagFinale(world, at, ft, len); return; }
         int tt = Math.max(1, Math.min(5, tier));
-        if (ft == 0) { // the slam hit, sized + pitched by tier (higher = deeper, louder)
-            world.spawnParticle(Particle.DUST, at, 10 + tt * 12, 0.3 + tt * 0.12, 0.3, 0.3 + tt * 0.12, 0,
-                    new Particle.DustOptions(color, 1.2f + tt * 0.2f));
-            world.playSound(at, Sound.BLOCK_AMETHYST_BLOCK_RESONATE, 0.6f + tt * 0.08f, (float) (1.5 - tt * 0.12));
-            world.playSound(at, Sound.BLOCK_BEACON_ACTIVATE, 0.6f, (float) (1.5 - tt * 0.12));
-            if (tt >= 5) world.playSound(at, Sound.ENTITY_ENDER_DRAGON_GROWL, 0.4f, 1.6f);
+        int frames = Math.max(1, len / PERIOD);
+        int frame = ft / PERIOD;
+        int bursts = tt;                              // Common 1 ... ALEPH 5 crackles across the window
+        int step = Math.max(1, frames / bursts);
+        if (frame % step == 0 && frame / step < bursts) {
+            crackle(world, at.clone().add(burstOffset(frame / step, tt)), color, 0.8 + tt * 0.32, tt);
         }
-        // Concurrent expanding rings — more rings, wider, the higher the tier.
-        int rings = tt >= 5 ? 3 : tt >= 3 ? 2 : 1;
-        for (int k = 0; k < rings; k++) {
-            double phase = p + k * 0.18;
-            if (phase > 1.0) continue;
-            ringFlat(world, at, color, 0.4 + phase * (0.8 + tt * 0.35), 10 + tt * 3);
-        }
-        if (tt >= 4) { // a rising colour column + sparks for the top tiers
-            world.spawnParticle(Particle.DUST, at.clone().add(0, p * (1.0 + tt * 0.3), 0), 3, 0.12, 0.2, 0.12, 0,
-                    new Particle.DustOptions(color, 1.2f));
-            world.spawnParticle(Particle.END_ROD, at, 2, 0.3, 0.4, 0.3, 0.03);
-        }
-        if (tt >= 2 && ft % (PERIOD * 2) == 0) world.spawnParticle(Particle.END_ROD, at, tt, 0.25, 0.3, 0.25, 0.02);
     }
 
-    /** The Daughters Bag's own top-tier spectacle: three counter-rotating red/blue/gold rings + a gold column. */
-    private void bagFinale(World world, Location at, int ft, double p) {
+    /** The Daughters Bag's own spectacle: a run of red/blue/gold firework crackles across the window. */
+    private void bagFinale(World world, Location at, int ft, int len) {
         if (ft == 0) {
             world.playSound(at, Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
-            world.playSound(at, Sound.BLOCK_BEACON_POWER_SELECT, 0.9f, 0.7f);
+            world.playSound(at, Sound.ENTITY_FIREWORK_ROCKET_LARGE_BLAST, 1.0f, 0.9f);
             world.playSound(at, Sound.ENTITY_ENDER_DRAGON_GROWL, 0.5f, 1.4f);
         }
-        double base = 0.4 + p * 2.2;
-        swirlRing(world, at, BAG_RED,  base,        p * 6.0, 14);
-        swirlRing(world, at, BAG_BLUE, base * 0.8, -p * 6.0 + 2.0, 12);
-        swirlRing(world, at, BAG_GOLD, base * 0.6,  p * 6.0 + 4.0, 10);
-        world.spawnParticle(Particle.DUST, at.clone().add(0, p * 2.0, 0), 3, 0.15, 0.25, 0.15, 0,
-                new Particle.DustOptions(BAG_GOLD, 1.3f));
-        if (ft % (PERIOD * 2) == 0) world.spawnParticle(Particle.END_ROD, at, 6, 0.4, 0.5, 0.4, 0.05);
-    }
-
-    private void ringFlat(World world, Location at, Color color, double radius, int points) {
-        Particle.DustOptions dust = new Particle.DustOptions(color, 1.3f);
-        for (int i = 0; i < points; i++) {
-            double a = (2 * Math.PI * i) / points;
-            world.spawnParticle(Particle.DUST, at.clone().add(Math.cos(a) * radius, 0, Math.sin(a) * radius),
-                    1, 0, 0, 0, 0, dust);
+        int frames = Math.max(1, len / PERIOD);
+        int frame = ft / PERIOD;
+        int bursts = 6;
+        int step = Math.max(1, frames / bursts);
+        if (frame % step == 0 && frame / step < bursts) {
+            int k = frame / step;
+            Color c = switch (k % 3) { case 0 -> BAG_RED; case 1 -> BAG_BLUE; default -> BAG_GOLD; };
+            crackle(world, at.clone().add(burstOffset(k, 5)), c, 1.7, 5);
         }
     }
 
-    private void swirlRing(World world, Location at, Color color, double radius, double angOff, int points) {
-        Particle.DustOptions dust = new Particle.DustOptions(color, 1.2f);
-        for (int i = 0; i < points; i++) {
-            double a = (2 * Math.PI * i) / points + angOff;
-            world.spawnParticle(Particle.DUST, at.clone().add(Math.cos(a) * radius, 0, Math.sin(a) * radius),
-                    1, 0, 0, 0, 0, dust);
-        }
+    /** One damage-free firework crackle: a coloured star + firework sparks + the firework blast/twinkle SFX. */
+    private void crackle(World world, Location at, Color color, double power, int tt) {
+        double spread = 0.25 * power;
+        world.spawnParticle(Particle.DUST, at, (int) (16 * power), spread, spread, spread, 0,
+                new Particle.DustOptions(color, 1.5f));
+        world.spawnParticle(Particle.FIREWORK, at, (int) (24 * power), 0.35 * power, 0.35 * power, 0.35 * power, 0.09);
+        world.playSound(at, Sound.ENTITY_FIREWORK_ROCKET_BLAST, 0.9f, (float) (1.3 - tt * 0.06));
+        world.playSound(at, Sound.ENTITY_FIREWORK_ROCKET_TWINKLE, 0.7f, 1.0f);
+        if (tt >= 4) world.playSound(at, Sound.ENTITY_FIREWORK_ROCKET_LARGE_BLAST, 0.9f, 1.0f);
+    }
+
+    /** A deterministic offset so multi-crackle finales spread out instead of stacking dead-centre. */
+    private Vector burstOffset(int k, int tt) {
+        if (tt <= 1 || k == 0) return new Vector(0, 0, 0);
+        double a = k * 2.399963; // golden-angle spread
+        double r = 0.5 + (k % 3) * 0.35;
+        return new Vector(Math.cos(a) * r, (k % 2) * 0.4, Math.sin(a) * r);
     }
 
     private void ambientHaze(Location centre, double time) {

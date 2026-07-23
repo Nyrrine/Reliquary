@@ -201,31 +201,60 @@ public final class ExtractionTicket {
         meta.setCustomModelDataComponent(cmd);
     }
 
-    /** The Standard ticket: name + the full weighted-odds table on the lore. No em-dashes. */
+    /**
+     * The Standard ticket: name + a colour-coded rarity odds table (each entry tinted to match its in-world glow,
+     * grades from {@link EgoGrade#color()}, loot tiers from {@link Pouch.Rarity#nameColor()}). No em-dashes.
+     */
     private static void styleStandard(ItemMeta meta) {
         meta.displayName(Component.text("Standard Extraction Ticket").color(NAME)
                 .decoration(TextDecoration.ITALIC, false).decoration(TextDecoration.BOLD, true));
-        TextColor odds = NamedTextColor.AQUA;
         TextColor head = TextColor.color(0xC9CDD6);
         List<Component> lore = new ArrayList<>();
-        lore.add(Component.text("Hold it near Carmen's Brain and sneak to roll.", FAINT)
+        lore.add(Component.text("Hold near Carmen's Brain, sneak to roll.", FAINT)
                 .decoration(TextDecoration.ITALIC, true));
-        lore.add(oddsLine("Weighted 100% table:", head, false));
-        lore.add(oddsLine("ALEPH 1% · WAW 3% · HE 4.5% · TETH 5% · ZAYIN 6.5%", odds, false));
-        lore.add(oddsLine("weapons 20% total", FAINT, true));
-        lore.add(oddsLine("Common Pouch 49% · Uncommon 20% · Rare 7% · Legendary 3%", odds, false));
-        lore.add(oddsLine("pouches 79% total", FAINT, true));
-        lore.add(oddsLine("A Certain Daughters Bag 1%", TextColor.color(0xFFC94D), false));
-        lore.add(Component.text("Sneak right-click near the Brain to roll (spends the ticket).", FAINT)
+        lore.add(Component.empty());
+        lore.add(Component.text("Weapons (20%)", head).decoration(TextDecoration.ITALIC, false));
+        lore.add(row(gradeEntry(EgoGrade.ALEPH, "1%"), gradeEntry(EgoGrade.WAW, "3%"),
+                gradeEntry(EgoGrade.HE, "4.5%"), gradeEntry(EgoGrade.TETH, "5%"), gradeEntry(EgoGrade.ZAYIN, "6.5%")));
+        lore.add(Component.empty());
+        lore.add(Component.text("Loot (79%)", head).decoration(TextDecoration.ITALIC, false));
+        lore.add(row(lootEntry(Pouch.Rarity.LEGENDARY, "3%"), lootEntry(Pouch.Rarity.RARE, "7%"),
+                lootEntry(Pouch.Rarity.UNCOMMON, "20%"), lootEntry(Pouch.Rarity.COMMON, "49%")));
+        lore.add(Component.empty());
+        lore.add(Component.text("Special (1%)", head).decoration(TextDecoration.ITALIC, false));
+        lore.add(Component.text("A Certain ", NamedTextColor.RED).decoration(TextDecoration.ITALIC, false)
+                .append(Component.text("Daughters", TextColor.color(0x3B5DC9)))
+                .append(Component.text(" Bag", NamedTextColor.RED)));
+        lore.add(Component.empty());
+        lore.add(Component.text("Sneak right-click near the Brain to roll. Spends the ticket.", FAINT)
                 .decoration(TextDecoration.ITALIC, true));
         meta.lore(lore);
         meta.setEnchantmentGlintOverride(true);
         var cmd = meta.getCustomModelDataComponent();
-        cmd.setStrings(List.of("extraction/ticket")); // no new art this round — base model
+        cmd.setStrings(List.of("extraction/ticket")); // no new art this round, base model
         meta.setCustomModelDataComponent(cmd);
     }
 
-    private static Component oddsLine(String text, TextColor color, boolean italic) {
-        return Component.text(text, color).decoration(TextDecoration.ITALIC, italic);
+    /** A grade odds entry ("ALEPH 1%") tinted to the grade's show colour. */
+    private static Component gradeEntry(EgoGrade grade, String pct) {
+        return Component.text(grade.display() + " " + pct, TextColor.color(grade.color().asRGB()))
+                .decoration(TextDecoration.ITALIC, false);
+    }
+
+    /** A loot odds entry ("Fabled 3%") tinted to the rarity's name colour. */
+    private static Component lootEntry(Pouch.Rarity rarity, String pct) {
+        return Component.text(rarity.display() + " " + pct, rarity.nameColor())
+                .decoration(TextDecoration.ITALIC, false);
+    }
+
+    /** Join tier entries with gray " · " separators into one lore row. */
+    private static Component row(Component... entries) {
+        Component sep = Component.text(" · ", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false);
+        Component out = Component.empty().decoration(TextDecoration.ITALIC, false);
+        for (int i = 0; i < entries.length; i++) {
+            if (i > 0) out = out.append(sep);
+            out = out.append(entries[i]);
+        }
+        return out;
     }
 }

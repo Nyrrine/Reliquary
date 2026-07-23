@@ -6,6 +6,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Bukkit;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -17,7 +18,10 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -31,9 +35,17 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public final class ExtractionCommand {
 
+    /** Ticks a player waits between sneak-pulls (placeholder ≈ the show length + a beat). */
+    private static final int PULL_COOLDOWN_TICKS = 120;
+
     private final Reliquary plugin;
     private final WellDisplay wellDisplay;
     private CarmenBrainVfx brainVfx; // wired after construction (the Brain manager is built later)
+
+    // One extraction at a time, server-wide: true while a pull is animating (in-memory; a restart clears it).
+    private boolean extractionLocked = false;
+    // Per-player next-allowed tick for a sneak-pull (in-memory).
+    private final Map<UUID, Integer> cooldownUntilTick = new HashMap<>();
 
     public ExtractionCommand(Reliquary plugin) {
         this.plugin = plugin;
@@ -243,6 +255,20 @@ public final class ExtractionCommand {
 
     /** Route a ticket-holder's Brain interaction: Standard rolls the weighted table, grade/custom the weapon pool. */
     private void ticketWell(Player player, Location brainCentre, boolean sneaking, ItemStack ticket) {
+        // Global lock: while any pull animates, refuse EVERY interaction (preview + pull, any player/brain) and
+        // never touch the single-scene WellDisplay — a stray reveal would stop() and disrupt the live pull.
+        if (extractionLocked) {
+            player.sendActionBar(msg("Carmen's Brain is busy, one moment.", GREY));
+            return;
+        }
+        // Per-player cooldown gates only the sneak-pull; a preview is free. Both refusals are before any spend.
+        if (sneaking) {
+            Integer until = cooldownUntilTick.get(player.getUniqueId());
+            if (until != null && Bukkit.getCurrentTick() < until) {
+                player.sendActionBar(msg("One moment before the next extraction.", GREY));
+                return;
+            }
+        }
         if (ExtractionTicket.isStandard(ticket)) standardWell(player, brainCentre, sneaking, ticket);
         else poolWell(player, brainCentre, sneaking, ticket);
     }
@@ -341,11 +367,14 @@ public final class ExtractionCommand {
      */
     private void deliverAfterShow(Player player, Location brainCentre, ItemStack ticket,
                                   ItemStack deliverable, Weapon engage, WellDisplay.PullShow show) {
+        final UUID uuid = player.getUniqueId();
+        extractionLocked = true;                                             // acquire the global lock for the pull
+        cooldownUntilTick.put(uuid, Bukkit.getCurrentTick() + PULL_COOLDOWN_TICKS);
         spend(player, ticket);
-        final java.util.UUID uuid = player.getUniqueId();
         final Location dropAt = brainCentre.clone();
         if (brainVfx != null) brainVfx.beginExtract(brainCentre);
         Runnable onComplete = () -> {
+            extractionLocked = false;  // release FIRST so a delivery hiccup below can never strand the lock
             if (brainVfx != null) brainVfx.endExtract(brainCentre);
             Player p = plugin.getServer().getPlayer(uuid);
             if (p != null && p.isOnline()) giveOrDrop(p, deliverable);
