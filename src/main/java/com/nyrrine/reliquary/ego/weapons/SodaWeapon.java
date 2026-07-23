@@ -2,7 +2,6 @@ package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
-import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
@@ -97,7 +96,6 @@ public final class SodaWeapon implements EgoWeapon {
     private static final Color BLUE   = Color.fromRGB(0x5F, 0xB8, 0xFF);
     private static final Particle.DustOptions SPRAY  = new Particle.DustOptions(PURPLE, 0.9f);
     private static final Particle.DustOptions FOAM   = new Particle.DustOptions(LILAC, 0.8f);
-    private static final Particle.DustOptions BUBBLE = new Particle.DustOptions(BLUE, 0.7f);
 
     public SodaWeapon(Reliquary plugin) {
         this.plugin = plugin;

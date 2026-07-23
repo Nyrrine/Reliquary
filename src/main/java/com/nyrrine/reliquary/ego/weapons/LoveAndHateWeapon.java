@@ -2,7 +2,6 @@ package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
-import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -40,7 +39,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * In the Name of Love and Hate — "The Queen of Hatred" (Lobotomy Corp E.G.O, WAW).

@@ -2,7 +2,6 @@ package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
-import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
@@ -137,7 +136,6 @@ public final class CrimsonScarWeapon implements EgoWeapon {
 
     // Blood-drunk tuning — the below-half-HP frenzy (unchanged; "the effects are good").
     private static final double BLOOD_DRUNK_FRAC     = 0.50;  // below 50% max HP
-    private static final int    BLOOD_DRUNK_FRAC_PCT = 50;    // (for the javadoc/tuning readout)
     private static final double BLOOD_DRUNK_MULT     = 1.5;   // damage buff on the chop
     private static final double SPLASH_RADIUS        = 3.0;   // blades reach out this far
     private static final int    SPLASH_CAP           = 6;     // at most this many caught in the spray
@@ -164,7 +162,6 @@ public final class CrimsonScarWeapon implements EgoWeapon {
      */
     private static final TextColor BLOOD = TextColor.color(0xD8323C);
     private static final TextColor STEEL = TextColor.color(0xB8BCC6); // steel / reload accent
-    private static final TextColor FAINT = TextColor.color(0x8A6A6C); // conditions / controls / last line
 
     private static final Color RED_DEEP = Color.fromRGB(0xC0, 0x18, 0x23);
     private static final Color RED_BRIGHT = Color.fromRGB(0xF0, 0x3A, 0x44);

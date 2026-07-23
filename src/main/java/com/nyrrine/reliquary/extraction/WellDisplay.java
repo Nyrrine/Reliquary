@@ -694,7 +694,6 @@ public final class WellDisplay {
     }
 
     private static double easeOut(double x) { double m = 1 - x; return 1 - m * m * m; }
-    private static double easeIn(double x)  { return x * x * x; }
     private static double lerp(double a, double b, double t) { return a + (b - a) * t; }
     private static float frac01(float x) { return (float) (x - Math.floor(x)); }
 

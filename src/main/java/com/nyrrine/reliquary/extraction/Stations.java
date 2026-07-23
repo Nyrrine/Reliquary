@@ -33,21 +33,6 @@ public final class Stations {
         return loc.getWorld().getName() + "," + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ();
     }
 
-    /** The station type at a block, or {@code null} if it's an ordinary block. */
-    public StationType typeAt(Block block) {
-        StationType t = placed.get(key(block.getLocation()));
-        // Guard against a registry that outlived its block (explosion, piston, WorldEdit, fluid): if the
-        // block no longer matches the station's base material, it isn't a station — don't honor a ghost.
-        if (t != null && !isBase(block.getType(), t.base())) return null;
-        return t;
-    }
-
-    /** True if {@code actual} is the station's base — treating a floor head and its wall variant as the same. */
-    private static boolean isBase(Material actual, Material base) {
-        if (actual == base) return true;
-        return base == Material.PLAYER_HEAD && actual == Material.PLAYER_WALL_HEAD;
-    }
-
     /** The world-locations of every placed Carmen's Brain (a placed WELL), for the idle VFX manager. */
     public java.util.List<Location> wells() {
         java.util.List<Location> out = new java.util.ArrayList<>();

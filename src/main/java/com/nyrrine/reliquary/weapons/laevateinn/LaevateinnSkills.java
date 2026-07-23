@@ -2,7 +2,6 @@ package com.nyrrine.reliquary.weapons.laevateinn;
 
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.ego.EgoHud;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Location;
 import org.bukkit.Material;

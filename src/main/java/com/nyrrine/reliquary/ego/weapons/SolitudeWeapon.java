@@ -2,7 +2,6 @@ package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
-import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
@@ -247,8 +246,7 @@ public final class SolitudeWeapon implements EgoWeapon {
             renderBar(player, cyl);
             return;
         }
-        // The hammer is still cycling. Silent — the action bar already reads "Hammer — Ns"; a click on
-        // every early pull would just be noise.
+        // The hammer is still cycling; a click on every early pull would just be noise, so stay silent.
         if (now - cyl.lastShot < SHOT_INTERVAL_MS) return;
 
         cyl.lastShot = now;

@@ -70,13 +70,6 @@ public final class ExtractionTicket {
         return item;
     }
 
-    /** Whether this ticket was minted as a custom (hand-picked) ticket, for naming. */
-    public static boolean isCustom(ItemStack item) {
-        if (item == null) return false;
-        ItemMeta m = item.getItemMeta();
-        return m != null && m.getPersistentDataContainer().has(CUSTOM, PersistentDataType.BYTE);
-    }
-
     /** Whether this is a Standard ticket (weighted table with pouch/bag outcomes). */
     public static boolean isStandard(ItemStack item) {
         if (item == null) return false;

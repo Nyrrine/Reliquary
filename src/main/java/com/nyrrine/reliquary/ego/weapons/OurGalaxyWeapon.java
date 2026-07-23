@@ -3,7 +3,6 @@ package com.nyrrine.reliquary.ego.weapons;
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.Blink;
 import com.nyrrine.reliquary.core.EgoWeapon;
-import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;

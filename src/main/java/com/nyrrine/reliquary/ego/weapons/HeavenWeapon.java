@@ -2,7 +2,6 @@ package com.nyrrine.reliquary.ego.weapons;
 
 import com.nyrrine.reliquary.Reliquary;
 import com.nyrrine.reliquary.core.EgoWeapon;
-import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoEnchants;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
@@ -170,7 +169,6 @@ public final class HeavenWeapon implements EgoWeapon, Listener {
     private static final double BOLT_HIT_RADIUS      = 1.2;
     /** How the eye-tree stands: fork height and how far the branch-eyes spread. */
     private static final double TREE_FORK_Y          = 1.5;
-    private static final double TREE_SPREAD          = 1.6;
 
     /**
      * Eye positions relative to the anchor (x, y, z): the central eye first, then a couple of smaller ones.
