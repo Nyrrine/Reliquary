@@ -31,10 +31,11 @@ public final class ExtractionTicket {
 
     private ExtractionTicket() {}
 
-    private static final NamespacedKey MARK   = new NamespacedKey("reliquary", "extraction_ticket");
-    private static final NamespacedKey POOLS  = new NamespacedKey("reliquary", "ticket_pools");
-    private static final NamespacedKey IDS    = new NamespacedKey("reliquary", "ticket_ids");
-    private static final NamespacedKey CUSTOM = new NamespacedKey("reliquary", "ticket_custom");
+    private static final NamespacedKey MARK     = new NamespacedKey("reliquary", "extraction_ticket");
+    private static final NamespacedKey POOLS    = new NamespacedKey("reliquary", "ticket_pools");
+    private static final NamespacedKey IDS      = new NamespacedKey("reliquary", "ticket_ids");
+    private static final NamespacedKey CUSTOM   = new NamespacedKey("reliquary", "ticket_custom");
+    private static final NamespacedKey STANDARD = new NamespacedKey("reliquary", "ticket_standard");
     private static final Material MATERIAL = Material.PAPER;
 
     /** Valid pool names (grades) — the full ZAYIN…ALEPH ladder. */
@@ -50,17 +51,21 @@ public final class ExtractionTicket {
     }
 
     /** A fresh grade ticket with no pools yet. */
-    public static ItemStack create() { return blank(false); }
+    public static ItemStack create() { return blank(false, false); }
 
     /** A fresh custom ticket (hand-picked weapon ids), with nothing on it yet. */
-    public static ItemStack createCustom() { return blank(true); }
+    public static ItemStack createCustom() { return blank(true, false); }
 
-    private static ItemStack blank(boolean custom) {
+    /** A Standard ticket — a fixed weighted table (weapons by grade + pouches + the bag), not a pool. */
+    public static ItemStack createStandard() { return blank(false, true); }
+
+    private static ItemStack blank(boolean custom, boolean standard) {
         ItemStack item = new ItemStack(MATERIAL);
         ItemMeta meta = item.getItemMeta();
         meta.getPersistentDataContainer().set(MARK, PersistentDataType.BYTE, (byte) 1);
         if (custom) meta.getPersistentDataContainer().set(CUSTOM, PersistentDataType.BYTE, (byte) 1);
-        style(meta, new LinkedHashSet<>(), new LinkedHashSet<>(), custom);
+        if (standard) meta.getPersistentDataContainer().set(STANDARD, PersistentDataType.BYTE, (byte) 1);
+        style(meta, new LinkedHashSet<>(), new LinkedHashSet<>(), custom, standard);
         item.setItemMeta(meta);
         return item;
     }
@@ -70,6 +75,13 @@ public final class ExtractionTicket {
         if (item == null) return false;
         ItemMeta m = item.getItemMeta();
         return m != null && m.getPersistentDataContainer().has(CUSTOM, PersistentDataType.BYTE);
+    }
+
+    /** Whether this is a Standard ticket (weighted table with pouch/bag outcomes). */
+    public static boolean isStandard(ItemStack item) {
+        if (item == null) return false;
+        ItemMeta m = item.getItemMeta();
+        return m != null && m.getPersistentDataContainer().has(STANDARD, PersistentDataType.BYTE);
     }
 
     /** The pools (grade names, upper-case) configured on this ticket, in add order. */
@@ -142,7 +154,8 @@ public final class ExtractionTicket {
      */
     private static void restyle(ItemMeta meta) {
         style(meta, readMeta(meta, POOLS), readMeta(meta, IDS),
-                meta.getPersistentDataContainer().has(CUSTOM, PersistentDataType.BYTE));
+                meta.getPersistentDataContainer().has(CUSTOM, PersistentDataType.BYTE),
+                meta.getPersistentDataContainer().has(STANDARD, PersistentDataType.BYTE));
     }
 
     /** Read a comma-joined string set straight from a meta's PDC (used mid-write, before setItemMeta). */
@@ -153,7 +166,8 @@ public final class ExtractionTicket {
         return out;
     }
 
-    private static void style(ItemMeta meta, Set<String> pools, Set<String> ids, boolean custom) {
+    private static void style(ItemMeta meta, Set<String> pools, Set<String> ids, boolean custom, boolean standard) {
+        if (standard) { styleStandard(meta); return; }
         meta.displayName(Component.text(custom ? "Custom Extraction Ticket" : "Extraction Ticket").color(NAME)
                 .decoration(TextDecoration.ITALIC, false).decoration(TextDecoration.BOLD, true));
         List<Component> lore = new ArrayList<>();
@@ -185,5 +199,33 @@ public final class ExtractionTicket {
         var cmd = meta.getCustomModelDataComponent();
         cmd.setStrings(List.of(apex ? "extraction/ticket/waw" : "extraction/ticket"));
         meta.setCustomModelDataComponent(cmd);
+    }
+
+    /** The Standard ticket: name + the full weighted-odds table on the lore. No em-dashes. */
+    private static void styleStandard(ItemMeta meta) {
+        meta.displayName(Component.text("Standard Extraction Ticket").color(NAME)
+                .decoration(TextDecoration.ITALIC, false).decoration(TextDecoration.BOLD, true));
+        TextColor odds = NamedTextColor.AQUA;
+        TextColor head = TextColor.color(0xC9CDD6);
+        List<Component> lore = new ArrayList<>();
+        lore.add(Component.text("Hold it near Carmen's Brain and sneak to roll.", FAINT)
+                .decoration(TextDecoration.ITALIC, true));
+        lore.add(oddsLine("Weighted 100% table:", head, false));
+        lore.add(oddsLine("ALEPH 1% · WAW 3% · HE 4.5% · TETH 5% · ZAYIN 6.5%", odds, false));
+        lore.add(oddsLine("weapons 20% total", FAINT, true));
+        lore.add(oddsLine("Common Pouch 49% · Uncommon 20% · Rare 7% · Legendary 3%", odds, false));
+        lore.add(oddsLine("pouches 79% total", FAINT, true));
+        lore.add(oddsLine("A Certain Daughters Bag 1%", TextColor.color(0xFFC94D), false));
+        lore.add(Component.text("Sneak right-click near the Brain to roll (spends the ticket).", FAINT)
+                .decoration(TextDecoration.ITALIC, true));
+        meta.lore(lore);
+        meta.setEnchantmentGlintOverride(true);
+        var cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(List.of("extraction/ticket")); // no new art this round — base model
+        meta.setCustomModelDataComponent(cmd);
+    }
+
+    private static Component oddsLine(String text, TextColor color, boolean italic) {
+        return Component.text(text, color).decoration(TextDecoration.ITALIC, italic);
     }
 }

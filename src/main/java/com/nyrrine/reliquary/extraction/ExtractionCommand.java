@@ -6,7 +6,10 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Color;
 import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -44,10 +47,11 @@ public final class ExtractionCommand {
     /** The subcommands, in help/tab order. */
     private static final List<String> SUBS = List.of("give", "giveall", "ticket");
 
-    /** The cosmetic items {@code /cogito give <id>} can dispense (the 8 keepers; the 7 concentrates by sin). */
+    /** The cosmetic items {@code /cogito give <id>} can dispense (the 8 keepers; the 7 concentrates by sin;
+     *  plus the pouch/bag testing gives, which take their own path in {@link #give}). */
     private static final List<String> GIVE_ITEMS = List.of(
             "well", "enkephalin", "raw_cogito", "cogito", "radiant_cogito", "catalyst", "ember_distillate",
-            "wrath", "pride", "lust", "gloom", "sloth", "envy", "gluttony");
+            "wrath", "pride", "lust", "gloom", "sloth", "envy", "gluttony", "pouch", "bag");
 
     private static final TextColor GREEN = TextColor.color(0x74F066);
     private static final TextColor GREY  = NamedTextColor.GRAY;
@@ -90,13 +94,29 @@ public final class ExtractionCommand {
             player.sendMessage(msg("Usage: /cogito give <" + String.join("|", GIVE_ITEMS) + ">", GREY));
             return;
         }
-        ItemStack item = cosmetic(a[1].toLowerCase());
+        String id = a[1].toLowerCase();
+        if (id.equals("pouch")) {
+            Pouch.Rarity r = a.length >= 3 ? Pouch.Rarity.byId(a[2]) : null;
+            if (r == null) {
+                player.sendMessage(msg("Usage: /cogito give pouch <common|uncommon|rare|legendary>", GREY));
+                return;
+            }
+            giveOrDrop(player, Pouch.create(r));
+            player.sendMessage(msg("Gave a " + r.display() + " Pouch.", GREEN));
+            return;
+        }
+        if (id.equals("bag")) {
+            giveOrDrop(player, DaughtersBag.create());
+            player.sendMessage(msg("Gave A Certain Daughters Bag.", GREEN));
+            return;
+        }
+        ItemStack item = cosmetic(id);
         if (item == null) {
             player.sendMessage(msg("Unknown cosmetic: " + a[1], NamedTextColor.RED));
             return;
         }
         giveOrDrop(player, item);
-        player.sendMessage(msg("Gave " + a[1].toLowerCase() + ".", GREEN));
+        player.sendMessage(msg("Gave " + id + ".", GREEN));
     }
 
     private void giveAll(Player player) {
@@ -144,6 +164,12 @@ public final class ExtractionCommand {
             giveOrDrop(player, ExtractionTicket.createCustom());
             player.sendMessage(msg("Gave a Custom Extraction Ticket. Hand-pick weapons with /cogito ticket add "
                     + "<id> (grades still work too), then hold it near a Carmen's Brain.", GREEN));
+            return;
+        }
+        if (a.length >= 2 && a[1].equalsIgnoreCase("standard")) {
+            giveOrDrop(player, ExtractionTicket.createStandard());
+            player.sendMessage(msg("Gave a Standard Extraction Ticket. Hold it near a Carmen's Brain and sneak "
+                    + "to roll the weighted table (weapons, pouches, or the bag).", GREEN));
             return;
         }
         // Default: give a blank grade ticket (plus any grades listed after "ticket").
@@ -211,25 +237,29 @@ public final class ExtractionCommand {
         player.sendMessage(msg("Carmen's Brain draws from an Extraction Ticket — hold one nearby.", GREY));
     }
 
-    /** Preview the ticket's pool as the solar-system show; sneaking, pull a random weapon from it. */
+    /** Route a ticket-holder's Brain interaction: Standard rolls the weighted table, grade/custom the weapon pool. */
     private void ticketWell(Player player, Location brainCentre, boolean sneaking, ItemStack ticket) {
+        if (ExtractionTicket.isStandard(ticket)) standardWell(player, brainCentre, sneaking, ticket);
+        else poolWell(player, brainCentre, sneaking, ticket);
+    }
+
+    /** Grade/custom ticket: flat-random over the weapon pool (grade pools ∪ hand-picked ids). */
+    private void poolWell(Player player, Location brainCentre, boolean sneaking, ItemStack ticket) {
         java.util.Set<String> pools = ExtractionTicket.pools(ticket);
         java.util.Set<String> ids = ExtractionTicket.ids(ticket);
-        // Candidate pool = grade pools ∪ hand-picked ids, de-duplicated by id in add order.
         java.util.LinkedHashMap<String, WeaponSpec> byId = new java.util.LinkedHashMap<>();
         for (WeaponSpec w : WeaponSignatures.all()) if (pools.contains(w.grade().name())) byId.putIfAbsent(w.id(), w);
-        for (String id : ids) {
-            WeaponSpec s = customSpec(id);
-            if (s != null) byId.putIfAbsent(s.id(), s);
-        }
+        for (String id : ids) { WeaponSpec s = customSpec(id); if (s != null) byId.putIfAbsent(s.id(), s); }
         List<WeaponSpec> pool = new ArrayList<>(byId.values());
         if (pool.isEmpty()) {
             player.sendMessage(msg("This ticket has no reachable pools — add a grade or a weapon id with "
                     + "/cogito ticket add <grade|id>.", NamedTextColor.RED));
             return;
         }
-        // Build/keep the floating preview; on a pull we transition this same scene.
-        wellDisplay.reveal(brainCentre, pool, this::weaponItem);
+        List<WellDisplay.FloatItem> floats = new ArrayList<>();
+        List<ItemStack> reel = new ArrayList<>();
+        for (WeaponSpec w : pool) { floats.add(weaponFloat(w)); reel.add(displayFor(weaponItem(w))); }
+        wellDisplay.reveal(brainCentre, floats);
 
         if (!sneaking) {
             String across = pools.isEmpty() ? "custom picks" : String.join("/", pools)
@@ -237,31 +267,153 @@ public final class ExtractionCommand {
             player.sendActionBar(msg("Ticket: " + pool.size() + " weapons (" + across + "). Sneak to pull.", GREEN));
             return;
         }
-        // Pull a random weapon; only spend the ticket if a weapon is actually extracted.
         WeaponSpec pick = pool.get(ThreadLocalRandom.current().nextInt(pool.size()));
         Weapon weapon = plugin.weapons().get(pick.id());
         if (weapon == null) {
             player.sendMessage(msg("No item is wired for '" + pick.id() + "' yet — ticket kept.", NamedTextColor.RED));
             return;
         }
-        ItemStack item = weapon.createItem();
-        stampAttribution(item, player.getName());
-        item = plugin.tracker().register(item, weapon.id(), player.getName() + " (ticket)");
-        giveOrDrop(player, item);
-        plugin.weapons().engage(weapon, player.getUniqueId());
-        ticket.setAmount(ticket.getAmount() - 1);
-        player.getInventory().setItemInMainHand(ticket.getAmount() <= 0 ? null : ticket);
-        wellDisplay.pull(brainCentre, pick); // the gacha pull: others dissolve, the chosen blooms out
+        grantWeapon(player, weapon);
+        spend(player, ticket);
+        wellDisplay.pull(brainCentre, new WellDisplay.PullShow(displayFor(weaponItem(pick)),
+                pick.grade().color(), pick.grade().ordinal() + 1, false, reel));
         player.sendMessage(msg("Carmen's Brain grants " + pick.display() + " (" + pick.grade().display()
                 + ") from the ticket.", GREEN));
         player.playSound(player.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, 0.6f, 1.4f);
     }
 
-    /** The weapon item a spec resolves to (via the plugin's registry), for the floating show. */
+    /** Standard ticket: roll the fixed weighted table (weapons by grade, pouches, the 1% bag). */
+    private void standardWell(Player player, Location brainCentre, boolean sneaking, ItemStack ticket) {
+        // The whole board floats: every weapon (grade-coloured), the 4 pouch tiers, and the Daughters Bag.
+        List<WellDisplay.FloatItem> floats = new ArrayList<>();
+        List<ItemStack> reel = new ArrayList<>();
+        for (WeaponSpec w : WeaponSignatures.all()) { floats.add(weaponFloat(w)); reel.add(displayFor(weaponItem(w))); }
+        for (Pouch.Rarity r : Pouch.Rarity.values()) {
+            ItemStack pouch = Pouch.create(r);
+            floats.add(new WellDisplay.FloatItem(pouch, r.burst(), "pouch_" + r.name()));
+            reel.add(pouch);
+        }
+        ItemStack bagItem = DaughtersBag.create();
+        floats.add(new WellDisplay.FloatItem(bagItem, BAG_COLOR, "daughters_bag"));
+        reel.add(bagItem);
+        wellDisplay.reveal(brainCentre, floats);
+
+        if (!sneaking) {
+            player.sendActionBar(msg("Standard ticket — sneak to roll the table.", GREEN));
+            return;
+        }
+        // A single weighted pick; the ticket is spent only once a result is actually granted.
+        StdRoll roll = rollStandard();
+        ItemStack display;
+        Color color;
+        int tier;
+        boolean bag = false;
+        String label;
+        if (roll.grade() != null) {
+            WeaponSpec pick = randomWeaponOfGrade(roll.grade());
+            Weapon weapon = pick != null ? plugin.weapons().get(pick.id()) : null;
+            if (pick == null || weapon == null) {
+                player.sendMessage(msg("No " + roll.grade().display() + " weapon is wired yet — ticket kept.",
+                        NamedTextColor.RED));
+                return;
+            }
+            grantWeapon(player, weapon);
+            display = displayFor(weaponItem(pick));
+            color = pick.grade().color();
+            tier = pick.grade().ordinal() + 1;
+            label = pick.display() + " (" + pick.grade().display() + ")";
+        } else if (roll.rarity() != null) {
+            giveOrDrop(player, Pouch.create(roll.rarity()));
+            display = Pouch.create(roll.rarity());
+            color = roll.rarity().burst();
+            tier = roll.rarity().ordinal() + 1;
+            label = roll.rarity().display() + " Pouch";
+        } else {
+            giveOrDrop(player, DaughtersBag.create());
+            display = DaughtersBag.create();
+            color = BAG_COLOR;
+            tier = 5;
+            bag = true;
+            label = "A Certain Daughters Bag";
+        }
+        spend(player, ticket);
+        wellDisplay.pull(brainCentre, new WellDisplay.PullShow(display, color, tier, bag, reel));
+        player.sendMessage(msg("Carmen's Brain yields " + label + ".", GREEN));
+        player.playSound(player.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, 0.6f, 1.4f);
+    }
+
+    /** Open a held Pouch: roll one loot entry, give it, consume exactly one, small rarity-coloured pop. */
+    public void openPouch(Player player, ItemStack pouch) {
+        Pouch.Rarity r = Pouch.rarityOf(pouch);
+        if (r == null) return;
+        giveOrDrop(player, Pouch.rollLoot(r));
+        pouch.setAmount(pouch.getAmount() - 1);
+        player.getInventory().setItemInMainHand(pouch.getAmount() <= 0 ? null : pouch);
+        Location at = player.getLocation().add(0, 1.0, 0);
+        player.getWorld().spawnParticle(Particle.DUST, at, 14, 0.3, 0.4, 0.3, 0,
+                new Particle.DustOptions(r.burst(), 1.0f));
+        player.playSound(at, Sound.ENTITY_ITEM_PICKUP, 0.8f, 1.2f);
+        player.playSound(at, Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.6f, 1.4f);
+        player.sendActionBar(msg("Opened a " + r.display() + " Pouch.", GREEN));
+    }
+
+    /** The weapon item a spec resolves to (via the plugin's registry), or null if unwired. */
     private ItemStack weaponItem(WeaponSpec spec) {
         Weapon w = plugin.weapons().get(spec.id());
         return w != null ? w.createItem() : null;
     }
+
+    /** A colour-coded floating entry for a weapon (grade colour + display + id). */
+    private WellDisplay.FloatItem weaponFloat(WeaponSpec spec) {
+        return new WellDisplay.FloatItem(displayFor(weaponItem(spec)), spec.grade().color(), spec.id());
+    }
+
+    /** A non-null display item, falling back to a Nether Star if a weapon isn't wired yet. */
+    private ItemStack displayFor(ItemStack it) {
+        return it != null ? it : new ItemStack(Material.NETHER_STAR);
+    }
+
+    /** Grant a rolled weapon: attribution, tracker register, give (overflow drops), engage its lifecycle. */
+    private void grantWeapon(Player player, Weapon weapon) {
+        ItemStack item = weapon.createItem();
+        stampAttribution(item, player.getName());
+        item = plugin.tracker().register(item, weapon.id(), player.getName() + " (ticket)");
+        giveOrDrop(player, item);
+        plugin.weapons().engage(weapon, player.getUniqueId());
+    }
+
+    /** Spend exactly one ticket from the main hand. */
+    private void spend(Player player, ItemStack ticket) {
+        ticket.setAmount(ticket.getAmount() - 1);
+        player.getInventory().setItemInMainHand(ticket.getAmount() <= 0 ? null : ticket);
+    }
+
+    private WeaponSpec randomWeaponOfGrade(EgoGrade grade) {
+        List<WeaponSpec> of = new ArrayList<>();
+        for (WeaponSpec w : WeaponSignatures.all()) if (w.grade() == grade) of.add(w);
+        return of.isEmpty() ? null : of.get(ThreadLocalRandom.current().nextInt(of.size()));
+    }
+
+    /** One outcome of the Standard table: a weapon grade, a pouch rarity, or the bag (exactly one non-null/true). */
+    private record StdRoll(EgoGrade grade, Pouch.Rarity rarity, boolean bag) {}
+
+    /** The weighted 100% pick across the 10 Standard buckets (weapons 20%, pouches 79%, bag 1%). */
+    private StdRoll rollStandard() {
+        double r = ThreadLocalRandom.current().nextDouble(100.0);
+        double c = 0;
+        if ((c += 1.0)  > r) return new StdRoll(EgoGrade.ALEPH, null, false);
+        if ((c += 3.0)  > r) return new StdRoll(EgoGrade.WAW,   null, false);
+        if ((c += 4.5)  > r) return new StdRoll(EgoGrade.HE,    null, false);
+        if ((c += 5.0)  > r) return new StdRoll(EgoGrade.TETH,  null, false);
+        if ((c += 6.5)  > r) return new StdRoll(EgoGrade.ZAYIN, null, false);
+        if ((c += 1.0)  > r) return new StdRoll(null, null, true);                 // A Certain Daughters Bag
+        if ((c += 49.0) > r) return new StdRoll(null, Pouch.Rarity.COMMON, false);
+        if ((c += 20.0) > r) return new StdRoll(null, Pouch.Rarity.UNCOMMON, false);
+        if ((c += 7.0)  > r) return new StdRoll(null, Pouch.Rarity.RARE, false);
+        return new StdRoll(null, Pouch.Rarity.LEGENDARY, false);                   // remaining 3%
+    }
+
+    private static final Color BAG_COLOR = Color.fromRGB(0xFFC94D);
 
     /**
      * The spec for a hand-picked id: the roster spec if it is on the grade ladder, else a synthesized
@@ -307,13 +459,16 @@ public final class ExtractionCommand {
         if (a.length == 3 && a[0].equalsIgnoreCase("ticket") && a[1].equalsIgnoreCase("add")) {
             return filter(ticketArgs(false), a[2]);
         }
+        if (a.length == 3 && a[0].equalsIgnoreCase("give") && a[1].equalsIgnoreCase("pouch")) {
+            return filter(List.of("common", "uncommon", "rare", "legendary"), a[2]);
+        }
         return List.of();
     }
 
     /** Tab options for the ticket command — grades (+ all) and weapon ids, plus the subcommands at the first arg. */
     private List<String> ticketArgs(boolean firstArg) {
         List<String> out = new ArrayList<>();
-        if (firstArg) { out.add("add"); out.add("clear"); out.add("custom"); }
+        if (firstArg) { out.add("add"); out.add("clear"); out.add("custom"); out.add("standard"); }
         out.add("all");
         for (String p : ExtractionTicket.POOL_NAMES) out.add(p.toLowerCase(java.util.Locale.ROOT));
         if (!firstArg) for (Weapon w : plugin.weapons().all()) out.add(w.id()); // ids only offered under `add`

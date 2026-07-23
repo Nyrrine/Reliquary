@@ -91,10 +91,31 @@ public final class StationListener implements Listener {
         brainVfx.deploy(event.getPlayer(), target.getLocation());
     }
 
-    /** Belt-and-braces: the Carmen's Brain head must never place as a vanilla block. */
+    /** Belt-and-braces: the Brain head and the pouch/bag skulls must never place as a vanilla block. */
     @EventHandler
     public void onBlockPlace(BlockPlaceEvent event) {
-        if (StationType.fromItem(event.getItemInHand()) == StationType.WELL) event.setCancelled(true);
+        ItemStack held = event.getItemInHand();
+        if (StationType.fromItem(held) == StationType.WELL
+                || Pouch.matches(held) || DaughtersBag.matches(held)) event.setCancelled(true);
+    }
+
+    /**
+     * A held Pouch opens on right-click (air or block) — cancel the click (so the skull never places) and roll one
+     * loot entry. A Daughters Bag is an inert collectible for now: right-click only reports it is sealed.
+     */
+    @EventHandler
+    public void onPouchOrBag(PlayerInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND) return;
+        if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+        ItemStack held = event.getItem();
+        if (Pouch.matches(held)) {
+            event.setCancelled(true);
+            extraction.openPouch(event.getPlayer(), held);
+        } else if (DaughtersBag.matches(held)) {
+            event.setCancelled(true);
+            event.getPlayer().sendActionBar(Component.text("Its contents are sealed for now.")
+                    .color(NamedTextColor.GRAY));
+        }
     }
 
     /**
