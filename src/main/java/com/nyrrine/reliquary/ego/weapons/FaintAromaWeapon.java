@@ -172,8 +172,13 @@ public final class FaintAromaWeapon implements EgoWeapon {
 
     /** The Full Bloom cooldown for the bird held right now: the base rest cut by its Quicker Scent bonus. */
     private long fullBloomCooldownMs(Player player) {
+        return fullBloomCooldownMs(player.getInventory().getItemInMainHand());
+    }
+
+    /** As above, for a specific stack — used by the Duet path, where Faint Aroma is carried in the OFF hand. */
+    private long fullBloomCooldownMs(ItemStack faintAroma) {
         int qc = Math.min(QUICKER_SCENT_CAP,
-                player.getInventory().getItemInMainHand().getEnchantmentLevel(Enchantment.QUICK_CHARGE));
+                faintAroma == null ? 0 : faintAroma.getEnchantmentLevel(Enchantment.QUICK_CHARGE));
         return (long) (FULL_BLOOM_COOLDOWN_MS * (1.0 - QUICKER_SCENT_PER_LEVEL * qc));
     }
 
@@ -713,14 +718,51 @@ public final class FaintAromaWeapon implements EgoWeapon {
     }
 
     /**
+     * Duet: fire Faint Aroma's real Full Bloom burst (the 3 heavier arrows) from the OFF hand, when Solitude's
+     * right-click is pressed and Magnificent End is not yet charged. Respects Full Bloom's own cooldown and
+     * returns false — firing nothing — while it is still resting, so Solitude can fall through to Stories. The
+     * arrows deal damage through the same {@link #deal} dealing()-fence every Duet shot uses, so Solitude's
+     * onHit never cancels them (the v1 bug); the delayed arrows re-check the OFF hand.
+     */
+    public boolean duetFullBloom(Player wielder) {
+        ItemStack off = wielder.getInventory().getItemInOffHand();
+        if (!matches(off)) return false;
+        Bloom bloom = blooms.computeIfAbsent(wielder.getUniqueId(), k -> new Bloom());
+        long now = System.currentTimeMillis();
+        if (now < bloom.fullBloomCd) return false; // still resting — caller falls through to Stories
+        bloom.fullBloomCd = now + fullBloomCooldownMs(off);
+        for (int i = 0; i < FULL_BLOOM_ARROWS; i++) {
+            scheduleDuetBloomArrow(wielder, i * FULL_BLOOM_GAP_TICKS);
+        }
+        wearOffHand(wielder);
+        return true;
+    }
+
+    /** Like {@link #scheduleBloomArrow} but the delayed shots re-check the OFF hand — Faint Aroma sits there. */
+    private void scheduleDuetBloomArrow(Player player, long delayTicks) {
+        if (delayTicks <= 0L) { looseBloomArrow(player); return; }
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (player.isOnline() && matches(player.getInventory().getItemInOffHand())) {
+                looseBloomArrow(player);
+            }
+        }, delayTicks);
+    }
+
+    /** Duet: ms until Full Bloom is ready again (0 if ready) — for Solitude's right-click HUD cue. */
+    public long duetFullBloomRemaining(Player wielder) {
+        Bloom bloom = blooms.get(wielder.getUniqueId());
+        return bloom == null ? 0L : Math.max(0L, bloom.fullBloomCd - System.currentTimeMillis());
+    }
+
+    /**
      * Duet: Faint Aroma's slice of the merged HUD, for Solitude to fold onto its one always-on line — the
-     * petals gauge (turning cyan with a "full bloom" cue at the cap), the Blossoming Fragrance charge state
-     * (ready to loose vs cycling its cadence), and a <b>persistent</b> Magnificent End indicator (dim while
-     * charging, lit at full bloom — never a popup). Reads the OFF-hand cap (Faint Aroma sits there), so a
-     * Rampant Bloom cap shows true and the ME light matches exactly when a right-click would detonate.
+     * petals gauge (turning cyan with a "full bloom" cue at the cap) and the Blossoming Fragrance charge state
+     * (ready to loose vs cycling its cadence). Reads the OFF-hand cap (Faint Aroma sits there), so a Rampant
+     * Bloom cap shows true. The right-click cue (Magnificent End / Full Bloom / Stories) is composed by
+     * Solitude, which alone knows the cylinder state that decides the Stories fallthrough.
      *
      * <p>The aroma/Weakness meter is deliberately not on this line: with chambers, the LC-mode tag, petals,
-     * the BF state and the ME light already sharing one action bar, a fourth gauge overruns it. Aroma still
+     * the BF state and the RC cue already sharing one action bar, a fourth gauge overruns it. Aroma still
      * builds and fires; it just is not painted here.
      */
     public Component duetReadout(Player wielder) {
@@ -738,10 +780,7 @@ public final class FaintAromaWeapon implements EgoWeapon {
         boolean bfReady = System.currentTimeMillis() - bloom.lastBlossom >= BLOSSOM_CADENCE_MS;
         Component bf = plain(bfReady ? "Blossom ready" : "Blossom cycling", bfReady ? LAVENDER : FAINT);
 
-        // Persistent Magnificent End indicator: dim while charging, lit at full bloom. Never a transient popup.
-        Component me = plain("Magnificent End", bloomed ? CYAN : FAINT);
-
-        return EgoHud.row(petals, bf, me);
+        return EgoHud.row(petals, bf);
     }
 
     /** The Blossoming Fragrance shot SFX, shared by the solo click and the Duet blossom paths. */

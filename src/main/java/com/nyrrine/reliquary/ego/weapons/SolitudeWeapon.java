@@ -275,27 +275,35 @@ public final class SolitudeWeapon implements EgoWeapon {
         // at all, by design. It is what the gun does when it has nothing left to say.
         if (cyl.burst != null) return;                       // never stack a second burst
 
-        // Duet: Magnificent End takes the right-click at full bloom, at ANY cylinder state (loaded, empty, or
-        // reloading) — priority over Stories. Gating it to the loaded RC meant she could never reach it once
-        // empty; RC now means Magnificent End whenever it is charged. Below full bloom, the old behaviour
-        // resumes just below (dry -> Stories, loaded -> the "petals not ready" cue).
-        if (duetActive(player) && partner().duetMagnificentReady(player)) {
-            partner().duetMagnificentEnd(player);
-            renderBar(player, cyl);
-            return;
+        // Duet: the right-click drives Faint Aroma at ANY cylinder state, in priority order:
+        //   1. petals at full bloom -> Magnificent End (the finisher).
+        //   2. else Full Bloom off cooldown -> its real 3-arrow burst (fenced so the arrows deal damage).
+        //   3. else (Full Bloom resting) -> fall through to Solitude's own Stories (dry) / dead loaded RC.
+        // The composed HUD's RC cue always names which of these the trigger will do right now.
+        if (duetActive(player)) {
+            if (partner().duetMagnificentReady(player)) {
+                partner().duetMagnificentEnd(player);
+                renderBar(player, cyl);
+                return;
+            }
+            if (partner().duetFullBloom(player)) {           // fires the burst if ready; false while resting
+                renderBar(player, cyl);
+                return;
+            }
+            // Full Bloom is resting — fall through to the Stories/loaded-dead logic below (rendered composed).
         }
 
-        if (cyl.reloading()) { dryClick(player); return; }
-        if (cyl.rounds > 0) {                                // loaded, below full bloom
-            // In Duet the loaded RC has no other job now. No popup — the persistent (dim) Magnificent End
-            // indicator on the always-on line already shows it is still charging; just a dry click. Solo: dead.
+        if (cyl.reloading()) { dryClick(player); if (duetActive(player)) renderBar(player, cyl); return; }
+        if (cyl.rounds > 0) {                                // loaded, no ME/Full Bloom available
             dryClick(player);
+            if (duetActive(player)) renderBar(player, cyl);  // composed line's RC cue shows why (Full Bloom resting)
             return;
         }
-        // dry cylinder, below full bloom -> Stories
+        // dry cylinder -> Stories (the Duet fallthrough when Full Bloom is resting)
         if (now < cyl.storiesReady) {
             dryClick(player);
-            player.sendActionBar(EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT));
+            if (duetActive(player)) renderBar(player, cyl);  // composed line shows the Stories rest
+            else player.sendActionBar(EgoHud.cooldown(STORIES, cyl.storiesReady - now, FAINT));
             return;
         }
         beginStories(player, cyl);
@@ -412,16 +420,44 @@ public final class SolitudeWeapon implements EgoWeapon {
 
     /**
      * The standardized Duet line, all of it on one {@link EgoHud#row}: the revolver's chambers, which mode
-     * left-click is in (Bang while loaded, Faint Aroma blossom-fire while empty or reloading), then Faint
-     * Aroma's slice — the petals gauge with its full-bloom cue, the Blossoming Fragrance charge state, and
-     * the persistent Magnificent End indicator (dim charging, lit at full bloom). Faint Aroma does not tick
-     * from the off hand, so Solitude paints the whole thing.
+     * left-click is in (Bang while loaded, Faint Aroma blossom-fire while empty or reloading), Faint Aroma's
+     * slice (the petals gauge with its full-bloom cue and the Blossoming Fragrance charge state), then the
+     * right-click cue naming what RC does right now. Faint Aroma does not tick from the off hand, so Solitude
+     * paints the whole thing.
      */
     private Component duetBar(Player player, Cyl cyl) {
         Component chambers = EgoHud.ammo(PRIMARY, "Chambers", cyl.rounds, MAG);
         boolean bangMode = cyl.rounds > 0 && !cyl.reloading();
         Component lcMode = plain("LC ", FAINT).append(plain(bangMode ? "Bang" : "Blossom", PRIMARY));
-        return EgoHud.row(chambers, lcMode, partner().duetReadout(player));
+        return EgoHud.row(chambers, lcMode, partner().duetReadout(player), rcCue(player, cyl));
+    }
+
+    /**
+     * The right-click cue: names what the trigger will do right now, mirroring {@link #onInteract}'s Duet
+     * priority exactly — Magnificent End at full bloom (lit), else Full Bloom (ready, or its rest), else the
+     * Stories fallthrough on a dry cylinder (ready, or its rest), else the dead loaded/reloading RC (which
+     * shows the Full Bloom rest, since that is what is blocking it).
+     */
+    private Component rcCue(Player player, Cyl cyl) {
+        long now = System.currentTimeMillis();
+        Component label;
+        if (partner().duetMagnificentReady(player)) {
+            label = plain("Magnificent End", PRIMARY);           // lit — RC detonates the finisher
+        } else {
+            long fb = partner().duetFullBloomRemaining(player);
+            if (fb <= 0L) {
+                label = plain("Full Bloom", PRIMARY);            // ready — RC fires the burst
+            } else if (cyl.rounds <= 0 && !cyl.reloading()) {
+                // Full Bloom resting, dry cylinder -> RC falls through to Stories.
+                label = now < cyl.storiesReady
+                        ? EgoHud.cooldown("Stories", cyl.storiesReady - now, FAINT)
+                        : plain("Stories", PRIMARY);
+            } else {
+                // Full Bloom resting, loaded/reloading -> RC is dead; name what is blocking it.
+                label = EgoHud.cooldown("Full Bloom", fb, FAINT);
+            }
+        }
+        return plain("RC ", FAINT).append(label);
     }
 
     private static Component plain(String s, TextColor c) {
