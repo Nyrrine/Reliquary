@@ -210,9 +210,6 @@ public final class ExtractionTicket {
                 .decoration(TextDecoration.ITALIC, false).decoration(TextDecoration.BOLD, true));
         TextColor head = TextColor.color(0xC9CDD6);
         List<Component> lore = new ArrayList<>();
-        lore.add(Component.text("Hold near Carmen's Brain, sneak to roll.", FAINT)
-                .decoration(TextDecoration.ITALIC, true));
-        lore.add(Component.empty());
         lore.add(Component.text("Weapons (20%)", head).decoration(TextDecoration.ITALIC, false));
         lore.add(row(gradeEntry(EgoGrade.ALEPH, "1%"), gradeEntry(EgoGrade.WAW, "3%"),
                 gradeEntry(EgoGrade.HE, "4.5%"), gradeEntry(EgoGrade.TETH, "5%"), gradeEntry(EgoGrade.ZAYIN, "6.5%")));
@@ -226,7 +223,9 @@ public final class ExtractionTicket {
                 .append(Component.text("Daughters", TextColor.color(0x3B5DC9)))
                 .append(Component.text(" Bag", NamedTextColor.RED)));
         lore.add(Component.empty());
-        lore.add(Component.text("Sneak right-click near the Brain to roll. Spends the ticket.", FAINT)
+        lore.add(Component.text("Right-click near Carmen's Brain: preview.", FAINT)
+                .decoration(TextDecoration.ITALIC, true));
+        lore.add(Component.text("Sneak right-click: extract (spends the ticket).", FAINT)
                 .decoration(TextDecoration.ITALIC, true));
         meta.lore(lore);
         meta.setEnchantmentGlintOverride(true);
