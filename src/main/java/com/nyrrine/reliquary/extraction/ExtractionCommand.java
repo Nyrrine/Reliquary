@@ -25,11 +25,13 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * The {@code /cogito} command — now just the ticket + gacha Carmen's Brain and a cosmetic dispenser. The brewing
- * minigame (Font/Alembic/Censer/Centrifuge/Manifold/Crucible chemistry) has been removed; getting an E.G.O
- * weapon is: hold an Extraction Ticket near a deployed Carmen's Brain, right-click anywhere to preview the pool
- * as a floating show, sneak right-click to pull a random weapon from the ticket's grade pools. (The actual
- * weapon-give for the testbed stays on {@code /reliquary}.)
+ * The {@code /cogito} command — the ticket + gacha Carmen's Brain and a cosmetic give. The old brewing minigame
+ * (Font/Alembic/Censer/Centrifuge/Manifold/Crucible chemistry) is gone. You extract by holding an Extraction
+ * Ticket near a deployed Carmen's Brain: right-click anywhere to preview the floating board, sneak right-click to
+ * roll (which runs the hype reel, then delivers on completion). Grade/custom tickets draw a random weapon from
+ * their pool; a Standard ticket rolls a weighted table that can also yield a Loot bag (four rarities, opened
+ * later for vanilla loot) or the 1% Daughters Bag. (The direct weapon-give for the testbed stays on
+ * {@code /reliquary}.)
  *
  * <p>Reached via {@code /cogito <sub> ...} (aliases {@code /ext}, {@code /co}) or {@code /reliquary ext ...}.
  */
@@ -263,8 +265,10 @@ public final class ExtractionCommand {
         }
         // Per-player cooldown gates only the sneak-pull; a preview is free. Both refusals are before any spend.
         if (sneaking) {
+            int now = Bukkit.getCurrentTick();
+            cooldownUntilTick.values().removeIf(v -> v <= now); // prune expired so the map can't grow forever
             Integer until = cooldownUntilTick.get(player.getUniqueId());
-            if (until != null && Bukkit.getCurrentTick() < until) {
+            if (until != null && now < until) {
                 player.sendActionBar(msg("One moment before the next extraction.", GREY));
                 return;
             }

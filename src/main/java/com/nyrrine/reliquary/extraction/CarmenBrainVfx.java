@@ -324,6 +324,9 @@ public final class CarmenBrainVfx {
             Interaction.PreviousInteraction atk = hitbox.getLastAttack();
             if (atk == null || atk.getTimestamp() <= lastAttackTs) return false;
             lastAttackTs = atk.getTimestamp();
+            // A pull owns the Brain: consume the attack timestamp but never collect it out from under a live show
+            // (and don't bank the punch for after the pull ends).
+            if (extracting) return false;
             punches++;
             world.spawnParticle(Particle.DUST, brainAt, 6, 0.2, 0.2, 0.2, 0, AMBIENT_DUST);
             world.playSound(brainAt, Sound.ENTITY_SLIME_SQUISH, 0.6f, 1.2f);

@@ -239,6 +239,9 @@ public final class WellDisplay {
         firePullDone();            // deliver any prior pending pull first (one pull at a time; defensive)
         onPullDone = onComplete;   // guarded: fires exactly once via firePullDone() on every path below
 
+        // Everything from here to scheduling is guarded: if setup throws (e.g. an entity spawn fails), the
+        // completion still fires exactly once (release lock + deliver + restore) so a spent ticket can't strand.
+        try {
         final Location centre = sceneCentre != null ? sceneCentre : brainCentre.clone();
         if (sceneCentre == null) sceneCentre = centre;
         final World world = centre.getWorld();
@@ -299,6 +302,11 @@ public final class WellDisplay {
             }
         };
         active.runTaskTimer(plugin, 0L, PERIOD);
+        } catch (Exception e) {
+            plugin.getLogger().warning("Extraction pull failed to start; delivering + releasing: " + e);
+            reapScene();
+            firePullDone(); // idempotent — releases the lock + delivers the spent reward exactly once
+        }
     }
 
     /** Pop each floater out (a small colour puff) as the reel slams. */

@@ -35,9 +35,10 @@ public final class StationListener implements Listener {
     private final ExtractionCommand extraction;
     private final CarmenBrainVfx brainVfx;
 
-    // At most one extraction per player per tick — belt-and-braces so the entity-click path (below) can never
-    // double-fire an extract alongside the proximity path if a client emits both events on one click.
+    // At most one action per player per tick — belt-and-braces so a client emitting both events on one click can
+    // never double-fire an extract (entity + proximity path) or open two Loot bags on a single right-click.
     private final Map<UUID, Integer> lastExtractTick = new HashMap<>();
+    private final Map<UUID, Integer> lastPouchTick = new HashMap<>();
 
     public StationListener(ExtractionCommand extraction, CarmenBrainVfx brainVfx) {
         this.extraction = extraction;
@@ -45,9 +46,14 @@ public final class StationListener implements Listener {
     }
 
     /** Claim this player's single extraction slot for the current tick; false if one already fired this tick. */
-    private boolean claimExtract(Player player) {
+    private boolean claimExtract(Player player) { return claimTick(lastExtractTick, player); }
+
+    /** Claim this player's single Loot-open slot for the current tick; false if one already fired this tick. */
+    private boolean claimPouch(Player player) { return claimTick(lastPouchTick, player); }
+
+    private boolean claimTick(Map<UUID, Integer> slots, Player player) {
         int tick = Bukkit.getCurrentTick();
-        Integer prev = lastExtractTick.put(player.getUniqueId(), tick);
+        Integer prev = slots.put(player.getUniqueId(), tick);
         return prev == null || prev != tick;
     }
 
@@ -109,8 +115,8 @@ public final class StationListener implements Listener {
         if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         ItemStack held = event.getItem();
         if (Pouch.matches(held)) {
-            event.setCancelled(true);
-            extraction.openPouch(event.getPlayer(), held);
+            event.setCancelled(true); // never place the skull, even on a duplicate click
+            if (claimPouch(event.getPlayer())) extraction.openPouch(event.getPlayer(), held);
         } else if (DaughtersBag.matches(held)) {
             event.setCancelled(true);
             event.getPlayer().sendActionBar(Component.text("Its contents are sealed for now.")
