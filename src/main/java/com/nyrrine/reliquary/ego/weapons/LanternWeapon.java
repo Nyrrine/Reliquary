@@ -6,6 +6,7 @@ import com.nyrrine.reliquary.core.Weapon;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
@@ -16,6 +17,7 @@ import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.enchantments.Enchantment;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -24,6 +26,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.util.Vector;
 
 import java.util.Iterator;
 import java.util.List;
@@ -58,9 +61,14 @@ import java.util.concurrent.ThreadLocalRandom;
  * is nothing to clamp now, so an ordinary strike passes through exactly as vanilla intends and its
  * enchants land. See {@link EgoModels#LANTERN}.
  *
+ * <p><b>[Right Click] Devour.</b> The lure stops waiting: the nearest foe in a frontal cone is yanked toward
+ * the wielder and bitten for {@value #DEVOUR_DAMAGE}, and the lantern feeds — a fraction of the bite comes
+ * back as the wielder's health. A medium cooldown. The bite is dealt through the framework's {@code dealing}
+ * fence, so it lands as a normal armour-respecting blow that never re-arms the nibble count.
+ *
  * <p>Nothing here spawns an entity and nothing edits the world, so there are no orphans to sweep. The only
- * state is per-wielder (digest tally, nibble tally) plus the short-lived digest tasks, all dropped in
- * {@link #onQuit} and {@link #onDisable}.
+ * state is per-wielder (digest tally, nibble tally, Devour cooldown) plus the short-lived digest tasks, all
+ * dropped in {@link #onQuit} and {@link #onDisable}.
  */
 public final class LanternWeapon implements EgoWeapon {
 
@@ -89,6 +97,21 @@ public final class LanternWeapon implements EgoWeapon {
     /** I Shall Nibble Thee!: every Nth landed strike is the bite that heals. */
     private static final int NIBBLE_EVERY = 5;
 
+    // Devour ([Right Click]) — the lure stops waiting and lunges: the nearest foe ahead is yanked in and bitten.
+    /** How near the foe must be, and how wide the frontal cone, for the maw to reach it. */
+    private static final double DEVOUR_RANGE   = 5.0;
+    /** Within ~75 degrees of the look line counts as "ahead" — a forgiving frontal cone. */
+    private static final double DEVOUR_ARC_DOT = 0.25;
+    /** The pull yanked onto the caught foe (toward the wielder), with a small upward pop over terrain. */
+    private static final double DEVOUR_PULL    = 0.95;
+    private static final double DEVOUR_PULL_UP = 0.28;
+    /** The bite the maw closes for — a normal, armour-respecting hit dealt through the {@code dealing} fence. */
+    private static final double DEVOUR_DAMAGE  = 5.0;
+    /** The lantern feeds on the devour: this fraction of the bite comes back as the wielder's health. */
+    private static final double DEVOUR_HEAL_FRAC = 0.40;
+    /** Devour's cooldown — a medium gate, so the grab is a tool, not a leash. */
+    private static final long   DEVOUR_COOLDOWN_MS = 8_000L;
+
     // Gluttony (a vanilla enchant — a NETHERITE_HOE holds Looting at an anvil, so this needs no catalogue
     // entry): a greedier lantern bites sooner, every Looting level shaving one strike off the count to the
     // next bite, down to every 3rd at Looting II or better (a 2-strike cut, floored so the teeth never close
@@ -116,6 +139,9 @@ public final class LanternWeapon implements EgoWeapon {
 
     /** Landed strikes since the last bite, per wielder. Rolls over at {@link #NIBBLE_EVERY}. */
     private final Map<UUID, Integer> nibbleTally = new ConcurrentHashMap<>();
+
+    /** Wielder -> epoch-millis at which Devour comes off cooldown (absent = ready). */
+    private final Map<UUID, Long> devourReadyAt = new ConcurrentHashMap<>();
 
     /** Digest heals waiting out their three seconds. Cancelled on quit/disable so none outlive the plugin. */
     private final Set<Digest> digesting = ConcurrentHashMap.newKeySet();
@@ -192,6 +218,74 @@ public final class LanternWeapon implements EgoWeapon {
         if (dealt > 0 && heal(attacker, dealt)) cue(attacker, "Lantern — nibbled");
     }
 
+    // ---- [Right Click] Devour ----------------------------------------------------------
+
+    /**
+     * Right-click: Devour. The lure stops waiting — the nearest foe in a frontal cone is yanked toward the
+     * wielder and bitten, and the lantern feeds on it (a fraction of the bite comes back as health). A medium
+     * cooldown. A right-click with nothing ahead, or while still on cooldown, is a quiet no-op that does not
+     * burn the gate. Sneak + right-click carries no ability — it falls through to nothing.
+     */
+    @Override
+    public void onInteract(Player player, boolean sneaking) {
+        if (sneaking) return;
+        if (!matches(player.getInventory().getItemInMainHand())) return;
+
+        UUID id = player.getUniqueId();
+        long now = System.currentTimeMillis();
+
+        Long ready = devourReadyAt.get(id);
+        if (ready != null && now < ready) {
+            player.playSound(player.getLocation(), Sound.BLOCK_HONEY_BLOCK_SLIDE, 0.4f, 0.7f); // still chewing the last one
+            return;
+        }
+
+        LivingEntity prey = nearestAhead(player);
+        if (prey == null) {
+            player.playSound(player.getLocation(), Sound.ENTITY_GENERIC_EAT, 0.4f, 0.6f); // an empty snap — nothing to eat
+            return;
+        }
+
+        devour(player, prey);
+        devourReadyAt.put(id, now + DEVOUR_COOLDOWN_MS);
+    }
+
+    /** Yank the prey in, bite it, and feed the wielder on the mouthful. */
+    private void devour(Player wielder, LivingEntity prey) {
+        // Yank the prey toward the wielder (fall back to the look line if they are stacked on us).
+        Vector pull = wielder.getLocation().toVector().subtract(prey.getLocation().toVector()).setY(0);
+        if (pull.lengthSquared() < 1.0e-6) pull = wielder.getEyeLocation().getDirection().multiply(-1).setY(0);
+        if (pull.lengthSquared() < 1.0e-6) pull = new Vector(1, 0, 0);
+        pull.normalize().multiply(DEVOUR_PULL).setY(DEVOUR_PULL_UP);
+        prey.setVelocity(prey.getVelocity().add(pull));
+
+        // The bite: a normal, armour-respecting hit dealt outside onHit, fenced so it never re-arms the nibble.
+        plugin.weapons().dealing(wielder.getUniqueId(), () -> prey.damage(DEVOUR_DAMAGE, wielder));
+
+        // The lantern feeds on what it caught.
+        double fed = DEVOUR_DAMAGE * DEVOUR_HEAL_FRAC;
+        if (fed > 0 && heal(wielder, fed)) cue(wielder, "Lantern — devoured");
+
+        devourFx(wielder, prey);
+    }
+
+    /** The nearest living body in Devour's frontal cone within reach, else null. */
+    private LivingEntity nearestAhead(Player wielder) {
+        Location eye = wielder.getEyeLocation();
+        Vector look = eye.getDirection().normalize();
+        LivingEntity best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (Entity e : wielder.getNearbyEntities(DEVOUR_RANGE, DEVOUR_RANGE, DEVOUR_RANGE)) {
+            if (e.equals(wielder) || !(e instanceof LivingEntity le) || le.isDead()) continue;
+            Vector to = le.getLocation().add(0, le.getHeight() * 0.5, 0).toVector().subtract(eye.toVector());
+            double dist = to.length();
+            if (dist < 0.01 || dist > DEVOUR_RANGE) continue;
+            if (to.multiply(1.0 / dist).dot(look) < DEVOUR_ARC_DOT) continue; // not ahead — behind or off to the side
+            if (dist < bestDist) { bestDist = dist; best = le; }
+        }
+        return best;
+    }
+
     // ---- [Passive] Om Nom Nom -----------------------------------------------------------
 
     /**
@@ -204,14 +298,16 @@ public final class LanternWeapon implements EgoWeapon {
         UUID id = player.getUniqueId();
         if (!matches(player.getInventory().getItemInMainHand())) return false;
 
-        // A fresh cue outranks the readout for a moment; otherwise show progress toward the bite:
-        // [Nibble ◆ ◆ ◇ ◇ ◇] — 0..4, resetting the moment the teeth close.
+        // A fresh cue outranks the readout for a moment; otherwise show the composed line — progress toward
+        // the bite ([Nibble ◆ ◆ ◇ ◇ ◇], resetting when the teeth close) beside Devour's cooldown.
         Cue cue = cues.get(id);
         if (cue != null && System.currentTimeMillis() < cue.until()) {
             player.sendActionBar(EgoHud.status(cue.text(), LURE_TEXT));
         } else {
             if (cue != null) cues.remove(id); // expired — prune inline rather than let it sit
-            player.sendActionBar(EgoHud.pips("Nibble", LURE_TEXT, nibbleTally.getOrDefault(id, 0), nibbleEvery(player)));
+            player.sendActionBar(EgoHud.row(
+                    EgoHud.pips("Nibble", LURE_TEXT, nibbleTally.getOrDefault(id, 0), nibbleEvery(player)),
+                    devourReadout(id)));
         }
 
         if (tick % LURE_PERIOD == 0) lureGlow(player);
@@ -286,6 +382,13 @@ public final class LanternWeapon implements EgoWeapon {
         return tally.merge(id, 1, Integer::sum);
     }
 
+    /** The Devour half of the composed line: its cooldown while it runs, else ready. */
+    private Component devourReadout(UUID id) {
+        Long ready = devourReadyAt.get(id);
+        long rem = ready == null ? 0L : ready - System.currentTimeMillis();
+        return rem > 0 ? EgoHud.cooldown("Devour", rem, LURE_TEXT) : EgoHud.ready("Devour", LURE_TEXT);
+    }
+
     /**
      * Strikes to the next bite for the lantern held right now: the base cadence cut by its Gluttony bonus
      * (Looting, capped, floored at 1). Read in both {@link #onHit} and the {@link #onTick} pip readout, so
@@ -328,6 +431,7 @@ public final class LanternWeapon implements EgoWeapon {
     public void onQuit(UUID id) {
         damageTally.remove(id);
         nibbleTally.remove(id);
+        devourReadyAt.remove(id);
         cues.remove(id);
         for (Iterator<Digest> it = digesting.iterator(); it.hasNext(); ) {
             Digest digest = it.next();
@@ -345,6 +449,7 @@ public final class LanternWeapon implements EgoWeapon {
         digesting.clear();
         damageTally.clear();
         nibbleTally.clear();
+        devourReadyAt.clear();
         cues.clear();
     }
 
@@ -381,6 +486,43 @@ public final class LanternWeapon implements EgoWeapon {
         // ...and the organ's light swelling on the one holding it.
         world.spawnParticle(Particle.DUST, attacker.getLocation().add(0, 1.1, 0),
                 8, 0.3, 0.4, 0.3, 0, LURE_DUST);
+    }
+
+    /**
+     * Devour: the maw opens between wielder and prey, a tether of lure-light hauls the body in, and the teeth
+     * close with a wet chomp — a layered show, not a single puff.
+     */
+    private void devourFx(Player wielder, LivingEntity prey) {
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        World world = wielder.getWorld();
+        Location maw = prey.getLocation().add(0, prey.getHeight() * 0.5, 0);
+        Location mouth = wielder.getLocation().add(0, 1.1, 0);
+
+        // The tether: a line of lure-light and bone drawn from the wielder's maw to the caught body.
+        Vector line = maw.toVector().subtract(mouth.toVector());
+        double len = line.length();
+        if (len > 1.0e-4) {
+            Vector stepv = line.multiply(1.0 / len);
+            for (double d = 0.0; d < len; d += 0.4) {
+                Location p = mouth.clone().add(stepv.clone().multiply(d));
+                world.spawnParticle(Particle.DUST, p, 1, 0.05, 0.05, 0.05, 0, LURE_DUST);
+                if (((int) (d / 0.4)) % 2 == 0) {
+                    world.spawnParticle(Particle.DUST, p, 1, 0.05, 0.05, 0.05, 0, TOOTH_DUST);
+                }
+            }
+        }
+
+        // The gaping maw around the prey — a ring of teeth (bone) and hungry green light.
+        world.spawnParticle(Particle.DUST, maw, 14, 0.35, 0.4, 0.35, 0, TOOTH_DUST);
+        world.spawnParticle(Particle.DUST, maw, 10, 0.35, 0.4, 0.35, 0, LURE_DUST);
+        world.spawnParticle(Particle.DUST, maw, 12, 0.3, 0.35, 0.3, 0, MEAT_DUST); // and the tearing that follows
+
+        // The chomp: a wet slam of the jaws over a hungry pull.
+        world.playSound(maw, Sound.BLOCK_SLIME_BLOCK_BREAK, 0.9f, 0.5f + rng.nextFloat() * 0.1f);
+        world.playSound(maw, Sound.ENTITY_GENERIC_EAT, 1.0f, 0.6f + rng.nextFloat() * 0.15f);
+        world.playSound(mouth, Sound.BLOCK_HONEY_BLOCK_SLIDE, 0.6f, 0.6f); // the pull hauling them in
+        // The organ's light swells on the one holding it as the mouthful goes down.
+        world.spawnParticle(Particle.DUST, mouth, 8, 0.3, 0.4, 0.3, 0, LURE_DUST);
     }
 
     /** A third hit taken: the lantern gulps it down. The heal is now three seconds out. */
@@ -432,7 +574,12 @@ public final class LanternWeapon implements EgoWeapon {
             "Slow strikes. Every 5th strike bites",
             "deep for 4 true damage through armor,",
             "and heals you for the swing plus the",
-            "bite.")
+            "bite."),
+        new EgoLore.Ability("[Right Click] Devour",
+            "Yank the nearest foe ahead in close",
+            "and bite: 5 damage, and the lantern",
+            "feeds, healing you for part of it.",
+            "8 second cooldown.")
     );
 
     private static final EgoLore.Tooltip TOOLTIP =

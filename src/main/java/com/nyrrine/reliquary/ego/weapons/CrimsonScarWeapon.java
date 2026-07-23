@@ -62,8 +62,9 @@ import java.util.concurrent.ThreadLocalRandom;
  * {@code "ego/crimson_scar_pistol"}) renders as the flintlock. Both are plain vanilla items with no pack.
  *
  * <p>State: a per-wielder {@code firing} re-entrancy fence around the flintlock's {@code victim.damage(...)}
- * (so the bullet can't chain), and a {@code lastFire} reload-clock map. Both cleared on quit. No world
- * edits; nothing runs for non-wielders.
+ * (so the bullet can't chain), a {@code lastFire} reload-clock map, and a {@code loadedStrike} flag set by
+ * each shot so the wielder's next steel-form chop lands doubled. All cleared on quit. No world edits;
+ * nothing runs for non-wielders.
  */
 public final class CrimsonScarWeapon implements EgoWeapon {
 
@@ -88,6 +89,9 @@ public final class CrimsonScarWeapon implements EgoWeapon {
     /** Wielder -> epoch-millis of their last flintlock shot; drives the reload lock. Cleared on quit. */
     private final Map<UUID, Long> lastFire = new HashMap<>();
 
+    /** Wielders holding a Loaded Strike — their next steel-form chop lands doubled, then this clears. Cleared on quit. */
+    private final Set<UUID> loadedStrike = new HashSet<>();
+
     /** Wielder -> count of properly-spaced melee strikes toward the 3rd-strike lunging stab. Cleared on quit. */
     private final Map<UUID, Integer> strikeCount = new HashMap<>();
 
@@ -104,11 +108,16 @@ public final class CrimsonScarWeapon implements EgoWeapon {
      */
     private final Set<UUID> ticking = new HashSet<>();
 
-    // Flintlock tuning — a strong single ball, then a long wait. Shots cannot be fast.
+    // Flintlock tuning — a strong single ball, then a wait. Shots cannot be fast.
     private static final double FLINTLOCK_DAMAGE   = 9.0;    // 4.5 hearts — a decisive strike
     private static final double FLINTLOCK_RANGE    = 30.0;   // hitscan reach
     private static final double FLINTLOCK_RAY_SIZE = 0.5;    // entity ray fatness (forgiving aim)
-    private static final long   RELOAD_MS          = 4000L;  // long reload — swap back to steel meanwhile
+    private static final long   RELOAD_MS          = 2000L;  // 2s reload — swap back to steel meanwhile
+
+    // Loaded Strike — after a flintlock shot, the wielder's NEXT steel-form chop lands doubled. The flag is
+    // set when the ball is loosed and spent by the first melee hit that follows (once), rewarding the
+    // fire-then-swap-to-steel rhythm. Cadence flourish, one hit — never a sustained buff.
+    private static final double LOADED_STRIKE_MULT = 2.0;
 
     // Ram the Powder (a custom enchant — id "ram_the_powder"): the melee form is an axe, which can't hold
     // Quick Charge at an anvil, so a vanilla read is impossible — this is an ego-enchant that cuts the
@@ -311,9 +320,10 @@ public final class CrimsonScarWeapon implements EgoWeapon {
     private void renderBar(Player player) {
         ItemStack held = player.getInventory().getItemInMainHand();
         if (isPistol(held)) {
-            player.sendActionBar(EgoHud.row(formReadout(true), reloadReadout(player)));
+            player.sendActionBar(EgoHud.row(formReadout(true), reloadReadout(player), loadedReadout(player)));
         } else {
-            player.sendActionBar(EgoHud.row(formReadout(false), lungeReadout(player), bloodReadout(player)));
+            player.sendActionBar(EgoHud.row(
+                    formReadout(false), loadedReadout(player), lungeReadout(player), bloodReadout(player)));
         }
     }
 
@@ -347,6 +357,11 @@ public final class CrimsonScarWeapon implements EgoWeapon {
         return isBloodDrunk(player) ? EgoHud.status("Blood-Drunk", BLOOD) : null;
     }
 
+    /** The Loaded Strike pip: shown while a fired shot has the next chop loaded, on either form's line, else dropped. */
+    private Component loadedReadout(Player player) {
+        return loadedStrike.contains(player.getUniqueId()) ? EgoHud.status("Loaded Strike", BLOOD) : null;
+    }
+
     /**
      * Fire one strong, slow flintlock ball down the eye line. Locked while reloading (the action bar shows
      * the reload clock + a swap hint). The ball's {@code victim.damage} re-enters onHit — the {@link #firing}
@@ -366,6 +381,7 @@ public final class CrimsonScarWeapon implements EgoWeapon {
             }
         }
         lastFire.put(id, now);
+        loadedStrike.add(id); // the shot loads the next steel-form chop — spent by the first melee hit that follows
 
         World world = player.getWorld();
         Location eye = player.getEyeLocation();
@@ -435,6 +451,14 @@ public final class CrimsonScarWeapon implements EgoWeapon {
         }
 
         wetSlash(victim);
+
+        // Loaded Strike: a shot fired earlier loads the next chop — it lands doubled, once. Applied before the
+        // blood-drunk multiplier below, so a loaded chop in the frenzy compounds (a rare, earned spike). Spent
+        // whether or not blood-drunk, so it can never linger onto a later swing.
+        if (loadedStrike.remove(id)) {
+            event.setDamage(event.getDamage() * LOADED_STRIKE_MULT);
+            loadedStrikeFx(attacker, victim);
+        }
 
         // Combo: only properly-spaced chops count (mash inside MIN_HIT_INTERVAL_MS is ignored). Every third
         // counted strike is a lunging stab that dashes into the target and opens a bleed, then the count resets.
@@ -600,6 +624,21 @@ public final class CrimsonScarWeapon implements EgoWeapon {
         world.playSound(impact, Sound.BLOCK_HONEY_BLOCK_BREAK, 0.7f, 0.6f + rng.nextFloat() * 0.2f); // wet squelch
     }
 
+    /** The Loaded Strike lands: the chop drives home on the shot's leftover powder — a heavier crack and a wide red spray. */
+    private void loadedStrikeFx(Player attacker, LivingEntity victim) {
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        World world = victim.getWorld();
+        Location impact = victim.getLocation().add(0, 1.0, 0);
+
+        world.spawnParticle(Particle.DUST, impact, 18, 0.3, 0.4, 0.3, 0.0, AURA_DUST);
+        world.spawnParticle(Particle.SWEEP_ATTACK, impact, 1, 0.0, 0.0, 0.0, 0);
+        world.spawnParticle(Particle.CRIT, impact, 8, 0.25, 0.25, 0.25, 0.2);
+        world.spawnParticle(Particle.SMOKE, impact, 4, 0.15, 0.15, 0.15, 0.01); // leftover muzzle powder
+
+        world.playSound(impact, Sound.ENTITY_PLAYER_ATTACK_CRIT, 1.0f, 0.8f);
+        world.playSound(impact, Sound.ENTITY_FIREWORK_ROCKET_BLAST, 0.5f, 1.3f + rng.nextFloat() * 0.15f);
+    }
+
     /** The lunging stab lands: a driven crimson thrust — a spray of blood, a sweep arc, and a meaty run-through. */
     private void stabFx(Player attacker, LivingEntity victim) {
         ThreadLocalRandom rng = ThreadLocalRandom.current();
@@ -686,6 +725,7 @@ public final class CrimsonScarWeapon implements EgoWeapon {
         // Wielder state.
         firing.remove(id);
         lastFire.remove(id);
+        loadedStrike.remove(id);
         strikeCount.remove(id);
         lastCountedHit.remove(id);
         ticking.remove(id);
@@ -701,6 +741,7 @@ public final class CrimsonScarWeapon implements EgoWeapon {
         bleeds.clear();
         firing.clear();
         lastFire.clear();
+        loadedStrike.clear();
         strikeCount.clear();
         lastCountedHit.clear();
         ticking.clear();
@@ -740,8 +781,12 @@ public final class CrimsonScarWeapon implements EgoWeapon {
             new EgoLore.Ability("[Right Click] Flintlock Shot",
                     "In flintlock form, fires one ball down",
                     "your eye line — 9 damage, 30 blocks.",
-                    "Then a 4 second reload locks the",
+                    "Then a 2 second reload locks the",
                     "trigger. Does nothing in steel form."),
+            new EgoLore.Ability("[Passive] Loaded Strike",
+                    "After a flintlock shot, your next",
+                    "steel-form chop lands for double",
+                    "damage. Spent on the first hit."),
             new EgoLore.Ability("[Shift + Right-click] Form Swap",
                     "Swaps between the steel sickle and the",
                     "flintlock. Enchantments and wear carry",

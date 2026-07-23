@@ -59,7 +59,7 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li><b>Hate · sneak + right-click — Reverse Arcana Slave</b>: a long, dramatic chant draws converging
  *       magic circles inward, then fires a <b>massive laser that follows your aim for ten seconds</b>,
  *       dealing tick damage (no knockback) and temporarily carving a tunnel through the blocks in front of
- *       you. 5-minute cooldown.</li>
+ *       you. 2.5-minute cooldown.</li>
  * </ul>
  *
  * <p>All state is a handful of in-memory UUID maps, dropped on quit. Every runnable is lifetime-capped and
@@ -95,14 +95,14 @@ public final class LoveAndHateWeapon implements EgoWeapon {
 
     // ---- tuning -------------------------------------------------------------------
     private static final long MEND_CD_MS    = 900L;      // Love right-click gate
-    private static final long SALVO_CD_MS   = 3500L;     // Hate right-click gate — 3.5s so the 4-hit salvo isn't spammable
+    private static final long SALVO_CD_MS   = 2200L;     // Hate right-click gate — 2.2s so the 4-hit salvo presses harder
     private static final long MINOR_CD_MS   = 120_000L;  // Minor Arcana Slave — 2 minutes
-    private static final long REVERSE_CD_MS = 300_000L;  // Reverse Arcana Slave — 5 minutes
+    private static final long REVERSE_CD_MS = 150_000L;  // Reverse Arcana Slave — 2.5 minutes
 
     /**
      * ENCHANT — Arcana Focus (custom id {@code "arcana_focus"}): each level shaves this off the current
      * form's ult cooldown, capped at {@link #ARCANA_FOCUS_CAP} and never below {@link #ARCANA_FOCUS_MIN_MS}.
-     * At max it trims 45s — Minor 120s→75s, Reverse 300s→255s. Pure cadence; the ult's effect is unchanged,
+     * At max it trims 45s — Minor 120s→75s, Reverse 150s→105s. Pure cadence; the ult's effect is unchanged,
      * so it can't push the Aleph's burst out of band. PLACEHOLDER (balance wave). */
     private static final long ARCANA_FOCUS_REDUCTION_MS = 15_000L;
     private static final int  ARCANA_FOCUS_CAP          = 3;
@@ -112,7 +112,7 @@ public final class LoveAndHateWeapon implements EgoWeapon {
     private static final int    MEND_REGEN_TICKS = 100;  // Regeneration I on a mended ally
     private static final int    MEND_REGEN_AMP   = 0;
 
-    private static final double SALVO_DAMAGE = 4.0;      // per homing bolt
+    private static final double SALVO_DAMAGE = 5.5;      // per homing bolt
     private static final int    SALVO_COUNT  = 4;        // bolts per cast
 
     private static final int    MINOR_REGEN_TICKS = 120; // Regeneration III on a beam-struck body
@@ -133,7 +133,7 @@ public final class LoveAndHateWeapon implements EgoWeapon {
     private static final double HEARTS_REACH_PER_LEVEL = 4.0;
     private static final int    HEARTS_REACH_CAP       = 2;
     private static final int    LASER_DMG_PERIOD = 8;    // tick-damage cadence (respects i-frames)
-    private static final double LASER_DAMAGE   = 4.0;    // per pulse, no knockback
+    private static final double LASER_DAMAGE   = 6.0;    // per pulse, no knockback
     private static final int    LASER_MAX_TARGETS = 12;
     private static final int    CARVE_MAX      = 600;    // cap on concurrently-open temp-carved blocks; restores free slots as they expire
     private static final long   CARVE_TTL_MS   = 3000L;  // a carved block pops back ~3s after the beam passes
@@ -972,8 +972,8 @@ public final class LoveAndHateWeapon implements EgoWeapon {
                     new EgoLore.Ability("[Right Click] Homing Bolts",
                             "Hate form. Four bolts rise from",
                             "behind you and chase the nearest mobs",
-                            "ahead, bursting for 4 damage each.",
-                            "All four land. 3.5 second cooldown."),
+                            "ahead, bursting for 5.5 damage each.",
+                            "All four land. 2.2 second cooldown."),
                     new EgoLore.Ability("[Shift + Right-click] Minor Arcana",
                             "Love form. A bright beam that",
                             "ricochets off walls, showering",
@@ -985,11 +985,11 @@ public final class LoveAndHateWeapon implements EgoWeapon {
                             "Hate form. A 5 second chant draws",
                             "magic circles inward, then fires a",
                             "40 block laser that follows your aim",
-                            "for 10 seconds, dealing 4 damage a",
+                            "for 10 seconds, dealing 6 damage a",
                             "pulse with no knockback. It carves a",
                             "tunnel through the blocks ahead;",
                             "every one of them grows back.",
-                            "5 minute cooldown.")
+                            "2.5 minute cooldown.")
             ));
 
     // ---- lifecycle ----------------------------------------------------------------

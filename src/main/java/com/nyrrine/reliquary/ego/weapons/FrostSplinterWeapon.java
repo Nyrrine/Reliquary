@@ -112,7 +112,7 @@ public final class FrostSplinterWeapon implements EgoWeapon {
      */
     private final Map<UUID, UUID> dueler = new HashMap<>();
 
-    /** [The Second Kiss] Wielder -> total strikes landed since the last discharge (every 2nd frosts a stack). */
+    /** [The Second Kiss] Wielder -> total strikes landed since the last discharge (each one frosts a stack). */
     private final Map<UUID, Integer> strikes = new HashMap<>();
 
     /** [The Second Kiss] Wielder -> charge stacks currently frosted onto the blade, 0..{@link #CHARGE_MAX}. */
@@ -144,10 +144,10 @@ public final class FrostSplinterWeapon implements EgoWeapon {
     private static final double DUELER_DAMAGE_MULT = 1.05;
 
     // [Left Click] The Second Kiss.
-    /** Every second strike frosts one stack onto the blade. */
-    private static final int STRIKES_PER_STACK = 2;
+    /** Every strike frosts one stack onto the blade. */
+    private static final int STRIKES_PER_STACK = 1;
     /** Stacks needed before the next strike is empowered. */
-    private static final int CHARGE_MAX = 12;
+    private static final int CHARGE_MAX = 8;
     /** Strikes to fill the charge from empty — {@value #CHARGE_MAX} x {@value #STRIKES_PER_STACK}. */
     private static final int STRIKES_TO_FULL = CHARGE_MAX * STRIKES_PER_STACK;
     /** The empowered strike seals the victim for 1.5s. */
@@ -165,8 +165,8 @@ public final class FrostSplinterWeapon implements EgoWeapon {
     private static final int DEEP_FREEZE_CAP             = 3;
 
     // [Right-click] The Third Kiss.
-    /** One hurled block of ice every 20 seconds. */
-    private static final long THROW_COOLDOWN_MS = 20_000L;
+    /** One hurled block of ice every 12 seconds. */
+    private static final long THROW_COOLDOWN_MS = 12_000L;
     /** A body caught by the block is sealed for 2.5s. */
     private static final int THIRD_KISS_ROOT_TICKS = 50;
 
@@ -983,14 +983,14 @@ public final class FrostSplinterWeapon implements EgoWeapon {
                             "The last foe you strike becomes your",
                             "dueler: +5% damage to them alone."),
                     new EgoLore.Ability("[Left Click] The Second Kiss",
-                            "Every second strike builds a charge.",
-                            "At 12, your next blow roots them in",
+                            "Every strike builds a charge.",
+                            "At 8, your next blow roots them in",
                             "ice for 1.5s and leaves 12s of",
                             "slowness behind."),
                     new EgoLore.Ability("[Right-click] The Third Kiss",
                             "Hurl a block of ice: it roots what it",
                             "hits for 2.5s. Catch them airborne and",
                             "it drags them down for double fall",
-                            "damage. 20s cooldown.")
+                            "damage. 12s cooldown.")
             ));
 }

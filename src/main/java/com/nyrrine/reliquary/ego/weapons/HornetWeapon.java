@@ -129,13 +129,13 @@ public final class HornetWeapon implements EgoWeapon {
     private static final int    TWIN_RELOAD_CAP       = 3;
 
     // ---- tuning: rifle (spore rounds) ----------------------------------------------
-    // A single deliberate round a second. 6.0 x 10 rounds = 60 damage a magazine, and 6.0/s sustained sits
-    // well under a netherite sword's melee DPS — a rifle should trade rate for reach, not beat steel.
+    // A brisk round every 0.6s. 6.0 x 10 rounds = 60 damage a magazine; the faster cadence trades the old
+    // one-a-second restraint for pressure, still gated by the magazine + reload rather than pure fire rate.
     private static final double RIFLE_DAMAGE      = 6.0;    // 3 hearts per spore round
     private static final double RIFLE_RANGE       = 40.0;   // hitscan reach — a real rifle's line
     private static final double RIFLE_RAY_SIZE    = 0.45;   // entity ray fatness (forgiving aim)
     private static final double RIFLE_SPREAD      = 0.012;  // a hair of scatter so it isn't a laser
-    private static final long   RIFLE_COOLDOWN_MS = 1000L;  // 1s between shots
+    private static final long   RIFLE_COOLDOWN_MS = 600L;   // 0.6s between shots
 
     // ---- tuning: shotgun (buckshot rounds) -----------------------------------------
     // 6 pellets x 1.8 = 10.8 if every pellet lands point-blank — under the ~11 single-instance ceiling
@@ -886,7 +886,7 @@ public final class HornetWeapon implements EgoWeapon {
                             "Swap between rifle and shotgun.",
                             "Each keeps its own magazine."),
                     new EgoLore.Ability("[Left-Click] Hornet [Rifle]",
-                            "One spore round. 1s between shots."),
+                            "One spore round. 0.6s between shots."),
                     new EgoLore.Ability("[Left-Click] Hornet [Shotgun]",
                             "A buckshot cone; each pellet pierces 3",
                             "bodies, and point-blank bites through",

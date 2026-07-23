@@ -7,6 +7,7 @@ import com.nyrrine.reliquary.ego.EgoDurability;
 import com.nyrrine.reliquary.ego.EgoHud;
 import com.nyrrine.reliquary.ego.EgoLore;
 import com.nyrrine.reliquary.ego.EgoModels;
+import com.nyrrine.reliquary.ego.SlashVfx;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
@@ -49,11 +50,16 @@ import java.util.concurrent.ThreadLocalRandom;
  * only spaced hits count. Every damaging hit also records the wielder's <b>most-recent foe</b> for a short
  * window ({@link #FOE_TTL_MS}ms), so the ability always has a target without a raytrace.
  *
- * <p><b>Rip Their Heart</b> ({@link #onInteract}, right-click) — at a full charge, the heart is torn out of
- * the wielder's most-recent foe (if it is still alive and nearby): a considerable burst of damage, a short
- * bleed, and 9s of Slowness + Weakness. The charge is spent (reset to zero). A right-click with an
+ * <p><b>Rip Their Heart</b> ({@link #onInteract}, plain right-click) — at a full charge, the heart is torn
+ * out of the wielder's most-recent foe (if it is still alive and nearby): a considerable burst of damage, a
+ * short bleed, and 9s of Slowness + Weakness. The charge is spent (reset to zero). A right-click with an
  * unfinished bar or no valid recent foe is a quiet no-op with a soft cue. The burst is a non-vanilla hit,
  * so it wears the item via {@link EgoDurability#wearMainHand(Player)}.
+ *
+ * <p><b>Timber!</b> ({@link #onInteract}, shift-right-click) — a heavy overhead chop that lands as an AoE
+ * ground shockwave, cutting and briefly staggering everything within {@link #TIMBER_RADIUS} blocks. It needs
+ * at least half a charge and spends half, on a medium cooldown. Its shockwave blows are dealt inside the
+ * {@link #ticking} fence so they can't build or spend charge off themselves, and it wears the axe once.
  *
  * <p>The action bar carries the live charge as a gauge while the axe is held. State is kept
  * O(active wielders + live bleeds): per-wielder charge/last-hit clocks and a most-recent-foe pointer, plus
@@ -104,6 +110,19 @@ public final class LoggingWeapon implements EgoWeapon {
     private static final long   BLEED_PERIOD_TICKS = 10; // every ~0.5s
     private static final int    BLEED_TICKS = 4;         // four ticks -> ~6.0 over ~2s
 
+    // ---- Timber! tuning (shift-right-click) ---------------------------------------
+    /** Timber! needs at least this much heart charge to swing, and spends this much when it does. */
+    private static final double TIMBER_MIN_CHARGE  = 0.50;
+    private static final double TIMBER_CHARGE_COST = 0.50;
+    /** A medium gate so the overhead chop is a beat, not a spam. */
+    private static final long   TIMBER_COOLDOWN_MS = 6_000L;
+    /** The shockwave reach and the chop's damage to everything caught in it. */
+    private static final double TIMBER_RADIUS = 4.0;
+    private static final double TIMBER_DAMAGE = 5.0;
+    /** The brief stagger the shockwave leaves — Slowness III for 1.5s. */
+    private static final int    TIMBER_STAGGER_TICKS = 30;
+    private static final int    TIMBER_STAGGER_AMP   = 2;
+
     /** Oak splinters flung from every chop. Cached — a plank's block data never changes. */
     private static final BlockData CHIP = Material.OAK_PLANKS.createBlockData();
     /** Blood dust for the torn-out-heart burst / bleed trail. */
@@ -115,6 +134,8 @@ public final class LoggingWeapon implements EgoWeapon {
     private final Map<UUID, Double> charge = new HashMap<>();
     /** Wielder -> epoch-ms of their last COUNTED hit; drives the mash guard. */
     private final Map<UUID, Long> lastCountedHit = new HashMap<>();
+    /** Wielder -> epoch-ms at which Timber! comes off cooldown (absent = ready). */
+    private final Map<UUID, Long> timberReadyAt = new HashMap<>();
     /** Wielder -> the most-recent foe they damaged, and when that pointer lapses. */
     private final Map<UUID, RecentFoe> recentFoe = new HashMap<>();
     /** Victim -> their live bleed task; refreshed (cancel + replace) per rip. */
@@ -202,13 +223,16 @@ public final class LoggingWeapon implements EgoWeapon {
     }
 
     /**
-     * Right-click: at a full charge, tear the heart out of the wielder's most-recent foe (if still alive and
-     * nearby) — a considerable burst, a short bleed, and 9s of Slowness + Weakness. The charge is spent.
+     * Right-click splits on the sneak key. A plain right-click at a full charge tears the heart out of the
+     * wielder's most-recent foe (if still alive and nearby) — a considerable burst, a short bleed, and 9s of
+     * Slowness + Weakness, spending the whole charge. A shift-right-click is Timber! (see {@link #timber}).
      * An unfinished bar or no valid recent foe is a quiet no-op with a soft cue.
      */
     @Override
     public void onInteract(Player player, boolean sneaking) {
         if (!matches(player.getInventory().getItemInMainHand())) return;
+
+        if (sneaking) { timber(player); return; }
 
         double c = charge.getOrDefault(player.getUniqueId(), 0.0);
         if (c < 1.0) { notReadyCue(player); return; } // not charged yet
@@ -217,6 +241,58 @@ public final class LoggingWeapon implements EgoWeapon {
         if (foe == null) { notReadyCue(player); return; } // no valid foe within reach
 
         ripHeart(player, foe);
+    }
+
+    /**
+     * Shift-right-click: Timber! — a heavy overhead chop that lands as an AoE ground shockwave, cutting and
+     * briefly staggering everything within {@link #TIMBER_RADIUS} blocks. It needs at least
+     * {@value #TIMBER_MIN_CHARGE} of heart charge and spends {@value #TIMBER_CHARGE_COST}, on a medium
+     * cooldown. Not enough charge, or still on cooldown, is a quiet no-op with the soft dry-wood cue.
+     *
+     * <p>The shockwave's blows are dealt inside the {@link #ticking} fence — the same one the rip uses — so a
+     * chop can never build or spend heart charge off its own damage. A Timber! is a non-vanilla burst, so it
+     * wears the axe once via {@link EgoDurability#wearMainHand(Player)}.
+     */
+    private void timber(Player player) {
+        UUID id = player.getUniqueId();
+        long now = System.currentTimeMillis();
+
+        Long ready = timberReadyAt.get(id);
+        if (ready != null && now < ready) { notReadyCue(player); return; } // still on cooldown
+
+        double c = charge.getOrDefault(id, 0.0);
+        if (c < TIMBER_MIN_CHARGE) { notReadyCue(player); return; }        // not enough charge to swing
+
+        // Spend the charge and start the cooldown before the blow, so a re-entrant tick can't double-fire it.
+        charge.put(id, Math.max(0.0, c - TIMBER_CHARGE_COST));
+        timberReadyAt.put(id, now + TIMBER_COOLDOWN_MS);
+
+        // The overhead chop — a steep downward SlashVfx with the axe swept along it.
+        SlashVfx.slash(plugin, player.getEyeLocation(), player.getEyeLocation().getDirection())
+                .arcSpan(150).reach(3.4)
+                .colours(Color.fromRGB(0x9C, 0x6B, 0x3F), Color.fromRGB(0xE8, 0xD8, 0xB0))
+                .thickness(1.5f).duration(5).tilt(78)
+                .blade(Material.NETHERITE_AXE).bladeScale(1.25)
+                .play();
+
+        // The shockwave: cut and stagger everything in reach. Fenced so the AoE never re-arms the charge.
+        ticking.add(id);
+        try {
+            for (var entity : player.getNearbyEntities(TIMBER_RADIUS, TIMBER_RADIUS, TIMBER_RADIUS)) {
+                if (entity.equals(player) || !(entity instanceof LivingEntity le) || le.isDead()) continue;
+                if (le.getLocation().distanceSquared(player.getLocation()) > TIMBER_RADIUS * TIMBER_RADIUS) continue;
+                le.damage(TIMBER_DAMAGE, player);
+                le.addPotionEffect(new PotionEffect(
+                        PotionEffectType.SLOWNESS, TIMBER_STAGGER_TICKS, TIMBER_STAGGER_AMP, false, true, true));
+                le.getWorld().spawnParticle(Particle.CRIT, le.getLocation().add(0, 1.0, 0), 5, 0.25, 0.3, 0.25, 0.1);
+            }
+        } finally {
+            ticking.remove(id);
+        }
+
+        EgoDurability.wearMainHand(player);
+        timberFx(player);
+        sendChargeBar(player);
     }
 
     /** Tear the heart out of the foe: burst + bleed + debuffs, spend the charge, wear the axe. */
@@ -331,14 +407,24 @@ public final class LoggingWeapon implements EgoWeapon {
         return true;
     }
 
-    /** Push the current charge to the wielder as a gauge: {@code [▮▮…]  Heart NN%} (or a ready cue at full). */
+    /**
+     * Push the current charge to the wielder as a gauge: {@code [▮▮…]  Heart NN%} (or a ready cue at full),
+     * with Timber!'s cooldown appended on the same composed line while it runs.
+     */
     private void sendChargeBar(Player player) {
-        double c = charge.getOrDefault(player.getUniqueId(), 0.0);
+        UUID id = player.getUniqueId();
+        double c = charge.getOrDefault(id, 0.0);
         int pct = (int) Math.round(c * 100.0);
         Component label = c >= 1.0
                 ? EgoHud.status("Rip Their Heart — ready", HEART)
                 : EgoHud.status("Heart " + pct + "%", HEART);
-        player.sendActionBar(EgoHud.gauge(HEART, c, label));
+        Component gauge = EgoHud.gauge(HEART, c, label);
+
+        Long ready = timberReadyAt.get(id);
+        long rem = ready == null ? 0L : ready - System.currentTimeMillis();
+        Component timber = rem > 0 ? EgoHud.cooldown("Timber", rem, BARK) : null;
+
+        player.sendActionBar(EgoHud.row(gauge, timber));
     }
 
     // ---- SFX / VFX ----------------------------------------------------------------
@@ -352,6 +438,33 @@ public final class LoggingWeapon implements EgoWeapon {
 
         float pitch = 0.75f + ThreadLocalRandom.current().nextFloat() * 0.15f;
         world.playSound(impact, Sound.BLOCK_WOOD_BREAK, 0.8f, pitch);
+    }
+
+    /** Timber! lands: a heavy chop-and-crash, and an expanding ring of splintered ground thrown out around the wielder. */
+    private void timberFx(Player player) {
+        World world = player.getWorld();
+        Location feet = player.getLocation();
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+
+        // The overhead landing — a heavy wooden crash under a driven crit.
+        world.playSound(feet, Sound.BLOCK_WOOD_BREAK, 1.0f, 0.5f);
+        world.playSound(feet, Sound.ENTITY_PLAYER_ATTACK_STRONG, 1.0f, 0.6f + rng.nextFloat() * 0.1f);
+        world.playSound(feet, Sound.ENTITY_GENERIC_EXPLODE, 0.5f, 0.9f); // the ground taking the blow
+
+        // The shockwave ring: splinters and dust flung out in a widening circle across the ground.
+        final int points = 26;
+        for (double radius = 1.5; radius <= TIMBER_RADIUS; radius += 1.25) {
+            for (int i = 0; i < points; i++) {
+                double a = (Math.PI * 2 * i) / points;
+                Location p = feet.clone().add(Math.cos(a) * radius, 0.15, Math.sin(a) * radius);
+                world.spawnParticle(Particle.BLOCK, p, 2, 0.15, 0.05, 0.15, 0.0, CHIP);
+                if (i % 2 == 0) {
+                    world.spawnParticle(Particle.DUST, p, 1, 0.1, 0.05, 0.1, 0.0,
+                            new Particle.DustOptions(BLOOD, 0.9f));
+                }
+            }
+        }
+        world.spawnParticle(Particle.EXPLOSION, feet.clone().add(0, 0.2, 0), 1, 0, 0, 0, 0);
     }
 
     /** The charge just filled: a low heartbeat thunk and a pulse of red at the wielder's chest. */
@@ -400,6 +513,7 @@ public final class LoggingWeapon implements EgoWeapon {
         // Wielder state.
         charge.remove(id);
         lastCountedHit.remove(id);
+        timberReadyAt.remove(id);
         ticking.remove(id);
         recentFoe.remove(id);
 
@@ -418,6 +532,7 @@ public final class LoggingWeapon implements EgoWeapon {
         recentFoe.clear();
         charge.clear();
         lastCountedHit.clear();
+        timberReadyAt.clear();
         ticking.clear();
     }
 
@@ -454,6 +569,12 @@ public final class LoggingWeapon implements EgoWeapon {
                             "and struck in the last 9 seconds. A",
                             "heavy burst, a short bleed of true",
                             "damage, and 9s of Slowness II and",
-                            "Weakness. Spends the charge.")
+                            "Weakness. Spends the charge."),
+                    new EgoLore.Ability("[Shift + Right-click] Timber!",
+                            "At half charge or more, an overhead",
+                            "chop crashes down as a shockwave —",
+                            "5 damage and a brief stagger to all",
+                            "within 4 blocks. Spends half the",
+                            "charge. 6 second cooldown.")
             ));
 }
