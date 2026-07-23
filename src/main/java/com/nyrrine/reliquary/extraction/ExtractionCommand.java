@@ -106,7 +106,7 @@ public final class ExtractionCommand {
                 return;
             }
             giveOrDrop(player, Pouch.create(r));
-            player.sendMessage(msg("Gave a " + r.display() + " Pouch.", GREEN));
+            player.sendMessage(msg("Gave a " + r.display() + " Loot.", GREEN));
             return;
         }
         if (id.equals("bag")) {
@@ -367,7 +367,7 @@ public final class ExtractionCommand {
                 new Particle.DustOptions(r.burst(), 1.0f));
         player.playSound(at, Sound.ENTITY_ITEM_PICKUP, 0.8f, 1.2f);
         player.playSound(at, Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.6f, 1.4f);
-        player.sendActionBar(msg("Opened a " + r.display() + " Pouch.", GREEN));
+        player.sendActionBar(msg("Opened a " + r.display() + " Loot.", GREEN));
     }
 
     /** The weapon item a spec resolves to (via the plugin's registry), or null if unwired. */
