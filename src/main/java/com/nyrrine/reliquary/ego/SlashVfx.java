@@ -76,6 +76,7 @@ public final class SlashVfx {
         private int    duration   = 4;      // ticks the sweep takes to cross the whole arc
         private double tiltDeg    = 0.0;    // roll of the swing plane about the aim (0 = horizontal sweep)
         private boolean sparks    = true;
+        private boolean sweepEdge = true;   // the hard SWEEP_ATTACK flash on the leading edge (vanilla sword-sweep look)
         private Material bladeItem = null;  // null = particles only
         private double bladeScale = 1.0;
 
@@ -99,6 +100,9 @@ public final class SlashVfx {
         public Builder tilt(double degrees) { this.tiltDeg = degrees; return this; }
         /** Whether to fling a few sparks off the leading edge. */
         public Builder sparks(boolean on) { this.sparks = on; return this; }
+        /** Whether to paint the hard {@code SWEEP_ATTACK} flash on the leading edge (the vanilla sword-sweep look);
+         *  false keeps the dust crescent + crit slash but drops the sweep arc. */
+        public Builder sweepEdge(boolean on) { this.sweepEdge = on; return this; }
         /** Sweep an item blade (an {@link ItemDisplay}) along the arc as well as the particles. Null for none. */
         public Builder blade(Material item) { this.bladeItem = item; return this; }
         /** Scale of the optional item blade. */
@@ -192,7 +196,7 @@ public final class SlashVfx {
             private void renderLeadingEdge(double lead) {
                 Vector dir = forward.clone().rotateAroundAxis(axis, lead);
                 Location p = at(dir, reach);
-                world.spawnParticle(Particle.SWEEP_ATTACK, p, 1, 0.0, 0.0, 0.0, 0.0);
+                if (sweepEdge) world.spawnParticle(Particle.SWEEP_ATTACK, p, 1, 0.0, 0.0, 0.0, 0.0);
                 world.spawnParticle(Particle.CRIT, p, 3, 0.06, 0.06, 0.06, 0.12);
                 world.spawnParticle(Particle.DUST, p, 2, 0.05, 0.05, 0.05, 0.0,
                         new Particle.DustOptions(edge, thickness * 1.2f));
