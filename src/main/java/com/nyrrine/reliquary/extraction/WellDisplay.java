@@ -26,59 +26,67 @@ import java.util.List;
 import java.util.function.Function;
 
 /**
- * The extraction show above Carmen's Brain — a living <b>solar-system nervous system</b>. The Brain sits at the
- * centre and the ticket's reachable weapons float around it on a slowly-orbiting shell, each an {@link ItemDisplay}
- * linked back to the Brain by a curved green synapse tendril with travelling pulses. The whole constellation spins
- * around the Brain; each weapon also drifts on a buoyant water-sway and can be batted around.
+ * The extraction show above Carmen's Brain — a living <b>aquarium</b>. The ticket's reachable weapons drift
+ * around the Brain like fish in a tank: each floats on its own independent layered-noise path (no lockstep, no
+ * schools), gently contained to a volume around the Brain, softly pushing off any neighbour it drifts too close
+ * to. A player can bat one with a left-click and it gets flung, then settles back into the drift.
  *
- * <p><b>Live collision (hard invariant, moving or still):</b> every frame each weapon's resolved position is
- * checked — its block must be non-solid AND the Brain must have clear line-of-sight to it ({@link #clear}); a
- * blocked position is clamped back along the Brain→item ray to the last clear point, so an item bumps a wall and
- * slides instead of ever entering, hiding behind, or passing through it.
+ * <p><b>Block-safety (hard invariant, moving or still):</b> a resolved position is accepted only if its block is
+ * non-solid, the Brain has clear line-of-sight to it, AND it clears any floor below by {@link #FLOOR_CLEARANCE}
+ * (a downward probe lifts it off the top face); otherwise the item holds its last good spot. Items always float
+ * clear in open air — never resting on, kissing, or under a block surface.
  *
- * <p><b>Hittable "for funsies":</b> each weapon carries an {@link Interaction} hitbox tracking its position; a
- * left-click (polled via {@link Interaction#getLastAttack()}, no listener) bats it — a knockback impulse the item
- * carries as a damped spring back toward its home slot, colliding with blocks per the move-rule. This is purely
- * cosmetic: no grant, no drop, no ticket spend. Right-clicks still run the proximity random-pull.
+ * <p><b>Show arc:</b> a summon (items grow out from the Brain with green synapse tendrils), a tendril-despawn
+ * flourish at the hand-off, a long tendril-free free-float ({@link #DURATION_TICKS}), then a staggered pop-out
+ * outro (items wink away one by one) on the natural timeout. Any other exit (out of range, new preview, pull,
+ * unload, disable) hard-reaps at once.
  *
- * <p>{@link #reveal} builds/keeps the idle preview (a "wow" scale-in that lingers for {@link #DURATION_TICKS});
- * {@link #pull} plays the gacha pull. All entities — displays AND hitboxes — carry {@link #TAG}, are
- * non-persistent, and are reaped on every exit (timeout, new preview, pull resolve, the Brain leaving/unloading,
- * or disable + a cross-world tag sweep), with a preview tag distinct from the idle Brain's so the reaps never fight.
+ * <p><b>Hittable is cosmetic only:</b> the bat adds velocity + particles, never a grant/drop/spend, and item↔item
+ * pushes are cosmetic too. Right-clicks run the proximity random-pull. All entities — displays AND hitboxes —
+ * carry {@link #TAG}, are non-persistent, and are reaped on every exit + a cross-world sweep.
  */
 public final class WellDisplay {
 
     /** Scoreboard tag on every entity this show spawns — distinct from the idle Brain tag, for orphan reaping. */
     public static final String TAG = "reliquary_well_preview";
 
-    /** How long an idle preview lingers before it dissolves (ticks). */
-    public static final int DURATION_TICKS = 220;
+    /** How long the tendril-free free-float lingers before the pop-out outro (ticks ≈ 45s). */
+    public static final int DURATION_TICKS = 900;
 
     private static final int    PERIOD        = 2;     // ticks between physics/collision/particle frames (throttle)
-    private static final double SPHERE_RADIUS = 5.5;   // shell radius the weapons float over (placeholder)
+    private static final double SPHERE_RADIUS = 7.5;   // the tank radius items wander within (placeholder)
+    private static final double MIN_RADIUS    = 2.0;   // items are nudged out of this inner bubble around the Brain
     private static final int    SAFETY_CEILING = 64;   // hard ceiling on floating weapons (pathological tickets)
-    private static final int    INTRO_TICKS   = 16;    // the scale-in "wow" opening
+    private static final int    INTRO_TICKS   = 20;    // the summon (grow-out) length
+    private static final int    OUTRO_LEN     = 160;   // the staggered pop-out window
+    private static final int    OUTRO_START   = DURATION_TICKS - OUTRO_LEN;
     private static final int    PULL_TICKS    = 34;    // the sneak-extract pull animation
-    private static final double WATCH_RANGE   = 32.0;  // reap the preview if no player stays this near the Brain
+    private static final double WATCH_RANGE   = 40.0;  // reap the preview if no player stays this near the Brain
 
     private static final float  PLANET_SCALE  = 0.65f; // base weapon-model scale (varied per planet)
     private static final float  CHOSEN_SCALE  = 1.5f;  // the pulled weapon blooms to this
-    private static final double SWAY_AMP      = 0.28;  // buoyant water-drift amplitude
-    private static final double ORBIT_RATE    = Math.toRadians(14); // constellation spin (rad/sec)
     private static final double GOLDEN_ANGLE  = Math.PI * (3.0 - Math.sqrt(5.0));
-    private static final double BEAD_SPEED    = 0.6;   // synapse pulse travel (cycles/sec along a tendril)
+    private static final double BEAD_SPEED    = 0.6;   // synapse pulse travel (cycles/sec) during the summon
     private static final float  HITBOX_SIZE   = 0.7f;
 
-    // Knock physics (a damped spring pulling a batted item back to its home slot).
-    private static final double KNOCK_SPRING = 7.0;
-    private static final double KNOCK_DAMP   = 3.2;
-    private static final double IMPULSE      = 1.3;
+    // Aquarium drift physics (all placeholders for the live tune).
     private static final double DT           = PERIOD / 20.0;
+    private static final double WANDER_ACCEL = 2.4;    // per-item layered-noise steering
+    private static final double ORBIT_BIAS   = 0.55;   // a faint slow whole-tank circulation on top of the wander
+    private static final double CONTAIN      = 3.2;    // spring keeping items inside [MIN_RADIUS, SPHERE_RADIUS]
+    private static final double SEP_DIST     = 1.7;    // item↔item personal space
+    private static final double SEP_STRENGTH = 4.0;    // how hard they push apart
+    private static final double DAMP         = 0.88;   // velocity damping per frame
+    private static final double MAX_SPEED    = 3.0;    // blocks/sec speed cap
+    private static final double IMPULSE      = 2.8;    // a bat's knockback punch (juicy)
+    private static final double FLOOR_CLEARANCE = 0.7; // minimum gap above the top face of any block below
+    private static final double FLOOR_PROBE  = FLOOR_CLEARANCE + 1.6;
+
+    private static final Vector DOWN = new Vector(0, -1, 0);
 
     private static final Particle.DustOptions TENDRIL = new Particle.DustOptions(CarmenBrainVfx.GREEN, 0.6f);
     private static final Particle.DustOptions BEAD    = new Particle.DustOptions(CarmenBrainVfx.GREEN_SOFT, 0.95f);
     private static final Particle.DustOptions HAZE    = new Particle.DustOptions(CarmenBrainVfx.GREEN_SOFT, 0.7f);
-    private static final Particle.DustOptions ARC     = new Particle.DustOptions(CarmenBrainVfx.GREEN, 0.5f);
 
     private final Plugin plugin;
     private BukkitRunnable active;
@@ -91,33 +99,39 @@ public final class WellDisplay {
 
     public WellDisplay(Plugin plugin) { this.plugin = plugin; }
 
-    /** One floating weapon: its display + hitbox, spec, home slot on the shell, and its live motion state. */
+    /** One drifting weapon: its display + hitbox, spec, and its live aquarium motion state. */
     private static final class Planet {
         final ItemDisplay body;
         final Interaction hitbox;
         final WeaponSpec spec;
-        final Vector3f dir;         // unit home direction on the shell (pre-orbit)
-        final double radius;
+        final Vector anchor;        // its spread home the summon grows it out to
         final float scale;
         final float spin;
-        final double p1, p2, p3;    // sway phase seeds
+        final double[] wf;          // per-axis wander frequencies (independent per item)
+        final double[] wp;          // per-axis wander phases
         final int order;
-        final Vector vel = new Vector();        // knock velocity
-        final Vector disp = new Vector();       // knock displacement from the home+sway point
-        final Vector lastPos = new Vector();    // last resolved world position (pull starts from here)
+        final Vector vel = new Vector();
+        final Vector pos = new Vector();
+        final Vector lastPos = new Vector();
         long lastAttack = 0L;
+        boolean popped = false;
 
-        Planet(ItemDisplay body, Interaction hitbox, WeaponSpec spec, Vector3f dir, double radius,
+        Planet(ItemDisplay body, Interaction hitbox, WeaponSpec spec, Vector anchor,
                float scale, float spin, int order) {
-            this.body = body; this.hitbox = hitbox; this.spec = spec; this.dir = dir; this.radius = radius;
+            this.body = body; this.hitbox = hitbox; this.spec = spec; this.anchor = anchor;
             this.scale = scale; this.spin = spin; this.order = order;
-            this.p1 = order * 1.7; this.p2 = order * 2.3 + 0.5; this.p3 = order * 0.9 + 1.1;
+            this.wf = new double[]{0.26 + 0.16 * frac01(order * 0.37f),
+                                   0.21 + 0.15 * frac01(order * 0.61f),
+                                   0.24 + 0.16 * frac01(order * 0.79f)};
+            this.wp = new double[]{order * 1.3, order * 2.1 + 0.6, order * 0.7 + 1.4};
+            this.pos.copy(anchor);
+            this.lastPos.copy(anchor);
         }
     }
 
     // ---- lifecycle -----------------------------------------------------------------
 
-    /** Cancel any running scene and reap its entities (new preview / pull start / out-of-range / disable). */
+    /** Cancel any running scene and hard-reap its entities (new preview / pull start / out-of-range / disable). */
     public void stop() {
         if (active != null) { active.cancel(); active = null; }
         reapScene();
@@ -145,15 +159,15 @@ public final class WellDisplay {
     // ---- the idle preview ----------------------------------------------------------
 
     /**
-     * Show (or keep) the idle orbiting preview around the Brain hover centre {@code brainCentre} for the reachable
+     * Show (or keep) the aquarium around the Brain hover centre {@code brainCentre} for the reachable
      * {@code candidates}. Idempotent: a right-click that asks for the same scene already on screen keeps it
-     * animating instead of restarting it. Empty pool → a small puff. {@code itemFor} resolves a spec to its weapon
+     * drifting instead of restarting it. Empty pool → a small puff. {@code itemFor} resolves a spec to its weapon
      * model (null → a Nether Star placeholder).
      */
     public void reveal(Location brainCentre, List<WeaponSpec> candidates,
                        Function<WeaponSpec, ItemStack> itemFor) {
         String key = keyFor(brainCentre, candidates);
-        if (active != null && key.equals(sceneKey)) return; // same scene already up — let it keep breathing
+        if (active != null && key.equals(sceneKey)) return; // same scene already up — let it keep drifting
 
         stop();
         World world = brainCentre.getWorld();
@@ -173,24 +187,23 @@ public final class WellDisplay {
         final Location centre = sceneCentre;
         active = new BukkitRunnable() {
             int t = 0;
+            boolean handoff = false;
             @Override public void run() {
-                if (t >= DURATION_TICKS || !alive(centre)) {
-                    reapScene(); cancel();
-                    if (active == this) active = null;
-                    return;
-                }
+                if (!alive(centre)) { reapScene(); cancel(); if (active == this) active = null; return; }
                 double time = t / 20.0;
-                double orbit = time * ORBIT_RATE;
-                boolean intro = t < INTRO_TICKS;
-                for (Planet pl : planets) {
-                    if (!pl.body.isValid()) continue;
-                    double grow = intro ? introGrow(t, pl.order) : 1.0;
-                    Location resolved = stepPlanet(centre, pl, time, orbit, grow);
-                    drawTendril(centre, resolved, pl, time, grow, t);
-                    if (!intro) pollHit(centre, pl, resolved);
+                if (t < INTRO_TICKS) {
+                    summon(centre, time, t);
+                } else {
+                    if (!handoff) { tendrilFlourish(centre); handoff = true; }
+                    updateSwarm(centre, time);
+                    ambientHaze(centre, time);
+                    if (t >= OUTRO_START) {
+                        popDue(centre, t);
+                        if (allPopped() || t >= DURATION_TICKS + OUTRO_LEN) {
+                            reapScene(); cancel(); if (active == this) active = null; return;
+                        }
+                    }
                 }
-                if (t % (PERIOD * 3) == 0) neighbourArcs(centre);
-                ambientHaze(centre, time);
                 t += PERIOD;
             }
         };
@@ -200,10 +213,9 @@ public final class WellDisplay {
     // ---- the gacha pull ------------------------------------------------------------
 
     /**
-     * Play the pull animation for a successful sneak-extract: the non-chosen weapons dissolve inward to the Brain
-     * while {@code chosenSpec} blooms out above it, then the whole scene reaps. Transitions whatever scene is live
-     * at {@code brainCentre} (the command reveals/keeps it right before calling this); if the chosen weapon was
-     * never on the shell (off-cap or collision-skipped) it is spawned at the Brain to bloom.
+     * Play the pull animation for a successful sneak-extract from whatever state the aquarium is in: the non-chosen
+     * weapons dissolve inward to the Brain while {@code chosenSpec} blooms out above it, then the scene reaps. If
+     * the chosen weapon isn't a live floating body (off-cap, popped, or never shown) it is spawned to bloom.
      */
     public void pull(Location brainCentre, WeaponSpec chosenSpec) {
         if (active != null) { active.cancel(); active = null; }
@@ -213,12 +225,11 @@ public final class WellDisplay {
         final World world = centre.getWorld();
         final Vector bloomAt = centre.toVector().add(new Vector(0, 1.15, 0));
 
-        // Resolve the chosen body: reuse its floating planet, or spawn it fresh at the Brain.
         ItemDisplay chosen = null;
         Vector chosenStart = null;
         float chosenStartScale = CHOSEN_SCALE;
         for (Planet pl : planets) {
-            if (pl.spec.id().equals(chosenSpec.id())) {
+            if (pl.spec.id().equals(chosenSpec.id()) && pl.body.isValid() && !pl.popped) {
                 chosen = pl.body;
                 chosenStart = pl.lastPos.lengthSquared() > 0 ? pl.lastPos.clone() : bloomAt.clone();
                 chosenStartScale = pl.scale;
@@ -242,25 +253,21 @@ public final class WellDisplay {
             int t = 0;
             @Override public void run() {
                 if (!chosenBody.isValid() || !alive(centre)) {
-                    reapScene(); cancel();
-                    if (active == this) active = null;
-                    return;
+                    reapScene(); cancel(); if (active == this) active = null; return;
                 }
                 double time = t / 20.0;
                 double p = Math.min(1.0, t / (double) PULL_TICKS);
 
-                // Non-chosen weapons dissolve inward to the Brain, tendrils retracting behind them.
                 for (Planet pl : planets) {
-                    if (pl.spec.id().equals(chosenId) || !pl.body.isValid()) continue;
+                    if (pl.popped || pl.spec.id().equals(chosenId) || !pl.body.isValid()) continue;
                     Vector start = pl.lastPos.lengthSquared() > 0 ? pl.lastPos : centre.toVector();
                     Vector pos = lerp(start, centre.toVector(), easeIn(p));
                     float s = (float) (pl.scale * (1.0 - easeIn(p)));
                     place(pl.body, centre, pos, yaw((float) (time * pl.spin)), s);
                     if (pl.hitbox.isValid()) pl.hitbox.remove(); // no batting mid-pull
-                    drawTendrilPts(centre, pos.toLocation(world), 1.0 - p, TENDRIL);
+                    drawTendrilPts(centre, pos.toLocation(world), 1.0 - p);
                 }
 
-                // The chosen weapon blooms: rises to the bloom point, scales up, spins, sparks.
                 Vector cpos = lerp(startPos, bloomAt, easeOut(p));
                 float cs = (float) lerp(startScale, CHOSEN_SCALE, easeOut(p));
                 place(chosenBody, centre, cpos, yaw((float) (time * 3.2)), cs);
@@ -270,9 +277,7 @@ public final class WellDisplay {
 
                 if (t >= PULL_TICKS) {
                     burst(cloc);
-                    reapScene(); cancel();
-                    if (active == this) active = null;
-                    return;
+                    reapScene(); cancel(); if (active == this) active = null; return;
                 }
                 t += PERIOD;
             }
@@ -290,81 +295,175 @@ public final class WellDisplay {
         for (int i = 0; i < n; i++) {
             WeaponSpec spec = candidates.get(i);
             Vector3f dir = shellDirection(i, n);
-            double radius = SPHERE_RADIUS * (0.74 + 0.26 * frac01(i * 0.618f));
+            double radius = SPHERE_RADIUS * (0.55 + 0.35 * frac01(i * 0.618f));
+            Vector anchor = brainCentre.toVector().add(new Vector(dir.x * radius, dir.y * radius, dir.z * radius));
             ItemDisplay body = spawnBody(brainCentre, resolve(spec, itemFor), 0.01f); // scales in
             Interaction hitbox = spawnHitbox(brainCentre);
             current.add(body);
             current.add(hitbox);
             float scale = PLANET_SCALE * (0.85f + 0.35f * frac01(i * 0.399f));
             float spin  = 0.6f + 0.9f * frac01(i * 0.222f);
-            planets.add(new Planet(body, hitbox, spec, dir, radius, scale, spin, i));
+            planets.add(new Planet(body, hitbox, spec, anchor, scale, spin, i));
         }
     }
 
     /** Even golden-angle direction on the unit sphere for planet {@code i} of {@code n}. */
     private Vector3f shellDirection(int i, int n) {
-        double y = 1.0 - (i + 0.5) / n * 2.0;                 // top → bottom
+        double y = 1.0 - (i + 0.5) / n * 2.0;
         double rXZ = Math.sqrt(Math.max(0.0, 1.0 - y * y));
         double theta = i * GOLDEN_ANGLE;
         return new Vector3f((float) (Math.cos(theta) * rXZ), (float) y, (float) (Math.sin(theta) * rXZ));
     }
 
-    // ---- per-frame motion + collision ----------------------------------------------
+    // ---- the summon (grow-out) -----------------------------------------------------
 
-    /**
-     * Advance one weapon a frame: orbit the home slot, add water-sway + the damped knock spring, collision-clamp
-     * the result, apply it to the display, and move its hitbox. Returns the resolved world location.
-     */
-    private Location stepPlanet(Location centre, Planet pl, double time, double orbit, double grow) {
+    /** Items grow out from the Brain to their anchor with a green synapse tendril trailing each. */
+    private void summon(Location centre, double time, int t) {
         World world = centre.getWorld();
-
-        // Home slot = orbited shell direction * radius.
-        double lx = pl.dir.x * pl.radius, ly = pl.dir.y * pl.radius, lz = pl.dir.z * pl.radius;
-        double cos = Math.cos(orbit), sin = Math.sin(orbit);
-        double hx = lx * cos - lz * sin, hz = lx * sin + lz * cos;
-        Vector home = centre.toVector().add(new Vector(hx, ly, hz));
-
-        // Buoyant water-sway on all axes.
-        Vector sway = new Vector(
-                SWAY_AMP * Math.sin(time * 0.7 + pl.p1),
-                SWAY_AMP * 0.8 * Math.sin(time * 0.9 + pl.p2),
-                SWAY_AMP * Math.sin(time * 0.6 + pl.p3));
-
-        // Damped spring on the knock displacement (pulls a batted item home).
-        Vector springAccel = pl.disp.clone().multiply(-KNOCK_SPRING).add(pl.vel.clone().multiply(-KNOCK_DAMP));
-        pl.vel.add(springAccel.multiply(DT));
-        pl.disp.add(pl.vel.clone().multiply(DT));
-
-        Vector desired = home.add(sway).add(pl.disp);
-        Location resolved = clampToClear(world, centre, desired.toLocation(world));
-        // If we had to clamp, fold the correction into disp and stop the outward push (it "bumps" the wall).
-        Vector corrected = resolved.toVector();
-        if (corrected.distanceSquared(desired) > 1.0e-4) {
-            pl.disp.add(corrected.clone().subtract(desired));
-            pl.vel.multiply(0.2);
+        Vector c = centre.toVector();
+        for (Planet pl : planets) {
+            if (!pl.body.isValid()) continue;
+            double grow = introGrow(t, pl.order);
+            // Grow along the Brain→anchor ray, but never past the clear/floor-safe span (invariant holds while moving).
+            Location cand = floorClear(world, clampToClear(world, centre, lerp(c, pl.anchor, grow).toLocation(world)));
+            Vector pos = clear(world, centre, cand) ? cand.toVector() : pl.pos.clone();
+            pl.pos.copy(pos);
+            pl.lastPos.copy(pos);
+            place(pl.body, centre, pos, yaw((float) (time * pl.spin)), (float) (pl.scale * grow));
+            moveHitbox(pl, pos);
+            drawTendril(centre, pos.toLocation(world), pl, time, grow, t);
         }
-        pl.lastPos.copy(corrected);
-
-        place(pl.body, centre, corrected, yaw((float) (time * pl.spin)), (float) (pl.scale * grow));
-        if (pl.hitbox.isValid()) {
-            pl.hitbox.teleport(resolved.clone().subtract(0, HITBOX_SIZE / 2.0, 0));
-        }
-        return resolved;
     }
 
-    /** Bat detection: a new left-click on the hitbox imparts an outward knockback impulse (cosmetic only). */
-    private void pollHit(Location centre, Planet pl, Location resolved) {
+    /** A one-shot dissolve of every summon tendril as the show hands off to the free-float. */
+    private void tendrilFlourish(Location centre) {
+        World world = centre.getWorld();
+        Vector a = centre.toVector();
+        for (Planet pl : planets) {
+            Vector b = pl.lastPos.clone();
+            Vector control = a.clone().add(b).multiply(0.5).add(new Vector(0, 0.4, 0));
+            for (int s = 1; s <= 8; s++) {
+                Vector pt = bezier(a, control, b, s / 8.0);
+                world.spawnParticle(Particle.DUST, pt.toLocation(world), 1, 0.02, 0.02, 0.02, 0, BEAD);
+                if (s % 3 == 0) world.spawnParticle(Particle.END_ROD, pt.toLocation(world), 1, 0.02, 0.02, 0.02, 0.01);
+            }
+        }
+        world.playSound(centre, Sound.BLOCK_AMETHYST_BLOCK_CHIME, 0.6f, 0.9f);
+        world.playSound(centre, Sound.BLOCK_BEACON_AMBIENT, 0.5f, 1.7f);
+    }
+
+    // ---- the free-float swarm ------------------------------------------------------
+
+    /** One aquarium frame: independent wander + containment + item↔item separation, then collision/floor clamp. */
+    private void updateSwarm(Location centre, double time) {
+        int n = planets.size();
+        Vector cc = centre.toVector();
+        Vector[] accel = new Vector[n];
+
+        // Pass 1 — per-item steering: layered-noise wander, a faint whole-tank orbit, soft containment.
+        for (int i = 0; i < n; i++) {
+            Planet pl = planets.get(i);
+            if (pl.popped || !pl.body.isValid()) { accel[i] = new Vector(); continue; }
+            Vector a = new Vector(
+                    Math.sin(time * pl.wf[0] + pl.wp[0]) + 0.5 * Math.sin(time * pl.wf[0] * 2.3 + pl.wp[1]),
+                    0.7 * Math.sin(time * pl.wf[1] + pl.wp[1]),
+                    Math.sin(time * pl.wf[2] + pl.wp[2]) + 0.5 * Math.sin(time * pl.wf[2] * 1.9 + pl.wp[0]));
+            a.multiply(WANDER_ACCEL);
+
+            Vector rel = pl.pos.clone().subtract(cc);
+            double d = rel.length();
+            if (d > 1.0e-4) {
+                Vector radial = rel.clone().multiply(1.0 / d);
+                if (d > SPHERE_RADIUS) a.add(radial.clone().multiply(-(d - SPHERE_RADIUS) * CONTAIN));
+                else if (d < MIN_RADIUS) a.add(radial.clone().multiply((MIN_RADIUS - d) * CONTAIN));
+                Vector tangent = new Vector(-rel.getZ(), 0, rel.getX()); // faint whole-tank circulation
+                if (tangent.lengthSquared() > 1.0e-6) a.add(tangent.normalize().multiply(ORBIT_BIAS));
+            }
+            accel[i] = a;
+        }
+
+        // Pass 2 — separation: push apart any pair inside personal space (cheap, skips far pairs by dist²).
+        double sep2 = SEP_DIST * SEP_DIST;
+        for (int i = 0; i < n; i++) {
+            Planet pi = planets.get(i);
+            if (pi.popped || !pi.body.isValid()) continue;
+            for (int j = i + 1; j < n; j++) {
+                Planet pj = planets.get(j);
+                if (pj.popped || !pj.body.isValid()) continue;
+                double d2 = pi.pos.distanceSquared(pj.pos);
+                if (d2 >= sep2 || d2 < 1.0e-6) continue;
+                double d = Math.sqrt(d2);
+                Vector push = pi.pos.clone().subtract(pj.pos).multiply(1.0 / d)
+                        .multiply((SEP_DIST - d) / SEP_DIST * SEP_STRENGTH);
+                accel[i].add(push);
+                accel[j].subtract(push);
+            }
+        }
+
+        // Pass 3 — integrate + collision/floor clamp (accept only a fully-clear spot, else hold).
+        World world = centre.getWorld();
+        for (int i = 0; i < n; i++) {
+            Planet pl = planets.get(i);
+            if (pl.popped || !pl.body.isValid()) continue;
+            pl.vel.add(accel[i].multiply(DT)).multiply(DAMP);
+            capSpeed(pl.vel);
+            Vector desired = pl.pos.clone().add(pl.vel.clone().multiply(DT));
+            Location cand = floorClear(world, clampToClear(world, centre, desired.toLocation(world)));
+            if (clear(world, centre, cand)) {
+                pl.pos.copy(cand.toVector());
+            } else {
+                pl.vel.multiply(0.3); // blocked — hold last good spot, bleed momentum
+            }
+            pl.lastPos.copy(pl.pos);
+            place(pl.body, centre, pl.pos, yaw((float) (time * pl.spin)), pl.scale);
+            moveHitbox(pl, pl.pos);
+            pollHit(centre, pl);
+        }
+    }
+
+    /** Bat detection: a new left-click on the hitbox flings the item with an outward impulse (cosmetic only). */
+    private void pollHit(Location centre, Planet pl) {
         if (!pl.hitbox.isValid()) return;
         Interaction.PreviousInteraction atk = pl.hitbox.getLastAttack();
         if (atk == null || atk.getTimestamp() <= pl.lastAttack) return;
         pl.lastAttack = atk.getTimestamp();
-        Vector out = resolved.toVector().subtract(centre.toVector());
+        Vector out = pl.pos.clone().subtract(centre.toVector());
         if (out.lengthSquared() < 1.0e-4) out = new Vector(0, 1, 0); else out.normalize();
-        pl.vel.add(out.multiply(IMPULSE).add(new Vector(0, 0.4, 0)));
+        pl.vel.add(out.multiply(IMPULSE).add(new Vector(0, 0.5, 0)));
         World world = centre.getWorld();
-        world.spawnParticle(Particle.DUST, resolved, 6, 0.15, 0.15, 0.15, 0, BEAD);
-        world.playSound(resolved, Sound.BLOCK_AMETHYST_BLOCK_HIT, 0.5f, 1.4f);
+        Location at = pl.pos.toLocation(world);
+        world.spawnParticle(Particle.DUST, at, 16, 0.3, 0.3, 0.3, 0, BEAD);
+        world.spawnParticle(Particle.END_ROD, at, 8, 0.25, 0.25, 0.25, 0.06);
+        world.playSound(at, Sound.BLOCK_AMETHYST_BLOCK_HIT, 0.9f, 1.3f);
+        world.playSound(at, Sound.ENTITY_PLAYER_ATTACK_STRONG, 0.6f, 1.2f);
     }
+
+    // ---- the pop-out outro ---------------------------------------------------------
+
+    /** Wink away any item whose staggered pop time has arrived (natural-timeout ending only). */
+    private void popDue(Location centre, int t) {
+        int n = planets.size();
+        World world = centre.getWorld();
+        for (Planet pl : planets) {
+            if (pl.popped) continue;
+            int due = OUTRO_START + (int) (pl.order / (double) Math.max(1, n) * (OUTRO_LEN * 0.85));
+            if (t < due) continue;
+            pl.popped = true;
+            Location at = pl.lastPos.toLocation(world);
+            world.spawnParticle(Particle.DUST, at, 8, 0.15, 0.15, 0.15, 0, BEAD);
+            world.spawnParticle(Particle.END_ROD, at, 3, 0.05, 0.05, 0.05, 0.02);
+            world.playSound(at, Sound.ENTITY_ITEM_PICKUP, 0.6f, 1.4f);
+            if (pl.body.isValid()) pl.body.remove();
+            if (pl.hitbox.isValid()) pl.hitbox.remove();
+        }
+    }
+
+    private boolean allPopped() {
+        for (Planet pl : planets) if (!pl.popped) return false;
+        return true;
+    }
+
+    // ---- collision -----------------------------------------------------------------
 
     /** Clamp {@code desired} back along the Brain→item ray to the last clear point; returns a usable location. */
     private Location clampToClear(World world, Location centre, Location desired) {
@@ -376,8 +475,18 @@ public final class WellDisplay {
         RayTraceResult hit = world.rayTraceBlocks(centre, dir, dist, FluidCollisionMode.NEVER, true);
         double reach = hit != null && hit.getHitPosition() != null
                 ? hit.getHitPosition().distance(centre.toVector()) : dist;
-        double clamped = Math.max(0.6, reach - 0.4); // stop short of the wall, never inside the Brain
+        double clamped = Math.max(0.6, reach - 0.4);
         return centre.clone().add(dir.multiply(clamped));
+    }
+
+    /** Lift {@code loc} so it clears the top face of any block below it by {@link #FLOOR_CLEARANCE}. */
+    private Location floorClear(World world, Location loc) {
+        RayTraceResult down = world.rayTraceBlocks(loc, DOWN, FLOOR_PROBE, FluidCollisionMode.NEVER, true);
+        if (down != null && down.getHitPosition() != null) {
+            double minY = down.getHitPosition().getY() + FLOOR_CLEARANCE;
+            if (loc.getY() < minY) { Location up = loc.clone(); up.setY(minY); return up; }
+        }
+        return loc;
     }
 
     /** A spot is usable if its block is non-solid AND the Brain has an unobstructed line to it. */
@@ -417,6 +526,13 @@ public final class WellDisplay {
         });
     }
 
+    private void moveHitbox(Planet pl, Vector pos) {
+        if (pl.hitbox.isValid()) {
+            pl.hitbox.teleport(new Location(pl.hitbox.getWorld(), pos.getX(),
+                    pos.getY() - HITBOX_SIZE / 2.0, pos.getZ()));
+        }
+    }
+
     /** Apply a world position + rotation + scale to a display whose spawn origin is the Brain centre. */
     private void place(Display d, Location centre, Vector worldPos, Quaternionf rot, float scale) {
         Vector3f rel = new Vector3f(
@@ -430,30 +546,26 @@ public final class WellDisplay {
 
     // ---- links + ambiance ----------------------------------------------------------
 
-    /** A curved green synapse tendril Brain→item with a travelling pulse bead + an occasional end spark. */
+    /** A curved green synapse tendril Brain→item with a travelling pulse bead — summon only. */
     private void drawTendril(Location centre, Location end, Planet pl, double time, double grow, int t) {
         if (grow <= 0.02) return;
         World world = centre.getWorld();
         Vector a = centre.toVector();
         Vector b = end.toVector();
         Vector control = a.clone().add(b).multiply(0.5).add(new Vector(0, 0.4, 0));
-        int steps = 5;
-        for (int s = 1; s <= steps; s++) spawnAt(world, bezier(a, control, b, (s / (double) steps) * grow), TENDRIL);
-        double bu = frac01((float) (time * BEAD_SPEED + pl.p1)) * grow;
+        for (int s = 1; s <= 5; s++) spawnAt(world, bezier(a, control, b, (s / 5.0) * grow), TENDRIL);
+        double bu = frac01((float) (time * BEAD_SPEED + pl.wp[0])) * grow;
         spawnAt(world, bezier(a, control, b, bu), BEAD);
-        if (grow > 0.75 && (t + pl.order) % (PERIOD * 6) == 0) {
-            world.spawnParticle(Particle.END_ROD, b.toLocation(world), 1, 0.03, 0.03, 0.03, 0.0);
-        }
     }
 
     /** Straight retracting tendril for the pull (no per-planet phase). */
-    private void drawTendrilPts(Location centre, Location end, double grow, Particle.DustOptions dust) {
+    private void drawTendrilPts(Location centre, Location end, double grow) {
         if (grow <= 0.02) return;
         World world = centre.getWorld();
         Vector a = centre.toVector();
         Vector b = end.toVector();
         Vector control = a.clone().add(b).multiply(0.5).add(new Vector(0, 0.35, 0));
-        for (int s = 1; s <= 5; s++) spawnAt(world, bezier(a, control, b, (s / 5.0) * grow), dust);
+        for (int s = 1; s <= 5; s++) spawnAt(world, bezier(a, control, b, (s / 5.0) * grow), TENDRIL);
     }
 
     private void drawBrightTendril(Location centre, Location end, double time) {
@@ -466,22 +578,12 @@ public final class WellDisplay {
         world.spawnParticle(Particle.END_ROD, bezier(a, control, b, bu).toLocation(world), 1, 0, 0, 0, 0.0);
     }
 
-    /** Faint arcs between neighbouring floating weapons — the "linked possibilities" web. */
-    private void neighbourArcs(Location centre) {
-        World world = centre.getWorld();
-        for (int i = 0; i + 1 < planets.size(); i++) {
-            Planet a = planets.get(i), b = planets.get(i + 1);
-            if (a.lastPos.lengthSquared() == 0 || b.lastPos.lengthSquared() == 0) continue;
-            for (int s = 1; s <= 3; s++) spawnAt(world, lerp(a.lastPos, b.lastPos, s / 4.0), ARC);
-        }
-    }
-
     private void ambientHaze(Location centre, double time) {
         World world = centre.getWorld();
         double bob = Math.sin(time * 1.3) * 0.1;
-        world.spawnParticle(Particle.DUST, centre.clone().add(0, bob, 0), 3, 0.5, 0.4, 0.5, 0, HAZE);
-        world.spawnParticle(Particle.GLOW, centre.clone().add(0, 0.2, 0), 1, 1.2, 0.9, 1.2, 0);
-        world.playSound(centre, Sound.BLOCK_BEACON_AMBIENT, 0.22f, 1.5f);
+        world.spawnParticle(Particle.DUST, centre.clone().add(0, bob, 0), 2, 0.6, 0.5, 0.6, 0, HAZE);
+        world.spawnParticle(Particle.GLOW, centre.clone().add(0, 0.2, 0), 1, 1.6, 1.2, 1.6, 0);
+        world.playSound(centre, Sound.BLOCK_BEACON_AMBIENT, 0.18f, 1.5f);
     }
 
     private void burst(Location at) {
@@ -507,8 +609,13 @@ public final class WellDisplay {
     }
 
     private double introGrow(int t, int order) {
-        double p = Math.max(0.0, Math.min(1.0, (t - order) / (double) Math.max(1, INTRO_TICKS - order)));
+        double p = Math.max(0.0, Math.min(1.0, (t - order * 0.4) / (double) Math.max(1, INTRO_TICKS - 4)));
         return easeOut(p);
+    }
+
+    private void capSpeed(Vector v) {
+        double s2 = v.lengthSquared();
+        if (s2 > MAX_SPEED * MAX_SPEED) v.multiply(MAX_SPEED / Math.sqrt(s2));
     }
 
     private ItemStack resolve(WeaponSpec spec, Function<WeaponSpec, ItemStack> itemFor) {
