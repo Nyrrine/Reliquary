@@ -200,6 +200,7 @@ public final class FourthMatchFlameWeapon implements EgoWeapon {
                 .arcSpan(95).reach(KINDLING_RANGE * 0.9)
                 .colours(SPARK, FLARE)
                 .thickness(1.1f).duration(3).tilt(20)
+                .sweepEdge(false) // keep the fire dust crescent + crit, drop the vanilla white sword-sweep flash
                 .play();
 
         world.playSound(eye, Sound.ITEM_FLINTANDSTEEL_USE, 0.9f, 1.4f);
