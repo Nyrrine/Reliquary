@@ -123,7 +123,7 @@ public final class ExtractionTicket {
         if (meta == null) return;
         meta.getPersistentDataContainer().set(POOLS, PersistentDataType.STRING, "");
         meta.getPersistentDataContainer().set(IDS, PersistentDataType.STRING, "");
-        restyle(item, meta);
+        restyle(meta);
         item.setItemMeta(meta);
     }
 
@@ -131,13 +131,26 @@ public final class ExtractionTicket {
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return;
         meta.getPersistentDataContainer().set(key, PersistentDataType.STRING, String.join(",", values));
-        restyle(item, meta);
+        restyle(meta);
         item.setItemMeta(meta);
     }
 
-    /** Re-run styling from the ticket's current pools/ids/custom flag. */
-    private static void restyle(ItemStack item, ItemMeta meta) {
-        style(meta, pools(item), ids(item), isCustom(item));
+    /**
+     * Re-run styling from the meta's own pools/ids/custom flag. Reads the in-progress {@code meta} (which already
+     * carries the just-written value) rather than the item, whose stored meta is still one step stale until
+     * {@code setItemMeta} lands — so a freshly added grade/id shows on the lore immediately.
+     */
+    private static void restyle(ItemMeta meta) {
+        style(meta, readMeta(meta, POOLS), readMeta(meta, IDS),
+                meta.getPersistentDataContainer().has(CUSTOM, PersistentDataType.BYTE));
+    }
+
+    /** Read a comma-joined string set straight from a meta's PDC (used mid-write, before setItemMeta). */
+    private static LinkedHashSet<String> readMeta(ItemMeta meta, NamespacedKey key) {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        String s = meta.getPersistentDataContainer().get(key, PersistentDataType.STRING);
+        if (s != null && !s.isEmpty()) for (String p : s.split(",")) if (!p.isEmpty()) out.add(p);
+        return out;
     }
 
     private static void style(ItemMeta meta, Set<String> pools, Set<String> ids, boolean custom) {
